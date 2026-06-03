@@ -15,6 +15,7 @@ mod fp12;
 mod fp2;
 mod fp4;
 mod hash;
+mod key_exchange;
 mod pairing;
 
 use hitls_types::CryptoError;
@@ -142,6 +143,44 @@ impl Sm9MasterKey {
             return Err(CryptoError::InvalidArg(""));
         }
         alg::encrypt(plaintext, user_id, &self.master_public)
+    }
+
+    /// Run the GB/T 38635 §4.4 key agreement protocol locally between
+    /// two encryption user keys derived from this master, returning a
+    /// `klen`-byte shared key from `self_user_key`'s perspective.
+    ///
+    /// Both keys must be `Sm9KeyType::Encrypt`. The roles of initiator
+    /// and responder are derived from the lexicographic order of the
+    /// two user IDs (smaller ID = initiator), matching the openHiTLS C
+    /// `CRYPT_SM9_ComputeShareKey` EAL wrapper used by the GB/T 38635
+    /// conformance SDV. This convenience entry-point is intended for
+    /// closed-environment uses (KAT round-trip tests, in-process key
+    /// derivation between known peers); a real two-party agreement
+    /// over a network is done via the lower-level `key_exchange_init_*`
+    /// / `key_exchange_confirm_*` primitives, which are not currently
+    /// re-exported.
+    pub fn compute_share_key(
+        &self,
+        self_user_key: &Sm9UserKey,
+        peer_user_key: &Sm9UserKey,
+        klen: usize,
+    ) -> Result<Vec<u8>, CryptoError> {
+        if self.key_type != Sm9KeyType::Encrypt {
+            return Err(CryptoError::InvalidArg(""));
+        }
+        if self_user_key.key_type != Sm9KeyType::Encrypt
+            || peer_user_key.key_type != Sm9KeyType::Encrypt
+        {
+            return Err(CryptoError::InvalidArg(""));
+        }
+        key_exchange::compute_share_key(
+            &self_user_key.user_id,
+            &self_user_key.private_key,
+            &peer_user_key.user_id,
+            &peer_user_key.private_key,
+            &self.master_public,
+            klen,
+        )
     }
 }
 
