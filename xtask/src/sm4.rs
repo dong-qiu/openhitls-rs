@@ -11,7 +11,8 @@
 //!   chosen by the trailing `enc` flag.
 //!
 //! The `.data` covers eight cipher modes (ECB/CBC/CTR/CFB/OFB/GCM/HCTR/XTS).
-//! The migrated subset (I153 added CBC/CTR/CFB/OFB; I156 added partial XTS) is:
+//! The migrated subset (I153 added CBC/CTR/CFB/OFB; I156 added partial XTS;
+//! I157 widened XTS to ciphertext-stealing rows after the GM-convention fix) is:
 //!
 //! * **ECB** — `Sm4Key::encrypt_block` / `decrypt_block`, per 16-byte block.
 //! * **CBC** — `sm4_cbc_encrypt_raw` / `sm4_cbc_decrypt_raw` (no padding,
@@ -22,15 +23,19 @@
 //! * **GCM (encrypt)** — `sm4_gcm_encrypt`; the `.data` cipher field carries
 //!   only the ciphertext (no tag), so the test compares the ciphertext
 //!   prefix and GCM *decrypt* is still skipped (it needs the tag).
-//! * **XTS, block-aligned only** — `sm4_xts_encrypt` /
-//!   `sm4_xts_decrypt` (I156 added these to `modes::xts`). Migrated for
-//!   the `input.len() == 16` rows. The longer (ciphertext-stealing)
-//!   rows + all HCTR rows are routed to `skipped_unsupported_alg`:
-//!   the Rust XTS-stealing path and the Rust HCTR diverge byte-for-byte
-//!   from the openHiTLS C reference (the implementations are
-//!   internally self-consistent — encrypt/decrypt round-trip cleanly
-//!   under proptest — but were never proven byte-compatible with C;
-//!   same flavor as the pre-I145 FrodoKEM gap).
+//! * **XTS (full)** — `sm4_xts_encrypt` / `sm4_xts_decrypt`. I157 fixed the
+//!   SM4-XTS α-multiplication to use GM/T 0002-2012 (right-shift + reduction
+//!   0xE1) instead of the AES IEEE 1619 convention (left-shift + 0x87) the
+//!   Rust code had been (incorrectly) sharing; ciphertext-stealing rows now
+//!   match the C reference byte-exact, so all rows of length >= 16 are
+//!   emitted.
+//! * **HCTR** — still routed to `skipped_unsupported_alg`. The Rust
+//!   `hctr_encrypt` / `_decrypt` are internally self-consistent (proptest
+//!   round-trip clean) but the C SDV `MODES_HCTR_Update` is a no-op buffer
+//!   stage that writes nothing to `out`, so the C test's
+//!   `memcmp(out, cipherText, 0)` always passes and the `.data` cipher
+//!   values are unverified — there is no trustworthy reference to migrate
+//!   against (see `docs/c-test-na-list.md`).
 
 use std::fmt::Write;
 
@@ -253,13 +258,11 @@ fn emit_kat(
         }
         "CRYPT_CIPHER_SM4_XTS" => {
             // XTS row's `key` field is K1 (data, 16 bytes) || K2 (tweak,
-            // 16 bytes). Emit only block-aligned data (input.len() == 16,
-            // a single XTS block); rows with non-aligned input invoke
-            // the ciphertext-stealing path which diverges from the C
-            // reference (same self-consistent-but-unverified-vs-C flavor
-            // as HCTR above). The 2 block-aligned rows here match
-            // byte-exact.
-            if row.key.len() != 32 || row.iv.len() != 16 || row.input.len() != 16 {
+            // 16 bytes). After I157 (SM4-XTS uses GM/T 0002-2012
+            // α-multiplication, not the AES IEEE 1619 convention) the
+            // ciphertext-stealing path matches the C reference byte-exact,
+            // so we now emit rows of any length >= 16.
+            if row.key.len() != 32 || row.iv.len() != 16 || row.input.len() < 16 {
                 stats.skipped_unsupported_alg += 1;
                 return;
             }

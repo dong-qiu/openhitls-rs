@@ -7,8 +7,12 @@
 use crate::aes::{AesKey, AES_BLOCK_SIZE};
 use hitls_types::CryptoError;
 
-/// Multiply a 128-bit tweak value by α in GF(2^128).
-/// Polynomial: x^128 + x^7 + x^2 + x + 1 (reduction constant 0x87).
+/// Multiply a 128-bit tweak value by α in GF(2^128) — **IEEE P1619
+/// convention** used by AES-XTS.
+///
+/// Byte-bit order: MSB-out (the high bit of each byte is the carry into
+/// the next byte's low bit). Reduction constant `0x87` matches the
+/// polynomial `x^128 + x^7 + x^2 + x + 1`.
 fn gf_mul_alpha(tweak: &mut [u8; AES_BLOCK_SIZE]) {
     let mut carry = 0u8;
     for byte in tweak.iter_mut() {
@@ -16,9 +20,31 @@ fn gf_mul_alpha(tweak: &mut [u8; AES_BLOCK_SIZE]) {
         *byte = (*byte << 1) | carry;
         carry = new_carry;
     }
-    // If the most significant bit was set, XOR with reduction constant
     if carry != 0 {
         tweak[0] ^= 0x87;
+    }
+}
+
+/// Multiply a 128-bit tweak value by α in GF(2^128) — **GM/T 0002-2012
+/// convention** used by SM4-XTS.
+///
+/// Byte-bit order: LSB-out (bit-reversed dual of the IEEE convention).
+/// Reduction constant `0xE1` is `0x87` bit-reversed. Matches the openHiTLS
+/// C `GF128Mul_GM` reference in `crypto/modes/src/modes_xts.c`.
+///
+/// **Not interchangeable** with [`gf_mul_alpha`]: using the IEEE
+/// convention with SM4 silently produces wrong (but internally
+/// self-consistent) ciphertext for every multi-block XTS row.
+fn gf_mul_alpha_gm(tweak: &mut [u8; AES_BLOCK_SIZE]) {
+    let mut carry_in = 0u8;
+    let mut carry_out = 0u8;
+    for byte in tweak.iter_mut() {
+        carry_out = (*byte << 7) & 0x80;
+        *byte = (*byte >> 1) | carry_in;
+        carry_in = carry_out;
+    }
+    if carry_out != 0 {
+        tweak[0] ^= 0xE1;
     }
 }
 
@@ -43,18 +69,23 @@ pub fn xts_encrypt(
     }
     let cipher1 = AesKey::new(key1)?;
     let cipher2 = AesKey::new(key2)?;
-    xts_encrypt_inner(&cipher1, &cipher2, tweak, plaintext)
+    xts_encrypt_inner(&cipher1, &cipher2, tweak, plaintext, gf_mul_alpha)
 }
 
 /// XTS encrypt parameterised over the block cipher (IEEE 1619 §5).
-/// Both AES and SM4 share an identical algorithm body — only the cipher
-/// primitive differs — so this generic inner avoids the alternative of a
-/// copy-pasted 80-line second implementation.
+/// AES and SM4 share an identical algorithm body — only the cipher
+/// primitive and the GF(2^128) α-multiplication convention differ — so
+/// this generic inner avoids a copy-pasted 80-line second implementation.
+/// The caller selects which `gf_mul`:
+///
+/// * AES → [`gf_mul_alpha`] (IEEE 1619, reduction `0x87`, MSB-out)
+/// * SM4 → [`gf_mul_alpha_gm`] (GM/T 0002-2012, reduction `0xE1`, LSB-out)
 fn xts_encrypt_inner<C: crate::provider::BlockCipher>(
     cipher1: &C,
     cipher2: &C,
     tweak: &[u8],
     plaintext: &[u8],
+    gf_mul: fn(&mut [u8; AES_BLOCK_SIZE]),
 ) -> Result<Vec<u8>, CryptoError> {
     // Encrypt tweak
     let mut t = [0u8; AES_BLOCK_SIZE];
@@ -89,7 +120,7 @@ fn xts_encrypt_inner<C: crate::provider::BlockCipher>(
         }
         ciphertext[start..start + AES_BLOCK_SIZE].copy_from_slice(&block);
 
-        gf_mul_alpha(&mut t);
+        gf_mul(&mut t);
     }
 
     // Handle ciphertext stealing for partial last block
@@ -112,7 +143,7 @@ fn xts_encrypt_inner<C: crate::provider::BlockCipher>(
         ciphertext[cm_start..cm_start + remainder].copy_from_slice(&block_m1[..remainder]);
 
         // Build the second-to-last ciphertext block using stolen ciphertext
-        gf_mul_alpha(&mut t);
+        gf_mul(&mut t);
         let mut block_m = [0u8; AES_BLOCK_SIZE];
         block_m[..remainder].copy_from_slice(&plaintext[m1_start + AES_BLOCK_SIZE..]);
         block_m[remainder..].copy_from_slice(&block_m1[remainder..]);
@@ -146,7 +177,7 @@ pub fn xts_decrypt(
     }
     let cipher1 = AesKey::new(key1)?;
     let cipher2 = AesKey::new(key2)?;
-    xts_decrypt_inner(&cipher1, &cipher2, tweak, ciphertext)
+    xts_decrypt_inner(&cipher1, &cipher2, tweak, ciphertext, gf_mul_alpha)
 }
 
 /// XTS decrypt parameterised over the block cipher (IEEE 1619 §5).
@@ -155,6 +186,7 @@ fn xts_decrypt_inner<C: crate::provider::BlockCipher>(
     cipher2: &C,
     tweak: &[u8],
     ciphertext: &[u8],
+    gf_mul: fn(&mut [u8; AES_BLOCK_SIZE]),
 ) -> Result<Vec<u8>, CryptoError> {
     // Encrypt tweak
     let mut t = [0u8; AES_BLOCK_SIZE];
@@ -186,7 +218,7 @@ fn xts_decrypt_inner<C: crate::provider::BlockCipher>(
         }
         plaintext[start..start + AES_BLOCK_SIZE].copy_from_slice(&block);
 
-        gf_mul_alpha(&mut t);
+        gf_mul(&mut t);
     }
 
     // Handle ciphertext stealing
@@ -195,7 +227,7 @@ fn xts_decrypt_inner<C: crate::provider::BlockCipher>(
 
         // Decrypt C_{m-1} with tweak T_{m} (next tweak)
         let t_m1 = t;
-        gf_mul_alpha(&mut t);
+        gf_mul(&mut t);
 
         let mut block_m = [0u8; AES_BLOCK_SIZE];
         block_m.copy_from_slice(&ciphertext[m1_start..m1_start + AES_BLOCK_SIZE]);
@@ -248,7 +280,10 @@ pub fn sm4_xts_encrypt(
     }
     let cipher1 = crate::sm4::Sm4Key::new(key1)?;
     let cipher2 = crate::sm4::Sm4Key::new(key2)?;
-    xts_encrypt_inner(&cipher1, &cipher2, tweak, plaintext)
+    // SM4-XTS uses the GM/T 0002-2012 α-multiplication (right-shift +
+    // reduction 0xE1), NOT the AES IEEE 1619 convention. Mixing them
+    // silently produces wrong ciphertext for every multi-block row.
+    xts_encrypt_inner(&cipher1, &cipher2, tweak, plaintext, gf_mul_alpha_gm)
 }
 
 /// Decrypt a data unit using XTS with **SM4** as the underlying block cipher.
@@ -267,7 +302,7 @@ pub fn sm4_xts_decrypt(
     }
     let cipher1 = crate::sm4::Sm4Key::new(key1)?;
     let cipher2 = crate::sm4::Sm4Key::new(key2)?;
-    xts_decrypt_inner(&cipher1, &cipher2, tweak, ciphertext)
+    xts_decrypt_inner(&cipher1, &cipher2, tweak, ciphertext, gf_mul_alpha_gm)
 }
 
 #[cfg(test)]
