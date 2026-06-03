@@ -10018,3 +10018,70 @@ na-list tally: SM4 9/237/0/37/283 -> 35/237/0/11/283; Total
 3149/3760/240/65/6480 -> 3175/3760/240/39/6480.
 
 Recorded as DEV_LOG Phase I153.
+
+## Phase I154 — SM2 key exchange (closes SM2 Structural Gap) (2026-06-03)
+
+> G
+
+Closes the SM2 Structural Gap (17 rows). Sm2KeyPair previously
+exposed no key-exchange method, so the SM2 EXCHANGE families in the
+C SDV routed to skipped_unsupported_alg.
+
+Production additions (default-feature, additive, no ABI break):
+
+- New public method Sm2KeyPair::exchange_with_nonce(my_r,
+  peer_pubkey, peer_r_point, my_id, peer_id, is_initiator, key_len)
+  -> Result<Vec<u8>, _> implementing GB/T 32918.3-2016 §6.1 SM2 key
+  agreement. Compute path: parse own ephemeral nonce r, derive own
+  R_self = r * G, parse peer's static P_peer and ephemeral R_peer
+  (both uncompressed 65 bytes); compute the truncated coordinates
+  x̄ = 2^w + (x mod 2^w) with w = ⌈log2(n)/2⌉ - 1 = 127 for
+  SM2P256V1; combine t = (d_self + x̄_self * r) mod n; compute V = t
+  * (P_peer + x̄_peer * R_peer) (h = 1, no cofactor mult); abort if
+  V is the point at infinity per §6.1 step 7's validity check
+  (mapped to Sm2DecryptFail); derive key = KDF(V.x || V.y || Z_A ||
+  Z_B, key_len) where Z_A is the initiator's identity hash
+  regardless of which side is computing — the is_initiator flag
+  selects which of compute_za(my_id, self.public_key, group) vs
+  compute_za(peer_id, p_peer, group) is Z_A.
+
+Two helpers:
+
+- private x_bar(x, w) -> Result<BigNum, _>: returns 2^w + (x mod
+  2^w) via set_bit(w) to build pow2w then mod_reduce for the
+  truncation. Cleaner than bit-masking + bitwise-or.
+- private sm2_exchange_kdf(vx, vy, z_a, z_b, klen): parallel to the
+  existing sm2_kdf(x, y, klen) used by encrypt/decrypt; the
+  exchange-specific variant prepends both Z hashes ahead of the SM3
+  counter, matching the §6.1 KDF input V.x || V.y || Z_A || Z_B.
+
+xtask emitter (xtask/src/sm2.rs): new Kind::ExchangePos arm; older
+Kind::Unsupported removed (no remaining SM2 family is unsupported).
+classify routes SM2_EXCHANGE_FUNC_TC001 -> ExchangePos; the
+remaining EXCHANGE workflow / validity rows (TC002/003/004 +
+EXCHANGE_CHECK_TC001/002) route to ApiSurface. New emit_exchange
+writer parses the row (prvKey, pubKey, r, R, shareKey, userId1,
+userId2, server, provider), maps server == 1 -> is_initiator = true
+and server == 0 -> is_initiator = false, and emits a byte-exact KAT
+assertion against shareKey.
+
+Critical verification: the implementation hits the GB/T 32918.5-2017
+§A.1 vector 1 (shareKey 6c89347354de2484c60b4ab1fde4c6e5) byte-exact
+on FIRST run — no debugging required. Plus a roundtrip test
+(generate two random keypairs + nonces, both sides converge on the
+same shared secret). Plus a public-only-fails defensive test.
+
+Verification: sm2 lib tests 63/0 -> 69/0 (+6); migrated_sm2 14/0 ->
+16/0 (+2 — server=1 row + server=0 row both byte-exact, same
+shareKey because both parties derive the same secret); xtask
+--check drift gate clean; cargo test -p hitls-crypto --all-features
+green; fmt + clippy -D warnings --all-features --all-targets clean
+(initial (n.bit_len() + 1) / 2 clippy-warned for manual_div_ceil;
+fixed to n.bit_len().div_ceil(2)).
+
+na-list tally: SM2 14/111/0/17/140 -> 16/124/0/0/140 (the 15
+EXCHANGE workflow rows that were unsupported now route to
+ApiSurface); Total 3175/3760/240/39/6480 ->
+3177/3760/240/22/6480.
+
+Recorded as DEV_LOG Phase I154.

@@ -20,8 +20,14 @@
 //!   `kat-nonce` feature) and checks the DER `(r, s)` matches `sign`.
 //!
 //! The *encrypt* family pins `k` with no nonce hook (encrypt is not migrated —
-//! routed to `ApiSurface`). SM2 key exchange (`sm2_exchange`) has no public
-//! Rust API, so it routes to `skipped_unsupported_alg`.
+//! routed to `ApiSurface`).
+//!
+//! * `SM2_EXCHANGE_FUNC_TC001` — SM2 key exchange (GB/T 32918.3-2016 §6.1):
+//!   `prvKey : pubKey : r : R : shareKey : userId1 : userId2 : server : provider`.
+//!   I154 added `Sm2KeyPair::exchange_with_nonce`; the C `server` flag maps
+//!   to `is_initiator` (the C SDV uses `server == 1` to mean "this side is
+//!   party A / initiator"). The migrated test asserts the derived key
+//!   matches `shareKey` byte-exactly.
 
 use std::fmt::Write;
 
@@ -39,7 +45,7 @@ pub fn emit_sm2_kat(cases: &[TestCase]) -> (String, EmitStats) {
             Kind::SignPos => emit_sign(&mut body, case, &mut stats),
             Kind::DecryptPos => emit_decrypt(&mut body, case, &mut stats, false),
             Kind::DecryptNeg => emit_decrypt(&mut body, case, &mut stats, true),
-            Kind::Unsupported => stats.skipped_unsupported_alg += 1,
+            Kind::ExchangePos => emit_exchange(&mut body, case, &mut stats),
             Kind::ApiSurface => stats.skipped_api += 1,
             Kind::Unknown => stats.skipped_unknown += 1,
         }
@@ -59,7 +65,7 @@ enum Kind {
     SignPos,
     DecryptPos,
     DecryptNeg,
-    Unsupported,
+    ExchangePos,
     ApiSurface,
     Unknown,
 }
@@ -80,9 +86,15 @@ fn classify(tc: &str) -> Kind {
     if tc.contains("SM2_DEC_FUNC_TC001") {
         return Kind::DecryptPos;
     }
-    // SM2 key exchange has no public Rust API.
+    // SM2 key exchange: TC001 = positive KAT (migrated via I154's
+    // `exchange_with_nonce`). TC002 / TC003 / TC004 / CHECK_TC are
+    // workflow / negative-validity tests — `_API_` style — and stay
+    // ApiSurface.
+    if tc.contains("SM2_EXCHANGE_FUNC_TC001") {
+        return Kind::ExchangePos;
+    }
     if tc.contains("SM2_EXCHANGE_FUNC") || tc.contains("SM2_EXCHANGE_CHECK") {
-        return Kind::Unsupported;
+        return Kind::ApiSurface;
     }
     // Encrypt KATs pin `k` (encrypt has no nonce hook), plus all the `_API_` /
     // key-pair-check / compare / decode workflow families.
@@ -295,6 +307,99 @@ fn emit_decrypt(out: &mut String, case: &TestCase, stats: &mut EmitStats, negati
         )
         .unwrap();
     }
+    writeln!(out, "}}\n").unwrap();
+    stats.emitted += 1;
+}
+
+/// SM2 key-exchange row shape (`EXCHANGE_FUNC_TC001`):
+/// `prvKey : pubKey : r : R : shareKey : userId1 : userId2 : server : provider`.
+fn emit_exchange(out: &mut String, case: &TestCase, stats: &mut EmitStats) {
+    if skip_if_provider_dup(case) {
+        stats.skipped_api += 1;
+        return;
+    }
+    if case.args.len() < 9 {
+        stats.skipped_unknown += 1;
+        return;
+    }
+    let (
+        Some(prv),
+        Some(peer_pub),
+        Some(my_r),
+        Some(peer_r),
+        Some(share),
+        Some(id_my),
+        Some(id_peer),
+        Some(server),
+    ) = (
+        case.args[0].as_hex(),
+        case.args[1].as_hex(),
+        case.args[2].as_hex(),
+        case.args[3].as_hex(),
+        case.args[4].as_hex(),
+        case.args[5].as_hex(),
+        case.args[6].as_hex(),
+        case.args[7].as_symbol(),
+    )
+    else {
+        stats.skipped_unknown += 1;
+        return;
+    };
+    // C `server == 1` → this side is party A / initiator. `server == 0` →
+    // this side is party B / responder.
+    let is_initiator = match server {
+        "1" => "true",
+        "0" => "false",
+        _ => {
+            stats.skipped_unknown += 1;
+            return;
+        }
+    };
+
+    write_doc(out, case, "SM2 key exchange KAT (GB/T 32918.3-2016 §6.1)");
+    writeln!(out, "#[test]").unwrap();
+    writeln!(out, "fn tc_line{}_sm2_exchange() {{", case.line).unwrap();
+    writeln!(out, "    let prv: &[u8] = {};", format_byte_slice(prv)).unwrap();
+    writeln!(
+        out,
+        "    let peer_pub: &[u8] = {};",
+        format_byte_slice(peer_pub)
+    )
+    .unwrap();
+    writeln!(out, "    let my_r: &[u8] = {};", format_byte_slice(my_r)).unwrap();
+    writeln!(
+        out,
+        "    let peer_r: &[u8] = {};",
+        format_byte_slice(peer_r)
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    let expected: &[u8] = {};",
+        format_byte_slice(share)
+    )
+    .unwrap();
+    writeln!(out, "    let id_my: &[u8] = {};", format_byte_slice(id_my)).unwrap();
+    writeln!(
+        out,
+        "    let id_peer: &[u8] = {};",
+        format_byte_slice(id_peer)
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    let kp = Sm2KeyPair::from_private_key(prv).unwrap();"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    let key = kp\n\
+         \x20       .exchange_with_nonce(my_r, peer_pub, peer_r, id_my, id_peer, \
+         {is_initiator}, expected.len())\n\
+         \x20       .unwrap();"
+    )
+    .unwrap();
+    writeln!(out, "    assert_eq!(key.as_slice(), expected);").unwrap();
     writeln!(out, "}}\n").unwrap();
     stats.emitted += 1;
 }
