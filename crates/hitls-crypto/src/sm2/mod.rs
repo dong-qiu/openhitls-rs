@@ -376,6 +376,105 @@ impl Sm2KeyPair {
         }
         Ok(bytes)
     }
+
+    /// SM2 key exchange per **GB/T 32918.3-2016 §6.1**, deterministic
+    /// (own ephemeral nonce supplied by the caller).
+    ///
+    /// One party in a two-party SM2 key agreement. Each side independently
+    /// calls this with their **own** long-term keypair (`self`), their own
+    /// ephemeral private nonce `my_r`, the **peer's** long-term public key
+    /// (uncompressed 65 bytes) and ephemeral public point
+    /// `R_peer = r_peer * G` (uncompressed 65 bytes), the two user IDs, the
+    /// role flag (initiator vs responder, see below), and the desired output
+    /// length `key_len`. Both sides derive the same `key_len`-byte shared
+    /// secret as long as the inputs match.
+    ///
+    /// **Role convention** (`is_initiator`):
+    /// * `true`  — this side is GB/T 32918.3 party **A** (initiator).
+    /// * `false` — this side is party **B** (responder).
+    ///
+    /// The KDF input ordering is `V.x || V.y || Z_A || Z_B` regardless of
+    /// role: `Z_A` is the initiator's user-ID hash, `Z_B` is the
+    /// responder's. This call places `self`'s Z in the right slot based on
+    /// `is_initiator`.
+    ///
+    /// `my_r` is the ephemeral private nonce `r ∈ [1, n-1]`. **Reusing**
+    /// `my_r` across sessions defeats the protocol; this entry point exists
+    /// for spec/KAT reproduction. For application use you must supply
+    /// fresh randomness.
+    pub fn exchange_with_nonce(
+        &self,
+        my_r: &[u8],
+        peer_pubkey: &[u8],
+        peer_r_point: &[u8],
+        my_id: &[u8],
+        peer_id: &[u8],
+        is_initiator: bool,
+        key_len: usize,
+    ) -> Result<Vec<u8>, CryptoError> {
+        if self.private_key.is_zero() {
+            return Err(CryptoError::EccInvalidPrivateKey);
+        }
+        if key_len == 0 {
+            return Err(CryptoError::InvalidArg(""));
+        }
+
+        let group = &self.group;
+        let n = group.order();
+        let fs = group.field_size();
+
+        // 1. Parse ephemeral nonce r ∈ [1, n-1].
+        let r = BigNum::from_bytes_be(my_r);
+        if r.is_zero() || r >= *n {
+            return Err(CryptoError::EccInvalidPrivateKey);
+        }
+
+        // 2. Compute own ephemeral public point R_self = r * G.
+        let r_self = group.scalar_mul_base(&r)?;
+
+        // 3. Parse peer's public key P_peer and ephemeral point R_peer.
+        let p_peer = EcPoint::from_uncompressed(group, peer_pubkey)?;
+        let r_peer_point = EcPoint::from_uncompressed(group, peer_r_point)?;
+
+        // 4. Compute x̄ = 2^w + (x mod 2^w) for both R points.
+        //    w = ⌈log2(n) / 2⌉ - 1 = 127 for SM2P256V1 (256-bit order).
+        let w = n.bit_len().div_ceil(2) - 1;
+        let x_bar_self = x_bar(r_self.x(), w)?;
+        let x_bar_peer = x_bar(r_peer_point.x(), w)?;
+
+        // 5. t = (d + x̄_self * r) mod n.
+        let t_inner = x_bar_self.mod_mul(&r, n)?;
+        let t = self.private_key.mod_add(&t_inner, n)?;
+
+        // 6. U = h * t * (P_peer + x̄_peer * R_peer). h = 1 for SM2.
+        //    Compute (x̄_peer * R_peer) first via scalar_mul, then add P_peer,
+        //    then scalar-mul by t.
+        let scaled_r_peer = group.scalar_mul(&x_bar_peer, &r_peer_point)?;
+        let q = group.point_add(&p_peer, &scaled_r_peer)?;
+        let u = group.scalar_mul(&t, &q)?;
+
+        if u.is_infinity() {
+            // Point at infinity → exchange aborted per GB/T 32918.3 §6.1
+            // step 7's validity check. Mapped to `Sm2DecryptFail` to reuse
+            // the existing SM2 "operation failed" error.
+            return Err(CryptoError::Sm2DecryptFail);
+        }
+
+        // 7. KDF input is V.x || V.y || Z_A || Z_B. Z_A = initiator's Z,
+        //    Z_B = responder's Z, regardless of which side is computing.
+        let my_z = compute_za(my_id, &self.public_key, group)?;
+        let peer_z = compute_za(peer_id, &p_peer, group)?;
+        let (z_a, z_b) = if is_initiator {
+            (my_z, peer_z)
+        } else {
+            (peer_z, my_z)
+        };
+
+        let ux = u.x().to_bytes_be_padded(fs)?;
+        let uy = u.y().to_bytes_be_padded(fs)?;
+        let key = sm2_exchange_kdf(&ux, &uy, &z_a, &z_b, key_len)?;
+        Ok(key)
+    }
 }
 
 /// Compute ZA = SM3(ENTLA || IDA || a || b || xG || yG || xA || yA).
@@ -407,6 +506,47 @@ fn compute_za(
     hasher.update(&public_key.y().to_bytes_be_padded(fs)?)?;
 
     hasher.finish()
+}
+
+/// Compute the GB/T 32918.3 §6.1 truncated coordinate
+/// `x̄ = 2^w + (x mod 2^w)`.
+fn x_bar(x: &BigNum, w: usize) -> Result<BigNum, CryptoError> {
+    // pow2w = 2^w (used both as the modulus and as the additive prefix).
+    let mut pow2w = BigNum::zero();
+    pow2w.set_bit(w);
+    // low = x mod 2^w  (keeps the bottom w bits of x).
+    let low = x.mod_reduce(&pow2w)?;
+    Ok(pow2w.add(&low))
+}
+
+/// Key-exchange KDF input is `V.x || V.y || Z_A || Z_B || counter` per
+/// GB/T 32918.3 §6.1; the underlying `KDF` is the SM2 `Kdf` from
+/// GB/T 32918.4 §5.4.3. (The single-shot SM2 encrypt `sm2_kdf` below
+/// hashes only `x || y || counter`; this variant prepends the two Z
+/// values.)
+fn sm2_exchange_kdf(
+    vx: &[u8],
+    vy: &[u8],
+    z_a: &[u8],
+    z_b: &[u8],
+    klen: usize,
+) -> Result<Vec<u8>, CryptoError> {
+    let mut output = Vec::with_capacity(klen);
+    let mut counter: u32 = 1;
+
+    while output.len() < klen {
+        let mut hasher = Sm3::new();
+        hasher.update(vx)?;
+        hasher.update(vy)?;
+        hasher.update(z_a)?;
+        hasher.update(z_b)?;
+        hasher.update(&counter.to_be_bytes())?;
+        let digest = hasher.finish()?;
+        output.extend_from_slice(&digest);
+        counter += 1;
+    }
+    output.truncate(klen);
+    Ok(output)
 }
 
 /// SM2 Key Derivation Function (GB/T 32918.4 Section 5.4.3).
@@ -706,5 +846,98 @@ mod tests {
                 prop_assert_eq!(recovered, pt);
             }
         }
+    }
+
+    /// SM2 key-exchange GB/T 32918.5-2017 §A.1 / openHiTLS C SDV vector 1.
+    ///
+    /// `prvKey` (own d) + `pubKey` (peer P) + `r` (own ephemeral nonce) +
+    /// `R` (peer's pre-generated ephemeral point) + expected 16-byte
+    /// shared key. Both sides use the SM2 default user ID
+    /// `1234567812345678`.
+    #[test]
+    fn test_sm2_exchange_gb_32918_5_vector1() {
+        use hitls_utils::hex::{hex, to_hex};
+
+        let my_prv = hex("81eb26e941bb5af16df116495f90695272ae2cd63d6c4ae1678418be48230029");
+        let peer_pub = hex(
+            "046ae848c57c53c7b1b5fa99eb2286af078ba64c64591b8b566f7357d576f16dfbee489d771621a27b36c5c7992062e9cd09a9264386f3fbea54dff69305621c4d",
+        );
+        let my_r = hex("d4de15474db74d06491c440d305e012400990f3e390c7e87153c12db2ea60bb3");
+        let peer_r = hex(
+            "04acc27688a6f7b706098bc91ff3ad1bff7dc2802cdb14ccccdb0a90471f9bd7072fedac0494b2ffc4d6853876c79b8f301c6573ad0aa50f39fc87181e1a1b46fe",
+        );
+        let expected_key = hex("6c89347354de2484c60b4ab1fde4c6e5");
+        let my_id = b"1234567812345678";
+        let peer_id = b"1234567812345678";
+
+        let kp = Sm2KeyPair::from_private_key(&my_prv).unwrap();
+
+        // GB/T 32918.5 vector 1 places `me` in the initiator role
+        // (`server = 1` in the C SDV maps to initiator A).
+        let key = kp
+            .exchange_with_nonce(&my_r, &peer_pub, &peer_r, my_id, peer_id, true, 16)
+            .unwrap();
+        assert_eq!(
+            to_hex(&key),
+            to_hex(&expected_key),
+            "SM2 key exchange vector 1 mismatch"
+        );
+    }
+
+    /// Two-party round-trip: A and B each call `exchange_with_nonce` with
+    /// random keys + nonces and converge on the same shared secret.
+    #[test]
+    fn test_sm2_exchange_roundtrip() {
+        let kp_a = Sm2KeyPair::generate().unwrap();
+        let kp_b = Sm2KeyPair::generate().unwrap();
+
+        // Ephemeral nonces (in production these must be fresh randomness).
+        let r_a = {
+            let kp = Sm2KeyPair::generate().unwrap();
+            kp.private_key_bytes().unwrap()
+        };
+        let r_b = {
+            let kp = Sm2KeyPair::generate().unwrap();
+            kp.private_key_bytes().unwrap()
+        };
+
+        // Each side needs the peer's ephemeral *point* R = r * G. We
+        // generate that by deriving a keypair from r and reading its
+        // public point.
+        let r_a_point = Sm2KeyPair::from_private_key(&r_a)
+            .unwrap()
+            .public_key_bytes()
+            .unwrap();
+        let r_b_point = Sm2KeyPair::from_private_key(&r_b)
+            .unwrap()
+            .public_key_bytes()
+            .unwrap();
+
+        let pub_a = kp_a.public_key_bytes().unwrap();
+        let pub_b = kp_b.public_key_bytes().unwrap();
+
+        let id_a = b"alice@example.com";
+        let id_b = b"bob@example.com";
+
+        let key_a = kp_a
+            .exchange_with_nonce(&r_a, &pub_b, &r_b_point, id_a, id_b, true, 32)
+            .unwrap();
+        let key_b = kp_b
+            .exchange_with_nonce(&r_b, &pub_a, &r_a_point, id_b, id_a, false, 32)
+            .unwrap();
+        assert_eq!(key_a, key_b, "two-party SM2 exchange must converge");
+        assert_eq!(key_a.len(), 32);
+    }
+
+    #[test]
+    fn test_sm2_exchange_public_only_fails() {
+        let alice = Sm2KeyPair::generate().unwrap();
+        let pub_only = Sm2KeyPair::from_public_key(&alice.public_key_bytes().unwrap()).unwrap();
+        let r = alice.private_key_bytes().unwrap();
+        let peer_pub = alice.public_key_bytes().unwrap();
+        let peer_r_point = peer_pub.clone();
+        let result =
+            pub_only.exchange_with_nonce(&r, &peer_pub, &peer_r_point, b"a", b"b", true, 16);
+        assert!(matches!(result, Err(CryptoError::EccInvalidPrivateKey)));
     }
 }
