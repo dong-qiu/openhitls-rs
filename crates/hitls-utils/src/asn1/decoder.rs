@@ -253,14 +253,18 @@ impl<'a> Decoder<'a> {
     }
 }
 
-/// Parse UTCTime string "YYMMDDHHMMSSZ" to UNIX timestamp.
-/// RFC 5280: 00-49 → 2000-2049, 50-99 → 1950-1999.
+/// Parse UTCTime string "YYMMDDHHMMSSZ" to UNIX timestamp, RFC 5280 §4.1.2.5.1 strict.
+///
+/// MUST be **exactly** `YYMMDDHHMMSSZ` (13 ASCII chars). Reject:
+/// * any trailing junk (e.g. `2608260733ZZZ` from the C SDV
+///   `change_time_no_ss` fixture),
+/// * timezone offsets like `+0800` instead of `Z` (the
+///   `change_time_z` fixture),
+/// * any other length.
+///
+/// Year encoding: 00–49 → 2000–2049, 50–99 → 1950–1999.
 fn parse_utc_time(s: &str) -> Result<i64, CryptoError> {
-    if !s.is_ascii() {
-        return Err(CryptoError::DecodeAsn1Fail);
-    }
-    let s = s.strip_suffix('Z').unwrap_or(s);
-    if s.len() < 12 {
+    if !s.is_ascii() || s.len() != 13 || !s.ends_with('Z') {
         return Err(CryptoError::DecodeAsn1Fail);
     }
     let yy: u32 = s[0..2].parse().map_err(|_| CryptoError::DecodeAsn1Fail)?;
@@ -273,13 +277,15 @@ fn parse_utc_time(s: &str) -> Result<i64, CryptoError> {
     datetime_to_unix(year, month, day, hour, min, sec)
 }
 
-/// Parse GeneralizedTime string "YYYYMMDDHHMMSSZ" to UNIX timestamp.
+/// Parse GeneralizedTime string "YYYYMMDDHHMMSSZ" to UNIX timestamp,
+/// RFC 5280 §4.1.2.5.2 strict.
+///
+/// MUST be **exactly** `YYYYMMDDHHMMSSZ` (15 ASCII chars) — no
+/// fractional seconds (e.g. `20551213093359.123Z` from the C SDV
+/// `change_time_float_ss` fixture must be rejected), no timezone
+/// offsets, no missing components.
 fn parse_generalized_time(s: &str) -> Result<i64, CryptoError> {
-    if !s.is_ascii() {
-        return Err(CryptoError::DecodeAsn1Fail);
-    }
-    let s = s.strip_suffix('Z').unwrap_or(s);
-    if s.len() < 14 {
+    if !s.is_ascii() || s.len() != 15 || !s.ends_with('Z') {
         return Err(CryptoError::DecodeAsn1Fail);
     }
     let year: u32 = s[0..4].parse().map_err(|_| CryptoError::DecodeAsn1Fail)?;
