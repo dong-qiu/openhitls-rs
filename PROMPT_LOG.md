@@ -10204,3 +10204,62 @@ breakdown); Total 3186/3760/240/13/6480 ->
 3188/3760/240/11/6480.
 
 Recorded as DEV_LOG Phase I156.
+
+## I157 — SM4 HCTR + XTS-stealing reference-interop divergence (2026-06-03)
+
+> 继续 SM4 HCTR + XTS-stealing reference-interop divergence
+
+I157 closes the SM4-XTS half of the I156 reference-interop gap with
+a one-line algorithm fix, and documents the SM4-HCTR half as a C
+SDV data-validity issue (not a Rust bug) after a focused probe of
+the C reference.
+
+Finding 1 — SM4-XTS GM-convention α-multiplication:
+
+The Rust XTS implementation hard-coded the AES IEEE 1619
+α-multiplication for the tweak update (left-shift + reduction byte
+0x87, MSB-out). The openHiTLS C XTS code branches on the underlying
+algorithm: AES uses GF128Mul (IEEE 1619), SM4 uses GF128Mul_GM
+(right-shift + 0xE1, LSB-out — the GHASH/GM polynomial
+representation per GB/T 0002-2012). Block-aligned single-block rows
+never trigger the tweak multiply, so I156's 2 migrated rows (both
+16-byte VECTOR2) coincidentally passed byte-exact while the 56-byte
+VECTOR1 ciphertext-stealing rows diverged.
+
+Fix: new private gf_mul_alpha_gm in modes/xts.rs alongside the
+existing gf_mul_alpha. xts_encrypt_inner / xts_decrypt_inner gain
+a gf_mul: fn(&mut [u8; AES_BLOCK_SIZE]) parameter (caller-selected,
+not hard-coded). AES wrappers pass gf_mul_alpha (unchanged behaviour
+— IEEE P1619 vector 1 still byte-exact). SM4 wrappers pass
+gf_mul_alpha_gm. xtask SM4 emitter widens the XTS arm from
+input.len() == 16 to input.len() >= 16.
+
+Finding 2 — SM4-HCTR C SDV cipher field is unverified:
+
+While probing the HCTR divergence I read crypto/modes/src/modes_hctr.c
+in the C reference. MODES_HCTR_Update (lines 291-317) is a no-op
+buffer stage: it copies input into the context's internal buffer
+and writes nothing to out. The SM4-HCTR SDV test then asserts
+memcmp(out, cipherText, len == 0) which is trivially true — the
+.data cipherText is never actually compared. Rust hctr_encrypt /
+_decrypt are internally self-consistent (gf128_mul + uhash
+byte-exact against side-by-side C reads; proptest round-trip
+clean), so the byte divergence vs the unverified C .data is not
+a Rust bug. HCTR migration deferred until an independent
+third-party KAT (GM/T 0002 erratum, or MODES_HCTR_Final
+output-augmented vectors) appears.
+
+Verification: modes::xts lib 10/0 unchanged; migrated_sm4 37/0
+-> 39/0 (+2 byte-exact: tc_line172_sm4_xts_encrypt,
+tc_line211_sm4_xts_decrypt); xtask --check drift clean (emitted
+37 -> 39, unsupported 9 -> 7); cargo test -p hitls-crypto
+--all-features green, 0 regressions; fmt + clippy -D warnings
+-p hitls-crypto -p xtask --all-features --all-targets clean.
+
+na-list: SM4-XTS row struck through; remaining gap narrowed to
+SM4-HCTR (4 rows, unverified C SDV data) + SM4-GCM-decrypt
+(3 rows, C SDV omits the auth tag). SM4 37/237/0/9/283 ->
+39/237/0/7/283. Total 3188/3760/240/11/6480 ->
+3190/3760/240/9/6480.
+
+Recorded as DEV_LOG Phase I157.
