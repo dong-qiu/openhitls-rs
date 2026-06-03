@@ -10,6 +10,7 @@ use hitls_crypto::modes::cfb::{sm4_cfb_decrypt, sm4_cfb_encrypt};
 use hitls_crypto::modes::ctr::sm4_ctr_crypt;
 use hitls_crypto::modes::gcm::sm4_gcm_encrypt;
 use hitls_crypto::modes::ofb::sm4_ofb_crypt;
+use hitls_crypto::modes::xts::{sm4_xts_decrypt, sm4_xts_encrypt};
 use hitls_crypto::sm4::Sm4Key;
 
 /// SDV_CRYPTO_SM4_ENCRYPT_FUNC_TC003 mode ecb encrypt
@@ -205,6 +206,33 @@ fn tc_line170_sm4_ofb_encrypt() {
     assert_eq!(actual.as_slice(), expected);
 }
 
+/// SDV_CRYPTO_SM4_ENCRYPT_FUNC_TC003 XTS_SM4_ENCRYPT_VECTOR2 #from GB/T 17964-2021
+/// C source: SDV_CRYPTO_SM4_ENCRYPT_FUNC_TC003 (line 174, SM4-XTS encrypt KAT)
+#[test]
+fn tc_line174_sm4_xts_encrypt() {
+    let key: &[u8] = &[
+        0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6, 0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f,
+        0x3c, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
+        0x0e, 0x0f,
+    ];
+    let key1 = &key[..16];
+    let key2 = &key[16..32];
+    let tweak: &[u8] = &[
+        0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8, 0xf9, 0xfa, 0xfb, 0xfc, 0xfd, 0xfe,
+        0xff,
+    ];
+    let input: &[u8] = &[
+        0x6b, 0xc1, 0xbe, 0xe2, 0x2e, 0x40, 0x9f, 0x96, 0xe9, 0x3d, 0x7e, 0x11, 0x73, 0x93, 0x17,
+        0x2a,
+    ];
+    let expected: &[u8] = &[
+        0xe9, 0x53, 0x82, 0x51, 0xc7, 0x1d, 0x7b, 0x80, 0xbb, 0xe4, 0x48, 0x3f, 0xef, 0x49, 0x7b,
+        0xd1,
+    ];
+    let actual = sm4_xts_encrypt(key1, key2, tweak, input).unwrap();
+    assert_eq!(actual.as_slice(), expected);
+}
+
 /// SDV_CRYPTO_SM4_ENCRYPT_FUNC_TC003 mode cfb encrypt #from GB/T 17964-2021
 /// C source: SDV_CRYPTO_SM4_ENCRYPT_FUNC_TC003 (line 176, SM4-CFB encrypt KAT)
 #[test]
@@ -346,6 +374,33 @@ fn tc_line209_sm4_ofb_decrypt() {
     ];
     let mut actual = input.to_vec();
     sm4_ofb_crypt(key, iv, &mut actual).unwrap();
+    assert_eq!(actual.as_slice(), expected);
+}
+
+/// SDV_CRYPTO_SM4_ENCRYPT_FUNC_TC004 XTS_SM4_ENCRYPT_VECTOR2 #from GB/T 17964-2021
+/// C source: SDV_CRYPTO_SM4_ENCRYPT_FUNC_TC004 (line 213, SM4-XTS decrypt KAT)
+#[test]
+fn tc_line213_sm4_xts_decrypt() {
+    let key: &[u8] = &[
+        0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6, 0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f,
+        0x3c, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
+        0x0e, 0x0f,
+    ];
+    let key1 = &key[..16];
+    let key2 = &key[16..32];
+    let tweak: &[u8] = &[
+        0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8, 0xf9, 0xfa, 0xfb, 0xfc, 0xfd, 0xfe,
+        0xff,
+    ];
+    let input: &[u8] = &[
+        0xe9, 0x53, 0x82, 0x51, 0xc7, 0x1d, 0x7b, 0x80, 0xbb, 0xe4, 0x48, 0x3f, 0xef, 0x49, 0x7b,
+        0xd1,
+    ];
+    let expected: &[u8] = &[
+        0x6b, 0xc1, 0xbe, 0xe2, 0x2e, 0x40, 0x9f, 0x96, 0xe9, 0x3d, 0x7e, 0x11, 0x73, 0x93, 0x17,
+        0x2a,
+    ];
+    let actual = sm4_xts_decrypt(key1, key2, tweak, input).unwrap();
     assert_eq!(actual.as_slice(), expected);
 }
 
@@ -919,4 +974,4 @@ fn tc_line590_sm4_gcm_encrypt() {
     assert_eq!(&out[..input.len()], expected);
 }
 
-// Generation summary: 35 emitted / 237 API-surface skipped / 0 unknown / 11 unsupported alg / 283 total C cases.
+// Generation summary: 37 emitted / 237 API-surface skipped / 0 unknown / 9 unsupported alg / 283 total C cases.

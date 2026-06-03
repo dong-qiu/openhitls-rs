@@ -43,7 +43,19 @@ pub fn xts_encrypt(
     }
     let cipher1 = AesKey::new(key1)?;
     let cipher2 = AesKey::new(key2)?;
+    xts_encrypt_inner(&cipher1, &cipher2, tweak, plaintext)
+}
 
+/// XTS encrypt parameterised over the block cipher (IEEE 1619 §5).
+/// Both AES and SM4 share an identical algorithm body — only the cipher
+/// primitive differs — so this generic inner avoids the alternative of a
+/// copy-pasted 80-line second implementation.
+fn xts_encrypt_inner<C: crate::provider::BlockCipher>(
+    cipher1: &C,
+    cipher2: &C,
+    tweak: &[u8],
+    plaintext: &[u8],
+) -> Result<Vec<u8>, CryptoError> {
     // Encrypt tweak
     let mut t = [0u8; AES_BLOCK_SIZE];
     t.copy_from_slice(tweak);
@@ -134,7 +146,16 @@ pub fn xts_decrypt(
     }
     let cipher1 = AesKey::new(key1)?;
     let cipher2 = AesKey::new(key2)?;
+    xts_decrypt_inner(&cipher1, &cipher2, tweak, ciphertext)
+}
 
+/// XTS decrypt parameterised over the block cipher (IEEE 1619 §5).
+fn xts_decrypt_inner<C: crate::provider::BlockCipher>(
+    cipher1: &C,
+    cipher2: &C,
+    tweak: &[u8],
+    ciphertext: &[u8],
+) -> Result<Vec<u8>, CryptoError> {
     // Encrypt tweak
     let mut t = [0u8; AES_BLOCK_SIZE];
     t.copy_from_slice(tweak);
@@ -208,6 +229,45 @@ pub fn xts_decrypt(
     }
 
     Ok(plaintext)
+}
+
+/// Encrypt a data unit using XTS with **SM4** (GM/T 0002-2012) as the
+/// underlying block cipher.
+#[cfg(feature = "sm4")]
+pub fn sm4_xts_encrypt(
+    key1: &[u8],
+    key2: &[u8],
+    tweak: &[u8],
+    plaintext: &[u8],
+) -> Result<Vec<u8>, CryptoError> {
+    if tweak.len() != AES_BLOCK_SIZE {
+        return Err(CryptoError::InvalidArg("XTS tweak must be 16 bytes"));
+    }
+    if plaintext.len() < AES_BLOCK_SIZE {
+        return Err(CryptoError::InvalidArg("XTS data too short"));
+    }
+    let cipher1 = crate::sm4::Sm4Key::new(key1)?;
+    let cipher2 = crate::sm4::Sm4Key::new(key2)?;
+    xts_encrypt_inner(&cipher1, &cipher2, tweak, plaintext)
+}
+
+/// Decrypt a data unit using XTS with **SM4** as the underlying block cipher.
+#[cfg(feature = "sm4")]
+pub fn sm4_xts_decrypt(
+    key1: &[u8],
+    key2: &[u8],
+    tweak: &[u8],
+    ciphertext: &[u8],
+) -> Result<Vec<u8>, CryptoError> {
+    if tweak.len() != AES_BLOCK_SIZE {
+        return Err(CryptoError::InvalidArg("XTS tweak must be 16 bytes"));
+    }
+    if ciphertext.len() < AES_BLOCK_SIZE {
+        return Err(CryptoError::InvalidArg("XTS data too short"));
+    }
+    let cipher1 = crate::sm4::Sm4Key::new(key1)?;
+    let cipher2 = crate::sm4::Sm4Key::new(key2)?;
+    xts_decrypt_inner(&cipher1, &cipher2, tweak, ciphertext)
 }
 
 #[cfg(test)]
