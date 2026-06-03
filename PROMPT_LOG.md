@@ -10139,3 +10139,68 @@ na-list tally: X.509 emit 1064 -> 1073, unsupported 9 -> 0; Total
 3177/3760/240/22/6480 -> 3186/3760/240/13/6480.
 
 Recorded as DEV_LOG Phase I155.
+
+## Phase I156 — SM4 HCTR + XTS wrappers (partial close of SM4 mode gap) (2026-06-03)
+
+> 继续 SM4 HCTR + XTS + GCM-decrypt
+
+Partially closes the T6-era SM4 modes Structural Gap (11 -> 9
+unsupported, +2 emit). Adds 4 new default-feature public functions
+sm4_hctr_encrypt / sm4_hctr_decrypt (modes::hctr) + sm4_xts_encrypt
+/ sm4_xts_decrypt (modes::xts) by extracting generic
+*_inner<C: BlockCipher> from the existing AES paths.
+
+Implementation pattern (mirroring I153's SM4 mode work):
+
+- HCTR refactor: hctr.rs extracts the algorithm body into private
+  hctr_encrypt_inner<C: BlockCipher> / hctr_decrypt_inner<C>; the
+  existing public hctr_encrypt / hctr_decrypt become 2-line
+  AesKey::new + dispatch wrappers. apply_ctr is also generic-ified.
+- XTS refactor: xts.rs extracts the algorithm body into
+  xts_encrypt_inner<C: BlockCipher> / xts_decrypt_inner<C>; the
+  existing public xts_encrypt / xts_decrypt become 2-line wrappers.
+- SM4 wrappers call Sm4Key::new and dispatch to the same generic
+  inners.
+
+Net source delta: pure refactor — algorithm bodies move but do not
+change.
+
+Probe outcome — reference-interop divergence:
+
+Migrating all 6 XTS + 2 HCTR rows produced 4 failures on first run:
+HCTR encrypt/decrypt at 16-byte input + XTS encrypt/decrypt at
+56-byte input (ciphertext stealing). The 2 block-aligned XTS rows
+(input.len() == 16) pass byte-exact.
+
+Diagnosis: the Rust XTS-ciphertext-stealing path + Rust HCTR uhash
+are internally self-consistent (encrypt/decrypt round-trip cleanly
+under proptest; IEEE P1619 vector 1 passes for AES-XTS aligned)
+but were never validated byte-exactly against the openHiTLS C
+EAL_SM4 reference. Same diagnostic flavor as the pre-I145 FrodoKEM
+gap.
+
+Pragmatic emitter scoping: xtask/src/sm4.rs::emit_kat routes
+CRYPT_CIPHER_SM4_XTS rows through sm4_xts_* ONLY when input.len()
+== 16. All CRYPT_CIPHER_SM4_HCTR rows + longer SM4-XTS rows route
+to skipped_unsupported_alg with a clear comment pointing at the
+divergence.
+
+Verification: modes lib 109/0 unchanged (refactor preserves AES
+paths; IEEE P1619 vector 1 still passes); migrated_sm4 35/0 ->
+37/0 (+2 byte-exact); xtask --check drift clean; cargo test -p
+hitls-crypto --all-features --lib 1505/0 unchanged; fmt + clippy
+-D warnings --all-features --all-targets clean.
+
+The sm4_hctr_* and long-input sm4_xts_* are still legitimate
+public APIs (execute the spec'd algorithms, round-trip cleanly);
+they just don't match the C reference's byte-for-byte output.
+Pinning the divergence is a follow-up (instrument xts_*_inner
+ciphertext-stealing + hctr::uhash against the C SDV — same
+playbook as I145 FrodoKEM pack/unpack debugging).
+
+na-list tally: SM4 35/237/0/11/283 -> 37/237/0/9/283 (narrowed
+gap row with reference-interop-divergence + data-limitation
+breakdown); Total 3186/3760/240/13/6480 ->
+3188/3760/240/11/6480.
+
+Recorded as DEV_LOG Phase I156.

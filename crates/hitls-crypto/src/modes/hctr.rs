@@ -172,8 +172,14 @@ fn xor_bytes(dst: &mut [u8], src: &[u8]) {
 
 // ── CTR keystream (using ctr_base XOR counter) ──
 
-/// Apply AES-CTR keystream to `data` in-place, using `ctr_base` XOR BE counter.
-fn apply_ctr(cipher: &AesKey, ctr_base: &[u8; BLOCK], data: &mut [u8]) -> Result<(), CryptoError> {
+/// Apply HCTR's CTR keystream to `data` in-place, using `ctr_base` XOR BE
+/// counter. Generic over the underlying block cipher so the SM4 wrappers
+/// below can plug in without code duplication.
+fn apply_ctr<C: crate::provider::BlockCipher>(
+    cipher: &C,
+    ctr_base: &[u8; BLOCK],
+    data: &mut [u8],
+) -> Result<(), CryptoError> {
     for (counter, chunk) in (1u64..).zip(data.chunks_mut(BLOCK)) {
         let mut ctr_block = *ctr_base;
         // XOR BE counter into last 8 bytes
@@ -203,38 +209,7 @@ pub fn hctr_encrypt(
         return Err(CryptoError::InvalidArg(""));
     }
     let cipher = AesKey::new(key)?;
-    let p0 = &plaintext[..BLOCK];
-    let p_rest = &plaintext[BLOCK..];
-
-    // Step 1: S = P[0] XOR UHash(K2, P_rest, tweak)
-    let h1 = uhash(hash_key, p_rest, tweak);
-    let mut s = [0u8; BLOCK];
-    s.copy_from_slice(p0);
-    xor_block(&mut s, &h1);
-
-    // Step 2: CC = AES-ECB(K1, S)
-    let mut cc = s;
-    cipher.encrypt_block(&mut cc)?;
-
-    // Step 3: ctr_base = S XOR CC
-    let mut ctr_base = [0u8; BLOCK];
-    ctr_base.copy_from_slice(&s);
-    xor_block(&mut ctr_base, &cc);
-
-    // Step 4: C_rest = CTR(K1, ctr_base, P_rest)
-    let mut c_rest = p_rest.to_vec();
-    apply_ctr(&cipher, &ctr_base, &mut c_rest)?;
-
-    // Step 5: C[0] = CC XOR UHash(K2, C_rest, tweak)
-    let h2 = uhash(hash_key, &c_rest, tweak);
-    let mut c0 = cc;
-    xor_block(&mut c0, &h2);
-
-    // Output: C[0] || C_rest
-    let mut out = Vec::with_capacity(plaintext.len());
-    out.extend_from_slice(&c0);
-    out.extend_from_slice(&c_rest);
-    Ok(out)
+    hctr_encrypt_inner(&cipher, hash_key, tweak, plaintext)
 }
 
 /// Decrypt data using HCTR mode.
@@ -253,38 +228,108 @@ pub fn hctr_decrypt(
         return Err(CryptoError::InvalidArg(""));
     }
     let cipher = AesKey::new(key)?;
+    hctr_decrypt_inner(&cipher, hash_key, tweak, ciphertext)
+}
+
+/// HCTR encryption parameterised over the block cipher. Shared by the
+/// public AES + SM4 entry points so the algorithm body lives in one place.
+fn hctr_encrypt_inner<C: crate::provider::BlockCipher>(
+    cipher: &C,
+    hash_key: &[u8; BLOCK],
+    tweak: &[u8],
+    plaintext: &[u8],
+) -> Result<Vec<u8>, CryptoError> {
+    let p0 = &plaintext[..BLOCK];
+    let p_rest = &plaintext[BLOCK..];
+
+    let h1 = uhash(hash_key, p_rest, tweak);
+    let mut s = [0u8; BLOCK];
+    s.copy_from_slice(p0);
+    xor_block(&mut s, &h1);
+
+    let mut cc = s;
+    cipher.encrypt_block(&mut cc)?;
+
+    let mut ctr_base = [0u8; BLOCK];
+    ctr_base.copy_from_slice(&s);
+    xor_block(&mut ctr_base, &cc);
+
+    let mut c_rest = p_rest.to_vec();
+    apply_ctr(cipher, &ctr_base, &mut c_rest)?;
+
+    let h2 = uhash(hash_key, &c_rest, tweak);
+    let mut c0 = cc;
+    xor_block(&mut c0, &h2);
+
+    let mut out = Vec::with_capacity(plaintext.len());
+    out.extend_from_slice(&c0);
+    out.extend_from_slice(&c_rest);
+    Ok(out)
+}
+
+/// HCTR decryption parameterised over the block cipher.
+fn hctr_decrypt_inner<C: crate::provider::BlockCipher>(
+    cipher: &C,
+    hash_key: &[u8; BLOCK],
+    tweak: &[u8],
+    ciphertext: &[u8],
+) -> Result<Vec<u8>, CryptoError> {
     let c0 = &ciphertext[..BLOCK];
     let c_rest = &ciphertext[BLOCK..];
 
-    // Step 1: z2 = C[0] XOR UHash(K2, C_rest, tweak)
     let h1 = uhash(hash_key, c_rest, tweak);
     let mut z2 = [0u8; BLOCK];
     z2.copy_from_slice(c0);
     xor_block(&mut z2, &h1);
 
-    // Step 2: z1 = AES-ECB-Decrypt(K1, z2)  =>  z1 = S (original)
     let mut z1 = z2;
     cipher.decrypt_block(&mut z1)?;
 
-    // Step 3: ctr_base = z1 XOR z2
     let mut ctr_base = [0u8; BLOCK];
     ctr_base.copy_from_slice(&z1);
     xor_block(&mut ctr_base, &z2);
 
-    // Step 4: P_rest = CTR(K1, ctr_base, C_rest)
     let mut p_rest = c_rest.to_vec();
-    apply_ctr(&cipher, &ctr_base, &mut p_rest)?;
+    apply_ctr(cipher, &ctr_base, &mut p_rest)?;
 
-    // Step 5: P[0] = z1 XOR UHash(K2, P_rest, tweak)
     let h2 = uhash(hash_key, &p_rest, tweak);
     let mut p0 = z1;
     xor_block(&mut p0, &h2);
 
-    // Output: P[0] || P_rest
     let mut out = Vec::with_capacity(ciphertext.len());
     out.extend_from_slice(&p0);
     out.extend_from_slice(&p_rest);
     Ok(out)
+}
+
+/// HCTR encrypt with **SM4** (GM/T 0002-2012) as the underlying block cipher.
+#[cfg(feature = "sm4")]
+pub fn sm4_hctr_encrypt(
+    key: &[u8],
+    hash_key: &[u8; BLOCK],
+    tweak: &[u8],
+    plaintext: &[u8],
+) -> Result<Vec<u8>, CryptoError> {
+    if plaintext.len() < BLOCK {
+        return Err(CryptoError::InvalidArg(""));
+    }
+    let cipher = crate::sm4::Sm4Key::new(key)?;
+    hctr_encrypt_inner(&cipher, hash_key, tweak, plaintext)
+}
+
+/// HCTR decrypt with **SM4** (GM/T 0002-2012) as the underlying block cipher.
+#[cfg(feature = "sm4")]
+pub fn sm4_hctr_decrypt(
+    key: &[u8],
+    hash_key: &[u8; BLOCK],
+    tweak: &[u8],
+    ciphertext: &[u8],
+) -> Result<Vec<u8>, CryptoError> {
+    if ciphertext.len() < BLOCK {
+        return Err(CryptoError::InvalidArg(""));
+    }
+    let cipher = crate::sm4::Sm4Key::new(key)?;
+    hctr_decrypt_inner(&cipher, hash_key, tweak, ciphertext)
 }
 
 #[cfg(test)]
