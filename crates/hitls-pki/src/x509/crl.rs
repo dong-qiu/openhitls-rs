@@ -129,8 +129,22 @@ impl CertificateRevocationList {
             }
         };
 
-        // signature AlgorithmIdentifier
-        let (_inner_sig_oid, _inner_sig_params) = parse_algorithm_identifier(&mut tbs_dec)?;
+        // signature AlgorithmIdentifier (TBS-inner).
+        // RFC 5280 §5.1.1.2: this field is informational; verification uses
+        // the outer signatureAlgorithm. But the C reference parser still
+        // rejects CRLs whose inner OID is not a recognized signature
+        // algorithm (`HITLS_X509_ERR_GET_ANY_TAG`). Apply the same gate
+        // here so the negative `change_invalid_cid_*` fixtures fail at
+        // parse time as the C SDV expects.
+        let (inner_sig_oid_bytes, _inner_sig_params) = parse_algorithm_identifier(&mut tbs_dec)?;
+        let inner_sig_oid = Oid::from_der_value(&inner_sig_oid_bytes)
+            .map_err(|e| PkiError::InvalidCrl(format!("inner signature OID: {e}")))?;
+        if !is_known_signature_algorithm(&inner_sig_oid) {
+            return Err(PkiError::InvalidCrl(format!(
+                "unknown TBS signature algorithm: {}",
+                inner_sig_oid
+            )));
+        }
 
         // issuer Name
         let issuer = parse_name(&mut tbs_dec)?;
@@ -140,7 +154,11 @@ impl CertificateRevocationList {
             .read_time()
             .map_err(|e| PkiError::InvalidCrl(e.to_string()))?;
 
-        // nextUpdate Time OPTIONAL
+        // nextUpdate Time OPTIONAL. RFC 5280 §5.1.2.5: when present, this
+        // field MUST decode to a valid UTCTime/GeneralizedTime. The earlier
+        // lenient `.ok()` silently masked a malformed time (e.g. the
+        // `no_next_time` C SDV fixture, where the UTCTime tag has length 0)
+        // — propagate the error instead.
         let next_update = if !tbs_dec.is_empty() {
             let tag = tbs_dec
                 .peek_tag()
@@ -149,8 +167,11 @@ impl CertificateRevocationList {
                 && (tag.number == u32::from(tags::UTC_TIME)
                     || tag.number == u32::from(tags::GENERALIZED_TIME))
             {
-                // Try to read the time; if the TLV has zero-length value, treat as absent
-                tbs_dec.read_time().ok()
+                Some(
+                    tbs_dec
+                        .read_time()
+                        .map_err(|e| PkiError::InvalidCrl(e.to_string()))?,
+                )
             } else {
                 None
             }
@@ -189,8 +210,19 @@ impl CertificateRevocationList {
             Vec::new()
         };
 
-        // signatureAlgorithm AlgorithmIdentifier
+        // signatureAlgorithm AlgorithmIdentifier (outer).
+        // Same OID gate as the inner field — reject unknown algorithms at
+        // parse time so the negative `change_invalid_cid_*` fixtures fail
+        // here (cf. C `HITLS_X509_ERR_GET_ANY_TAG`).
         let (signature_algorithm, signature_params) = parse_algorithm_identifier(&mut outer)?;
+        let outer_sig_oid = Oid::from_der_value(&signature_algorithm)
+            .map_err(|e| PkiError::InvalidCrl(format!("outer signature OID: {e}")))?;
+        if !is_known_signature_algorithm(&outer_sig_oid) {
+            return Err(PkiError::InvalidCrl(format!(
+                "unknown signature algorithm: {}",
+                outer_sig_oid
+            )));
+        }
 
         // signatureValue BIT STRING
         let (_, sig_bytes) = outer
@@ -350,6 +382,26 @@ pub(crate) fn verify_signature_with_oid(
             sig_oid
         )))
     }
+}
+
+/// Return `true` if `oid` names a signature algorithm this crate can
+/// verify. Used at parse time to reject CRLs that declare an
+/// algorithm the C reference parser rejects with
+/// `HITLS_X509_ERR_GET_ANY_TAG` (e.g. `sha512-256WithRSAEncryption` =
+/// OID 1.2.840.113549.1.1.16, or `sha512-224WithRSAEncryption` =
+/// 1.1.1.15 — neither is in the supported set).
+pub(crate) fn is_known_signature_algorithm(oid: &Oid) -> bool {
+    *oid == known::sha256_with_rsa_encryption()
+        || *oid == known::sha384_with_rsa_encryption()
+        || *oid == known::sha512_with_rsa_encryption()
+        || *oid == known::sha1_with_rsa_encryption()
+        || *oid == known::ecdsa_with_sha256()
+        || *oid == known::ecdsa_with_sha384()
+        || *oid == known::ecdsa_with_sha512()
+        || *oid == known::ed25519()
+        || *oid == known::ed448()
+        || *oid == known::sm2_with_sm3()
+        || *oid == known::rsassa_pss()
 }
 
 /// Strip leading zero bytes from a byte slice.
@@ -572,9 +624,15 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_crl_no_next_update() {
-        let crl = CertificateRevocationList::from_pem(NO_NEXT_UPDATE_PEM).unwrap();
-        assert!(crl.next_update.is_none());
+    /// The `demoCA_rsa2048_v2_no_next_time.crl` fixture from the openHiTLS C
+    /// SDV is **structurally malformed**: it encodes a UTCTime tag with
+    /// length 0 in the nextUpdate slot. The C reference parser rejects this
+    /// with `BSL_ASN1_ERR_DECODE_UTC_TIME`; the Rust parser used to silently
+    /// drop it via a `.ok()` and surface `next_update = None`. I155 removed
+    /// that leniency — the parse now correctly fails. The C SDV row for
+    /// this file is `CRL_PARSE_FILE_FUNC_TC007 → BSL_ASN1_ERR_DECODE_UTC_TIME`.
+    fn test_parse_crl_no_next_update_is_rejected() {
+        assert!(CertificateRevocationList::from_pem(NO_NEXT_UPDATE_PEM).is_err());
     }
 
     #[test]

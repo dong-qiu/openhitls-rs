@@ -10085,3 +10085,57 @@ ApiSurface); Total 3175/3760/240/39/6480 ->
 3177/3760/240/22/6480.
 
 Recorded as DEV_LOG Phase I154.
+
+## Phase I155 — CRL parser strictness (closes CRL parser leniency gap) (2026-06-03)
+
+> 继续 CRL parser leniency
+
+> 请继续刚才未完成的工作
+
+Closes the X.509 CRL parser leniency Structural Gap (9 rows). The
+Rust CRL parser was lenient in three places that the openHiTLS C
+reference parser was strict about, so 9 negative
+CRL_PARSE_FILE_FUNC_TC003/006/007/008 rows could not be migrated.
+
+Production tightening:
+
+1. UTCTime / GeneralizedTime strict (RFC 5280 §4.1.2.5) in
+   crates/hitls-utils/src/asn1/decoder.rs: parse_utc_time now
+   requires exactly 13 ASCII chars ending in Z (rejects timezone
+   offsets like `+0800`, trailing junk like `2608260733ZZZ`).
+   parse_generalized_time requires exactly 15 ASCII chars ending
+   in Z (rejects fractional seconds like `.123Z`).
+2. CRL nextUpdate no longer lenient: CertificateRevocationList::
+   from_der removed a `.ok()` that turned UTCTime decode failures
+   into next_update = None. Now propagates the error (rejects the
+   no_next_time.crl fixture with zero-length UTCTime tag).
+3. Signature-algorithm OID gate: new pub(crate) fn
+   is_known_signature_algorithm(oid) enumerates the same set used
+   by verify_signature_with_oid. from_der validates both the
+   TBS-inner and outer signature algorithm OIDs at parse time,
+   rejecting sha512-256WithRSAEncryption (1.1.16) and
+   sha512-224WithRSAEncryption (1.1.15) — the OIDs in the
+   change_invalid_cid_{1,2} fixtures that C errors with
+   HITLS_X509_ERR_GET_ANY_TAG.
+
+xtask/src/x509.rs::emit_crl_parse_res dropped the `res !=
+HITLS_PKI_SUCCESS → skipped_unsupported_alg` early-return; negative
+rows now emit assert!(... .is_err()) with _fail suffix.
+
+Test rename: test_parse_crl_no_next_update was asserting the
+leniency-bug behaviour (next_update.is_none()). Renamed to
+test_parse_crl_no_next_update_is_rejected, asserts is_err().
+
+Probe: before I155 = 6/9 ACCEPTED + 3/9 REJECTED; after I155 = 0/9
+ACCEPTED + 9/9 REJECTED.
+
+Verification: hitls-pki lib 457/0 -> 458/0 (renamed test);
+migrated_x509_parse 1064/0 -> 1073/0 (+9); hitls-tls 1114/0
+unchanged; hitls-utils 80/0 unchanged; xtask --check drift clean;
+cargo test --workspace --all-features green; fmt + clippy -D
+warnings --all-features --all-targets clean.
+
+na-list tally: X.509 emit 1064 -> 1073, unsupported 9 -> 0; Total
+3177/3760/240/22/6480 -> 3186/3760/240/13/6480.
+
+Recorded as DEV_LOG Phase I155.

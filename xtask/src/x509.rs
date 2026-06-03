@@ -632,15 +632,27 @@ fn emit_crl_parse_res(out: &mut String, case: &TestCase, stats: &mut EmitStats) 
         stats.skipped_unknown += 1;
         return;
     };
-    if res != "HITLS_PKI_SUCCESS" {
-        // Negative case — Rust's CRL parser does not reject it (see doc).
-        stats.skipped_unsupported_alg += 1;
-        return;
-    }
-
-    write_doc(out, case, "X.509 CRL parse KAT");
+    // I155: positive rows assert `is_ok()`; negative rows (any
+    // `HITLS_X509_ERR_*` / `BSL_ASN1_ERR_*`) assert `is_err()`. The Rust
+    // CRL parser was tightened to reject the C SDV's 6 leniency-exposing
+    // malformed fixtures (cf. `parse_utc_time` / `parse_generalized_time`
+    // strict-length-and-`Z` checks + the nextUpdate `.ok()` removal +
+    // `is_known_signature_algorithm` OID gate).
+    let positive = res == "HITLS_PKI_SUCCESS";
+    let kind = if positive {
+        "X.509 CRL parse KAT"
+    } else {
+        "X.509 CRL parse negative KAT"
+    };
+    let suffix = if positive { "" } else { "_fail" };
+    write_doc(out, case, kind);
     writeln!(out, "#[test]").unwrap();
-    writeln!(out, "fn tc_line{}_x509_crl_parse_res() {{", case.line).unwrap();
+    writeln!(
+        out,
+        "fn tc_line{}_x509_crl_parse_res{suffix}() {{",
+        case.line
+    )
+    .unwrap();
     writeln!(
         out,
         "    let bytes = std::fs::read(concat!(\n\
@@ -651,11 +663,19 @@ fn emit_crl_parse_res(out: &mut String, case: &TestCase, stats: &mut EmitStats) 
     )
     .unwrap();
     writeln!(out, "    let pem = std::str::from_utf8(&bytes).unwrap();").unwrap();
-    writeln!(
-        out,
-        "    assert!(CertificateRevocationList::from_pem(pem).is_ok());"
-    )
-    .unwrap();
+    if positive {
+        writeln!(
+            out,
+            "    assert!(CertificateRevocationList::from_pem(pem).is_ok());"
+        )
+        .unwrap();
+    } else {
+        writeln!(
+            out,
+            "    assert!(CertificateRevocationList::from_pem(pem).is_err());"
+        )
+        .unwrap();
+    }
     writeln!(out, "}}\n").unwrap();
     stats.emitted += 1;
 }
