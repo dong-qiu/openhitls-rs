@@ -960,9 +960,7 @@ mod tests {
         assert_eq!(d224.len(), 28, "SHA-224 digest must be 28 bytes");
 
         let sig = priv_key.sign_pss(&d224, RsaHashAlg::Sha224).unwrap();
-        assert!(pub_key
-            .verify_pss(&d224, &sig, RsaHashAlg::Sha224)
-            .unwrap());
+        assert!(pub_key.verify_pss(&d224, &sig, RsaHashAlg::Sha224).unwrap());
 
         // Cross-hash digest length check: a SHA-256 digest (32 B) fed
         // under `Sha224` (expects 28 B) must be rejected by the PSS
@@ -970,17 +968,13 @@ mod tests {
         let mut h256 = crate::sha2::Sha256::new();
         h256.update(msg).unwrap();
         let d256 = h256.finish().unwrap().to_vec();
-        assert!(pub_key
-            .verify_pss(&d256, &sig, RsaHashAlg::Sha224)
-            .is_err());
+        assert!(pub_key.verify_pss(&d256, &sig, RsaHashAlg::Sha224).is_err());
 
         // Tampered digest must fail verification (return Ok(false), not
         // Err — the signature is well-formed, just doesn't match).
         let mut bad = d224.clone();
         bad[0] ^= 0x01;
-        assert!(!pub_key
-            .verify_pss(&bad, &sig, RsaHashAlg::Sha224)
-            .unwrap());
+        assert!(!pub_key.verify_pss(&bad, &sig, RsaHashAlg::Sha224).unwrap());
     }
 
     #[test]
