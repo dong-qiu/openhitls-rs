@@ -45,6 +45,7 @@ pub enum RsaPadding {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RsaHashAlg {
     Sha1,
+    Sha224,
     Sha256,
     Sha384,
     Sha512,
@@ -618,13 +619,14 @@ pub(crate) fn mgf1_with_hash(
     mask_len: usize,
     alg: RsaHashAlg,
 ) -> Result<Vec<u8>, CryptoError> {
-    use crate::sha2::{Sha256, Sha384, Sha512};
+    use crate::sha2::{Sha224, Sha256, Sha384, Sha512};
 
     // SHA-1 MGF1 is only available with the `sha1` feature (used by OAEP-SHA-1
     // for interop; PSS never uses SHA-1). h_len is harmless to compute even
     // without the feature — the per-iteration match below fails closed.
     let h_len = match alg {
         RsaHashAlg::Sha1 => 20,
+        RsaHashAlg::Sha224 => 28,
         RsaHashAlg::Sha256 => 32,
         RsaHashAlg::Sha384 => 48,
         RsaHashAlg::Sha512 => 64,
@@ -647,6 +649,12 @@ pub(crate) fn mgf1_with_hash(
                 return Err(CryptoError::InvalidArg(
                     "SHA-1 MGF1 requires the sha1 feature",
                 ));
+            }
+            RsaHashAlg::Sha224 => {
+                let mut hasher = Sha224::new();
+                hasher.update(seed)?;
+                hasher.update(&c)?;
+                t.extend_from_slice(&hasher.finish()?);
             }
             RsaHashAlg::Sha256 => {
                 let mut hasher = Sha256::new();
@@ -932,6 +940,41 @@ mod tests {
         assert!(!pub_key
             .verify_pss(&bad, &sig384, RsaHashAlg::Sha384)
             .unwrap());
+    }
+
+    /// Phase I159 — PSS-SHA-224 sign+verify roundtrip. Closes the four
+    /// `RSA_{SIGN,VERIFY}_PSS_FUNC_TC003` SDV rows that previously fell
+    /// to `RsaHashAlg` not having a `Sha224` variant. The verify path
+    /// must also reject a wrong-length digest (a SHA-256 digest fed under
+    /// `Sha224` triggers the EMSA-PSS hash-length check) and a tampered
+    /// digest.
+    #[test]
+    fn test_rsa_pss_sign_verify_sha224() {
+        let priv_key = RsaPrivateKey::generate(2048).unwrap();
+        let pub_key = priv_key.public_key();
+        let msg = b"phase i159 verifies pss-sha224 sign+verify roundtrip";
+
+        let mut h224 = crate::sha2::Sha224::new();
+        h224.update(msg).unwrap();
+        let d224 = h224.finish().unwrap().to_vec();
+        assert_eq!(d224.len(), 28, "SHA-224 digest must be 28 bytes");
+
+        let sig = priv_key.sign_pss(&d224, RsaHashAlg::Sha224).unwrap();
+        assert!(pub_key.verify_pss(&d224, &sig, RsaHashAlg::Sha224).unwrap());
+
+        // Cross-hash digest length check: a SHA-256 digest (32 B) fed
+        // under `Sha224` (expects 28 B) must be rejected by the PSS
+        // encoder's hash-length precondition, not silently accepted.
+        let mut h256 = crate::sha2::Sha256::new();
+        h256.update(msg).unwrap();
+        let d256 = h256.finish().unwrap().to_vec();
+        assert!(pub_key.verify_pss(&d256, &sig, RsaHashAlg::Sha224).is_err());
+
+        // Tampered digest must fail verification (return Ok(false), not
+        // Err — the signature is well-formed, just doesn't match).
+        let mut bad = d224.clone();
+        bad[0] ^= 0x01;
+        assert!(!pub_key.verify_pss(&bad, &sig, RsaHashAlg::Sha224).unwrap());
     }
 
     #[test]

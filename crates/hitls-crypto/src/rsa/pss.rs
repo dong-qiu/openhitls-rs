@@ -1,8 +1,10 @@
 //! RSASSA-PSS signature padding (RFC 8017 §9.1).
 //!
-//! Supports SHA-256, SHA-384, and SHA-512 as the hash function (Phase T95
-//! generalised this from SHA-256 only). MGF1 uses the same hash. Default
-//! salt length equals the hash output length.
+//! Supports SHA-224, SHA-256, SHA-384, and SHA-512 as the hash function.
+//! Phase T95 generalised this from SHA-256 only; Phase I159 added SHA-224
+//! to close the four C SDV PSS-SHA-224 rows (`RSA_SIGN_PSS_FUNC_TC003` and
+//! `RSA_VERIFY_PSS_FUNC_TC003`). MGF1 uses the same hash. Default salt
+//! length equals the hash output length.
 
 use hitls_types::CryptoError;
 
@@ -12,6 +14,7 @@ use super::{mgf1_with_hash, RsaHashAlg};
 pub(crate) const fn h_len(alg: RsaHashAlg) -> usize {
     match alg {
         RsaHashAlg::Sha1 => 20,
+        RsaHashAlg::Sha224 => 28,
         RsaHashAlg::Sha256 => 32,
         RsaHashAlg::Sha384 => 48,
         RsaHashAlg::Sha512 => 64,
@@ -21,6 +24,11 @@ pub(crate) const fn h_len(alg: RsaHashAlg) -> usize {
 /// Hash a buffer with the given algorithm. Returns `Vec<u8>` of `h_len(alg)`.
 fn hash_with(alg: RsaHashAlg, data: &[u8]) -> Result<Vec<u8>, CryptoError> {
     match alg {
+        RsaHashAlg::Sha224 => {
+            let mut h = crate::sha2::Sha224::new();
+            h.update(data)?;
+            Ok(h.finish()?.to_vec())
+        }
         RsaHashAlg::Sha256 => {
             let mut h = crate::sha2::Sha256::new();
             h.update(data)?;
