@@ -10582,3 +10582,49 @@ na-list：
   限制，不是 Rust 算法 bug。
 
 Recorded as DEV_LOG Phase T160.
+
+## R20 — RsaHashAlg 加 #[non_exhaustive] (2026-06-05)
+
+> 1
+
+兑现 I159 review 留下的 follow-up：把 RsaHashAlg 标
+#[non_exhaustive]，把"未来加哈希变体不算 break"的约定写进
+类型系统。趁外部下游为 0 的空窗期把契约锁死。
+
+唯一改动 — crates/hitls-crypto/src/rsa/mod.rs：
+
+  pub enum RsaHashAlg 顶部追加 #[non_exhaustive] 属性
+  + 一段 doc-comment 说明动机和 in-crate / out-of-crate
+    行为差异。
+
+零代码删改，零 API 变化，零 feature flag 变化。
+
+作用域：
+
+  - In-crate: rustc 仍把同 crate 内的 match 视为可穷举，
+    所以仓内 4 处既有 match (mgf1 h_len + 每轮派发,
+    pss::h_len, pss::hash_with, oaep::l_hash) 继续工作
+  - Out-of-crate: 下游写无 _ 的 exhaustive match 会
+    编译失败 —— 强制下游显式承认"枚举可能新增 variant"
+  - R20 本身: 理论 minor break，现实 zero impact (仓外
+    无消费者)
+
+验证：
+
+  cargo build -p hitls-crypto --all-features: clean
+  cargo test -p hitls-crypto --all-features: 4489/0
+    (无回归，in-crate match 不受 #[non_exhaustive] 影响)
+  RUSTFLAGS="-D warnings" cargo clippy --workspace
+    --all-features --all-targets: clean
+  cargo fmt --all --check: clean
+
+后续：
+
+  未来加新哈希变体 (e.g. SHA-3-256/384/512 for RSA-PSS
+  PKCS#1 v2.2，或 SM3 for RSA-PSS-with-SM3 国密互通)
+  按 minor semver bump 处理，#[non_exhaustive] 已把契约
+  写进类型系统。
+
+迁移 tally 不变 (3193/3759/240/7/6480)。
+
+Recorded as DEV_LOG Phase R20.
