@@ -171,4 +171,26 @@ fn tc_line10_sm9_crypt_cross() {
     );
 }
 
-// Generation summary: 7 emitted / 31 API-surface skipped (N/A in Rust) / 0 unknown / 0 unsupported alg / 38 total C cases.
+/// C source: SDV_CRYPTO_SM9_KEYEX_API_TC001 (line 4, SM9 key exchange round-trip (GB/T 38635 §4.4))
+#[test]
+#[allow(deprecated)]
+fn tc_line4_sm9_keyex_roundtrip() {
+    let master_key: &[u8] = &[
+        0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32, 0x10, 0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32,
+        0x10, 0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32, 0x10, 0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54,
+        0x32, 0x10,
+    ];
+    let user_a: &[u8] = &[0x41, 0x6c, 0x69, 0x63, 0x65];
+    let user_b: &[u8] = &[0x42, 0x6f, 0x62];
+    let master = Sm9MasterKey::from_master_secret(Sm9KeyType::Encrypt, master_key).unwrap();
+    let key_a = master.extract_user_key(user_a).unwrap();
+    let key_b = master.extract_user_key(user_b).unwrap();
+    for klen in [32usize, 63, 15] {
+        let sk_a = master.compute_share_key(&key_a, &key_b, klen).unwrap();
+        let sk_b = master.compute_share_key(&key_b, &key_a, klen).unwrap();
+        assert_eq!(sk_a.len(), klen);
+        assert_eq!(sk_a, sk_b, "SK_A and SK_B must agree at klen={klen}");
+    }
+}
+
+// Generation summary: 8 emitted / 30 API-surface skipped (N/A in Rust) / 0 unknown / 0 unsupported alg / 38 total C cases.

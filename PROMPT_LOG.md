@@ -10375,3 +10375,67 @@ rows can be replayed through Sm9MasterKey::compute_share_key in
 a follow-up T-phase.
 
 Recorded as DEV_LOG Phase I158.
+
+## T159 — SM9 KEYEX_API_TC001 migration through I158 compute_share_key (2026-06-04)
+
+> 请继续 T159
+
+T159 closes the SM9 key-exchange Structural Gap end-to-end by
+routing the T158-deferred KEYEX_API_TC001 SDV row through the
+I158-added Sm9MasterKey::compute_share_key entry point.
+
+xtask emitter — xtask/src/sm9.rs:
+
+  New emit_keyex_api: unpacks (masterKey: 32B, userIdA, userIdB),
+  emits a test that:
+    - calls Sm9MasterKey::from_master_secret(Encrypt, masterKey)
+    - extracts both encryption user keys
+    - loops klen in [32, 63, 15]:
+        sk_a = master.compute_share_key(&key_a, &key_b, klen)
+        sk_b = master.compute_share_key(&key_b, &key_a, klen)
+        assert_eq!(sk_a, sk_b)
+
+  klen choices mirror the C SDV exactly:
+    - 32   = SM9_SHARED_KEY_LEN (one full SM3 block)
+    - 63   = SK_Long  (rcnt=1 full block + rbit=31 tail; crosses
+                       the SM3 block boundary)
+    - 15   = SK_Short (rcnt=0, rbit=15; tail-only path)
+
+  Both (self, peer) orderings are exercised so the lex-comparison
+  branch in compute_share_key is hit from both sides.
+
+  Dispatch arm: name.contains("KEYEX_API_TC001") → emit_keyex_api.
+  KEYEX_API_TC002 stays API-surface — it drills NULL-pointer
+  rejection on the C EAL ComputeShareKey wrapper, which Rust's
+  borrow checker forbids at compile time, so there is no runtime
+  check to migrate.
+
+Regenerated migrated_sm9.rs — new test:
+  tc_line4_sm9_keyex_roundtrip
+
+Verification:
+  cargo test -p hitls-crypto --features sm9,kat-nonce
+    --test migrated_sm9: 8/0 (was 7/0)
+  cargo test -p hitls-crypto --all-features: 4484/0
+    (was 4483/0; +1 new; no regression)
+  cargo run -p xtask -- migrate-c-tests --algo sm9 --check:
+    clean — emitted 7 → 8, API-surface 31 → 30, unsupported
+    0 → 0; generated file up-to-date
+  cargo fmt --all -- --check: clean
+  RUSTFLAGS="-D warnings" cargo clippy -p hitls-crypto -p xtask
+    --all-features --all-targets: clean
+
+na-list:
+  SM9 row 7/31/0/0/38 → 8/30/0/0/38
+  Total 3188/3760/240/11/6480 → 3189/3759/240/11/6480
+  SM9 key-exchange Structural Gap row struck through (resolved
+  by I158 + T159); SM9 section's API-surface count breakdown
+  updated to reflect TC001 → emitted, TC002 → API-surface
+
+Migration plan progress: SM9 is now structurally complete — all
+migratable round-trip families (SIGN_API / CRYPT_API /
+CHECK_KEYPAIR / CHECK_PRVKEY / KEYEX_API) covered; the 30
+remaining API-surface rows are header rows + EAL ctx CRUD with
+no Rust counterpart.
+
+Recorded as DEV_LOG Phase T159.
