@@ -42,7 +42,8 @@ impl McElieceKeyPair {
 
         let kp = keygen::seeded_keygen(&delta, &p)?;
 
-        // Serialize private key: delta(32) + c(8) + g_coeffs(2*(t+1)) + s(n_bytes) + controlbits
+        // Serialize sk in the C reference layout — see
+        // `serialize_private_key` doc-comment for the wire format.
         let sk = serialize_private_key(&kp, &p);
 
         Ok(Self {
