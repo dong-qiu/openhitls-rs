@@ -52,8 +52,37 @@ impl McElieceKeyPair {
         })
     }
 
+    /// Reconstruct a key pair from a serialised decapsulation key,
+    /// matching the openHiTLS C reference sk byte layout
+    /// `delta(32) || c(8) || g[0..t](2t) || controlbits(...) || s(n_bytes)`.
+    /// The resulting key pair has an empty encapsulation key — only the
+    /// `decapsulate` direction is available. Intended for reference KAT
+    /// migration where a published `(dk, ct, ss)` triple is replayed.
+    pub fn from_decapsulation_key(
+        param_id: McElieceParamId,
+        dk: &[u8],
+    ) -> Result<Self, CryptoError> {
+        let p = params::get_params(param_id);
+        if dk.len() != p.private_key_bytes {
+            return Err(CryptoError::InvalidArg(""));
+        }
+        Ok(Self {
+            encapsulation_key: Vec::new(),
+            decapsulation_key: dk.to_vec(),
+            param_id,
+        })
+    }
+
     /// Encapsulate: produce a shared secret and ciphertext.
     pub fn encapsulate(&self) -> Result<(Vec<u8>, Vec<u8>), CryptoError> {
+        // A key pair reconstructed via `from_decapsulation_key` has no
+        // encapsulation key; reject rather than encode against an empty
+        // matrix.
+        if self.encapsulation_key.is_empty() {
+            return Err(CryptoError::InvalidArg(
+                "encapsulation key absent (key pair built from a decapsulation key only)",
+            ));
+        }
         let p = params::get_params(self.param_id);
 
         // Generate random error vector
@@ -159,28 +188,36 @@ fn shake256_hash(input: &[u8], output_len: usize) -> Result<Vec<u8>, CryptoError
     hasher.squeeze(output_len)
 }
 
+/// Serialise the McEliece secret key to bytes in the **openHiTLS C
+/// reference layout** (see `crypto/mceliece/src/mceliece.c::
+/// McelieceExportPrvKey`): `delta || c || g[0..t] || controlbits || s`.
+///
+/// **Note on the `g` block.** The Goppa polynomial is monic — its
+/// leading coefficient `g[t]` is always `1` — so the reference only
+/// stores coefficients `g[0..t]` (i.e. `t` of them, not `t+1`) and the
+/// parser re-sets `g[t] = 1` on read. The Rust keygen already produces
+/// a monic `g`, so dropping the leading coefficient from the wire is
+/// lossless.
+///
+/// Pre-I160 the Rust layout also embedded a full `alpha` block (2·Q
+/// bytes = 16384 B) and ordered `s` ahead of `controlbits`. Neither
+/// matches the C reference: `alpha` is recovered from the Benes
+/// `controlbits` via `support_from_cbits`, and the section order is
+/// `controlbits` then `s`. I160 realigns both.
 fn serialize_private_key(kp: &keygen::KeyPairInternal, p: &params::McElieceParams) -> Vec<u8> {
-    let mut sk = Vec::new();
+    let mut sk = Vec::with_capacity(p.private_key_bytes);
     // delta (32 bytes)
     sk.extend_from_slice(&kp.sk_delta);
-    // c (8 bytes, little-endian)
+    // c (pivot mask, 8 bytes, little-endian)
     sk.extend_from_slice(&kp.sk_c.to_le_bytes());
-    // g coefficients (2*(t+1) bytes, little-endian)
-    for i in 0..=p.t {
+    // g coefficients (2*t bytes, little-endian; leading g[t] = 1 is implicit)
+    for i in 0..p.t {
         sk.extend_from_slice(&kp.sk_g.coeffs[i].to_le_bytes());
     }
-    // alpha (2*Q bytes)
-    for i in 0..params::Q {
-        if i < kp.sk_alpha.len() {
-            sk.extend_from_slice(&kp.sk_alpha[i].to_le_bytes());
-        } else {
-            sk.extend_from_slice(&0u16.to_le_bytes());
-        }
-    }
-    // s (n_bytes)
-    sk.extend_from_slice(&kp.sk_s);
-    // control bits
+    // controlbits (variable, depends on m)
     sk.extend_from_slice(&kp.sk_controlbits);
+    // s (n_bytes random tail)
+    sk.extend_from_slice(&kp.sk_s);
     sk
 }
 
@@ -190,6 +227,11 @@ struct PrivateKeyParts {
     controlbits: Vec<u8>,
 }
 
+/// Parse a McEliece secret key in the openHiTLS C reference layout.
+/// Mirrors `McelieceParsePrvKey` in `crypto/mceliece/src/mceliece.c`:
+/// reads `t` `g` coefficients then sets `g[t] = 1` (monic), then takes
+/// `controlbits` followed by `s`. See `serialize_private_key` for the
+/// pre-I160 divergence write-up.
 fn deserialize_private_key(
     sk: &[u8],
     p: &params::McElieceParams,
@@ -199,9 +241,9 @@ fn deserialize_private_key(
     offset += L_BYTES;
     // c (8 bytes) - skip
     offset += 8;
-    // g coefficients
+    // g coefficients: t coeffs on the wire, plus implicit monic leading
     let mut g = poly::GfPoly::new(p.t);
-    for i in 0..=p.t {
+    for i in 0..p.t {
         if offset + 2 > sk.len() {
             return Err(CryptoError::InvalidArg(""));
         }
@@ -209,17 +251,26 @@ fn deserialize_private_key(
         g.set_coeff(i, coeff);
         offset += 2;
     }
-    // alpha (2*Q bytes) - skip
-    offset += 2 * params::Q;
-    // s
+    // Monic leading coefficient — never written by the reference, but
+    // required by the decoder.
+    g.set_coeff(p.t, 1);
+    // controlbits: a fixed `(2*m - 1) * 2^(m-1) / 8` bytes (the size of
+    // a Benes-network control sequence over 2^m permutation slots; for
+    // m = 13 that's 25 · 4096 / 8 = 12800 bytes). Listed ahead of `s`
+    // in the wire layout per the C reference.
+    let cb_len = ((2 * p.m - 1) << (p.m - 1)) / 8;
+    let cb_end = offset + cb_len;
+    if cb_end > sk.len() {
+        return Err(CryptoError::InvalidArg(""));
+    }
+    let controlbits = sk[offset..cb_end].to_vec();
+    offset = cb_end;
+    // s (n_bytes tail)
     let s_end = offset + p.n_bytes;
     if s_end > sk.len() {
         return Err(CryptoError::InvalidArg(""));
     }
     let s = sk[offset..s_end].to_vec();
-    offset = s_end;
-    // controlbits
-    let controlbits = sk[offset..].to_vec();
 
     Ok(PrivateKeyParts { g, s, controlbits })
 }

@@ -252,6 +252,11 @@ fn migrate(
             workspace_root()?.join("crates/hitls-crypto/tests/migrated_frodokem.rs"),
             kem::emit_frodokem_kat,
         ),
+        "mceliece" => (
+            vec![c_root.join("crypto/mceliece/test_suite_sdv_mceliece.data")],
+            workspace_root()?.join("crates/hitls-crypto/tests/migrated_mceliece.rs"),
+            kem::emit_mceliece_kat,
+        ),
         "drbg" => (
             vec![c_root.join("crypto/drbg/test_suite_sdv_drbg.data")],
             workspace_root()?.join("crates/hitls-crypto/tests/migrated_drbg.rs"),
@@ -290,7 +295,7 @@ fn migrate(
         ),
         other => {
             return Err(format!(
-                "algo '{other}' not yet supported. Available: sha2, hmac, cmac, aes, curve25519, dsa, dh, sm4, sm2, sm9, mldsa, mlkem, sha3, md5, sha1, sm3, hkdf, pbkdf2, scrypt, kdf-tls12, gcm, aes-ccm, aes-kw, gmac, chacha-poly, siphash, cbc-mac, frodokem, drbg, ecc, rsa, bn, x509-parse, hpke, slhdsa, xmss"
+                "algo '{other}' not yet supported. Available: sha2, hmac, cmac, aes, curve25519, dsa, dh, sm4, sm2, sm9, mldsa, mlkem, sha3, md5, sha1, sm3, hkdf, pbkdf2, scrypt, kdf-tls12, gcm, aes-ccm, aes-kw, gmac, chacha-poly, siphash, cbc-mac, frodokem, mceliece, drbg, ecc, rsa, bn, x509-parse, hpke, slhdsa, xmss"
             )
             .into());
         }

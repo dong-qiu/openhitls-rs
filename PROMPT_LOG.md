@@ -10628,3 +10628,128 @@ Recorded as DEV_LOG Phase T160.
 迁移 tally 不变 (3193/3759/240/7/6480)。
 
 Recorded as DEV_LOG Phase R20.
+
+## I160 + T161 — McEliece reference KAT 修复与迁移 (2026-06-05)
+
+> 等合并后继续1 / 继续
+
+兑现先前对 McEliece 深度诊断的承诺。诊断结果修正了 na-list 之前
+的假设：根因不是 Benes 控制位编码差异，而是 Rust `serialize_private_key`
+/ `deserialize_private_key` 的 sk 字节流和 C 参考严重不一致。Rust↔Rust
+self round-trip 因为对称写读对称错而一直绿，bug 一直没暴露。
+
+诊断结果（对照 C `mceliece.c::McelieceExportPrvKey`）：
+
+  C 参考布局：delta(32) || c(8) || g[0..t] (2t LE) || controlbits || s(n_bytes)
+  Rust 老布局：delta(32) || c(8) || g[0..=t] (2(t+1) LE)
+              || alpha(2*Q = 16384) || s(n_bytes) || controlbits
+
+  三处分歧：
+    1. g 系数数量 — Rust 写 t+1（含 leading），C 只写 t
+       （Goppa 多项式天然 monic，g[t]=1，C 端解析时显式补）
+    2. alpha 段 — Rust 多塞 16384 B，C 不存（解码时从 controlbits
+       经 Benes support_from_cbits 还原）
+    3. section 顺序 — C 是 controlbits → s，Rust 是 s → controlbits
+
+  字节量对账（McEliece6688128）：
+    C 参考 sk：32 + 8 + 256 + 12800 + 836 = 13932 B
+              （与 privateKeyBytes 元数据严格相等）
+    Rust pre-I160 sk：32 + 8 + 258 + 16384 + 836 + 12800 = 30318 B
+                    （比标的 13932 多 16386 B —— 但 self round-trip
+                     不暴露因为读写对称）
+
+I160 修复 —— crates/hitls-crypto/src/mceliece/mod.rs：
+
+  serialize_private_key：
+    - g 系数循环 0..=p.t → 0..p.t（写 t 个不写 t+1）
+    - 删除 alpha 段
+    - controlbits 与 s 顺序对调（controlbits 前置）
+    - 用 Vec::with_capacity(p.private_key_bytes) 替代裸 Vec::new()
+
+  deserialize_private_key：
+    - g 系数循环 0..=p.t → 0..p.t
+    - 显式 g.set_coeff(p.t, 1) 补 monic leading
+    - 删除 offset += 2 * Q 的 alpha skip
+    - 用公式 cb_len = ((2*m - 1) << (m - 1)) / 8 算 controlbits 长度
+      （m=13 → 12800 B），先读 controlbits 后读 s
+
+  配套 API：新增默认 feature 公开
+    McElieceKeyPair::from_decapsulation_key(param_id, dk)
+    （镜像 FrodoKEM 的 I145 同款 hook；encapsulation_key = Vec::new()；
+     encapsulate() 头部加 empty-pk 早期 Err 避免后续从空 ek 索引 panic）
+
+I160 验证：
+
+  cargo test -p hitls-crypto --features mceliece test_mceliece: 18/0
+    （self round-trip 跨 6688128/8192128/Benes/GF/poly/vector/proptest
+     一片绿；对称写读保持工作）
+  cargo build -p hitls-crypto --features mceliece: clean
+  cargo fmt + clippy -D warnings: clean
+  cargo test -p hitls-crypto --all-features: 4489/0
+    （pre-T161；T161 接管后变 4490/0）
+
+T161 —— xtask McEliece KAT 入口：
+
+  xtask/src/kem.rs：
+    - 新增 mceliece_param 映射，覆盖全 12 个 param ID
+      （McEliece6688128 / 6960119 / 8192128 × _/F/Pc/Pcf）
+    - 新增 emit_mceliece_kat（与 emit_frodokem_kat 同款形状）：
+      data 行 layout (param, seed, testEk, testDk, testCt, testSs)
+      → 发出 McElieceKeyPair::from_decapsulation_key(param, dk)
+                    .decapsulate(ct) == expected_ss
+    - 顶部注释更新（"McEliece is NOT migrated" → "added in I160/T161"）
+
+  xtask/src/main.rs：
+    - 新增 mceliece 分发分支
+    - 字符串列表 update
+
+  cargo run -p xtask -- migrate-c-tests --algo mceliece：
+    parsed 14 TC rows
+    emitted 1 tests, skipped 13 API-surface, 0 unknown,
+      0 unsupported-alg
+
+  新增 1 个测试：tc_lineN_mceliece_mceliece6688128_decaps
+    dk = 13932 B C 参考 sk
+    ct = 208 B C 参考 ciphertext
+    expected_ss = 32 B C 参考 shared secret
+
+T161 验证 —— 首次运行即 byte-exact 通过，无需任何调试：
+
+  cargo test -p hitls-crypto --features mceliece --test migrated_mceliece: 1/0
+  cargo run -p xtask -- migrate-c-tests --algo mceliece --check: clean
+    （emitted 0 → 1，API-surface 0 → 13，unsupported 2 → 0）
+  cargo test -p hitls-crypto --all-features: 4490/0
+    （前 4489 + 1 新；无回归）
+  cargo fmt --check + clippy -D warnings -p hitls-crypto -p xtask
+    --all-features --all-targets: clean
+
+na-list：
+
+  per-algo 表新增 McEliece 行：1/13/0/0/14
+  Total 3193/3759/240/7/6480 → 3194/3772/240/7/6494
+  Structural Gap "Classic McEliece decaps KAT" 行划线归档，
+  描述改写为 "Resolved in I160 + T161"，详细列出三处布局分歧
+  + 修复路径 + 字节量对账。
+
+迁移计划进展：
+
+  Code-based PQC KEM 全部 byte-exact 通过：
+    - FrodoKEM 8 行（I145 修 pack/unpack bit-endianness）
+    - McEliece 1 行（I160 修 sk 字节布局）
+
+  剩余 5 行 FrodoKEM unsupported 是 eFrodoKEM 变体（openHiTLS 非标准
+  扩展），属"实现新变体"任务而非"诊断修复"。
+
+  全 workspace 剩余 7 条 unsupported 仍全部集中在 SM4-HCTR
+  （4 条，上游 C SDV cipherText 字段从未被 C 测试代码字节比较）+
+  SM4-GCM-decrypt（3 条，cipher field 缺 auth tag），都是上游数据限制。
+
+字节格式破坏性提醒：
+
+  Rust 老版本 sk 字节流（含 alpha 段、顺序乱）无法被新 deserialize
+  解析。仓内无外部 sk 持久化使用（migration-only / generate→decap
+  一次性 ephemeral），实际 zero impact。type API 完全向后兼容
+  （McElieceKeyPair 字段类型不变，公开方法签名不变，仅 sk 字节
+  解读规则换）。
+
+Recorded as DEV_LOG Phase I160 + T161.
