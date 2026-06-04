@@ -42,7 +42,13 @@ pub enum RsaPadding {
 }
 
 /// Hash algorithm identifier for RSA padding operations.
+///
+/// Marked `#[non_exhaustive]` so future hash variants (e.g. SHA-3, SM3 for
+/// RSA-PSS where applicable) can be added without breaking external
+/// downstream `match` arms. In-crate exhaustive matches are unaffected;
+/// out-of-crate consumers must include a `_` wildcard.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum RsaHashAlg {
     Sha1,
     Sha224,
