@@ -82,10 +82,12 @@ fn md_to_hash(symbol: &str) -> Option<&'static str> {
 }
 
 /// Map a `CRYPT_MD_*` symbol to the `RsaHashAlg` variant accepted by
-/// `verify_pss` (SHA-256/384/512 only — MGF1 has no SHA-1 and there is no
-/// SHA-224 variant).
+/// `verify_pss` / `sign_pss_with_salt` (SHA-224/256/384/512 — I159 added
+/// the SHA-224 variant; MGF1 has no SHA-1 so SHA-1 PSS rows still fall
+/// to `unsupported`).
 fn md_to_pss_alg(symbol: &str) -> Option<&'static str> {
     match symbol {
+        "CRYPT_MD_SHA224" => Some("Sha224"),
         "CRYPT_MD_SHA256" => Some("Sha256"),
         "CRYPT_MD_SHA384" => Some("Sha384"),
         "CRYPT_MD_SHA512" => Some("Sha512"),
@@ -236,8 +238,9 @@ fn emit_sign_pkcs15(
 /// publishes the exact salt the C test injects via `CRYPT_CTRL_SET_RSA_SALT`,
 /// so the signature is byte-exact: `from_nd(n, d).sign_pss_with_salt(MD(msg),
 /// alg, salt) == sign` (both `from_nd` and `sign_pss_with_salt` are
-/// `kat-nonce`-gated). PSS in the Rust API supports SHA-256/384/512 only, so
-/// SHA-1 / SHA-224 rows are `unsupported`.
+/// `kat-nonce`-gated). PSS in the Rust API supports SHA-224/256/384/512
+/// (I159 added SHA-224); SHA-1 PSS rows still fall to `unsupported` because
+/// MGF1 SHA-1 is not wired.
 fn emit_sign_pss(
     out: &mut String,
     case: &TestCase,
