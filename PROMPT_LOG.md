@@ -10495,3 +10495,90 @@ RSA_{SIGN,VERIFY}_PSS_FUNC_TC003 的落地由紧跟其后的 T 阶段
 72/108/0/4/170 → 76/108/0/0/170，Total → 3193/3759/240/7/6480。
 
 Recorded as DEV_LOG Phase I159.
+
+## T160 — RSA PSS-SHA-224 KAT 迁移 (2026-06-04)
+
+> 等PR #231 合并后 开始 T160
+
+承接 I159 的产品落地，T160 把 xtask emitter 的 SHA-224 拒绝
+分支拆掉，让 4 行 SDV `RSA_{VERIFY,SIGN}_PSS_FUNC_TC001` 的
+SHA-224 行从 unsupported 走到 emitted。
+
+唯一改动点 — xtask/src/rsa.rs::md_to_pss_alg：
+
+  在已有 SHA-256/384/512 匹配前面追加：
+    "CRYPT_MD_SHA224" => Some("Sha224"),
+
+  函数返回从 None 变成 Some("Sha224") 后，调用它的
+  emit_verify_pss / emit_sign_pss 两个 writer 既有的
+  unsupported 守卫天然透传新值，无需进一步改写。
+
+文档同步更新：
+
+  md_to_pss_alg 顶部 doc：
+    "SHA-256/384/512 only — MGF1 has no SHA-1 and there is
+     no SHA-224 variant"
+    → "SHA-224/256/384/512 — I159 added the SHA-224 variant;
+       MGF1 has no SHA-1 so SHA-1 PSS rows still fall to
+       `unsupported`"
+
+  emit_sign_pss 段头 doc：
+    "PSS in the Rust API supports SHA-256/384/512 only, so
+     SHA-1 / SHA-224 rows are `unsupported`"
+    → "PSS in the Rust API supports SHA-224/256/384/512 (I159
+       added SHA-224); SHA-1 PSS rows still fall to
+       `unsupported` because MGF1 SHA-1 is not wired"
+
+把"现实里不支持 SHA-224"的历史描述换成"I159 之后支持"，同时
+把仍 unsupported 的真正原因（SHA-1 PSS）写明。
+
+重新生成 migrated_rsa.rs：
+
+  parsed 170 TC rows
+  emitted 76 tests, skipped 108 API-surface, 0 unknown,
+    0 unsupported-alg
+  （前 72 emitted + 4 新；前 4 unsupported → 0）
+
+新加 4 条测试：2 PSS-SHA-224 verify + 2 PSS-SHA-224 sign，
+形状与既有 SHA-256/384/512 行完全一致。
+
+验证：
+
+  cargo test -p hitls-crypto --features rsa,sha1,sha2,kat-nonce
+    --test migrated_rsa: 76/0
+    （注：feature 列表要带 sha1，因为该 test 文件 cfg 头是
+     #![cfg(all(feature = "rsa", feature = "sha1",
+     feature = "sha2"))]，既有 PKCS#1 v1.5 SHA-1 KAT 行
+     依赖 Sha1；SHA-224 新行不需要新 feature）
+  cargo run -p xtask -- migrate-c-tests --algo rsa --check:
+    clean（emitted 72 → 76，unsupported 4 → 0）
+  cargo test -p hitls-crypto --all-features: 4489/0
+    （前 4485 + 4 新；无回归）
+  cargo fmt --all --check: clean
+  RUSTFLAGS="-D warnings" cargo clippy -p hitls-crypto -p xtask
+    --all-features --all-targets: clean
+
+na-list：
+
+  RSA 行 72/108/0/4/170 → 76/108/0/0/170
+  Total 3189/3759/240/11/6480 → 3193/3759/240/7/6480
+  RSA 段叙述（"4 unsupported are PSS-SHA-224"）改写为
+    "I159 + T160 closed"
+  末尾"all deterministic RSA sign/verify/encrypt/decrypt
+  families are now migrated"扩展为跨 SHA-1/224/256/384/512
+  全部覆盖
+
+迁移计划进展：
+
+  RSA 算法迁移结构性闭环 —— 所有 deterministic 家族
+  （PKCS#1 v1.5 + OAEP + PSS）跨 SHA-1/224/256/384/512 全部
+  覆盖；剩余 108 行 RSA API-surface 全是 EAL ctx CRUD +
+  随机化 sign 的非 KAT 路径，无 Rust 对应物。
+
+  全 workspace 剩余 7 条 unsupported 集中在 SM4：4 条 HCTR
+  （C SDV cipherText 字段从未被 C 测试代码字节比较，I157
+  已诊断为"上游数据未验证"）+ 3 条 SM4-GCM-decrypt（C SDV
+  cipher field 没有 16-byte auth tag）。两条都是上游数据
+  限制，不是 Rust 算法 bug。
+
+Recorded as DEV_LOG Phase T160.

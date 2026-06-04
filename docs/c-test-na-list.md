@@ -60,7 +60,7 @@ Counts are the `Generation summary` footer of each generated file
 | SHA-3 | 46 | 50 | 0 | 2 | 98 |
 | DRBG | 18 | 272 | 0 | 0 | 290 |
 | ECC | 61 | 603 | 0 | 0 | 647 |
-| RSA | 72 | 108 | 0 | 4 | 170 |
+| RSA | 76 | 108 | 0 | 0 | 170 |
 | BigNum | 230 | 130 | 2 | 0 | 362 |
 | MD5 | 9 | 8 | 0 | 0 | 17 |
 | SHA-1 | 8 | 6 | 0 | 0 | 14 |
@@ -81,7 +81,7 @@ Counts are the `Generation summary` footer of each generated file
 | SLH-DSA | 317 | 32 | 0 | 0 | 349 |
 | XMSS | 84 | 4 | 0 | 0 | 88 |
 | SM9 | 8 | 30 | 0 | 0 | 38 |
-| **Total** | **3189** | **3759** | **240** | **11** | **6480** |
+| **Total** | **3193** | **3759** | **240** | **7** | **6480** |
 
 RSA migrates the signature **verify** families from
 `test_suite_sdv_eal_rsa_sign_verify.data`: `VERIFY_PKCSV15_FUNC_TC001`
@@ -91,8 +91,8 @@ SHA-256/384/512). Migrating them surfaced and fixed **two real Rust gaps**
 PKCS#1 v1.5 verify (and sign) silently failed — added OID 2.16.840.1.101.3.4.2.4;
 (2) `verify_pss` hardcoded `saltLen = hashLen`, but the NIST vectors use a
 20-byte salt — added `RsaPublicKey::verify_pss_with_salt(.., salt_len)` (RFC 8017
-EMSA-PSS-VERIFY `sLen`). The 2 unsupported are PSS-SHA-224 (no `RsaHashAlg::Sha224`
-/ MGF1-SHA-224). RSA **PKCS#1 v1.5 sign** is now migrated (I139):
+EMSA-PSS-VERIFY `sLen`). The PSS-SHA-224 unsupported rows (2 verify) closed
+in I159 + T160 — added `RsaHashAlg::Sha224` + wired MGF1 SHA-224. RSA **PKCS#1 v1.5 sign** is now migrated (I139):
 `SIGN_PKCSV15_FUNC_TC002` emits `from_nd(n, d).sign(Pkcs1v15Sign, MD(msg)) == sign`
 (Emitted 30 → 38, +8). PKCS#1 v1.5 signing is deterministic, so no nonce hook is
 needed — but the C vectors publish only `(n, d)` (no CRT params), so a test-only
@@ -125,9 +125,14 @@ salt) == sign` (new `kat-nonce`-gated `RsaPrivateKey::sign_pss_with_salt`
 backed by `pss::pss_sign_pad_with_salt_bytes_alg`). Emitted 66 → 72 (SHA-256/
 384/512). `SIGN_PSS_FUNC_TC002` (random salt of a given length — C only
 checks sign succeeds, no byte-compare) and `TC003` (saltLen 0/-1/-2 error
-paths) stay API-surface. The 4 `unsupported` are PSS-SHA-224 (2 verify + 2
-sign — no `RsaHashAlg::Sha224`). **All deterministic RSA sign/verify/
-encrypt/decrypt families are now migrated.**
+paths) stay API-surface. **I159 + T160 closed the 4 PSS-SHA-224 unsupported
+rows**: I159 added `RsaHashAlg::Sha224` + wired MGF1 / `pss::hash_with` /
+OAEP `l_hash` to SHA-224; T160 opened the `md_to_pss_alg` SHA-224 mapping
+in `xtask/src/rsa.rs` so the 2 verify + 2 sign rows now byte-exact migrate
+through the same `verify_pss` / `sign_pss_with_salt` paths as SHA-256/384/
+512. Emitted 72 → 76, unsupported 4 → 0. **All deterministic RSA sign/
+verify/encrypt/decrypt families across SHA-1/224/256/384/512 are now
+migrated.**
 
 BigNum (T142) migrates the deterministic `*_FUNC_TC*` arithmetic families
 from `test_suite_sdv_bn.data` against `hitls_bignum::BigNum`: `RSHIFT` (101,
