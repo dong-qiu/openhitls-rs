@@ -31,6 +31,10 @@ fn l_hash(alg: RsaHashAlg) -> Result<Vec<u8>, CryptoError> {
                 ))
             }
         }
+        RsaHashAlg::Sha224 => {
+            let mut hasher = crate::sha2::Sha224::new();
+            Ok(hasher.finish()?.to_vec())
+        }
         RsaHashAlg::Sha256 => {
             let mut hasher = crate::sha2::Sha256::new();
             Ok(hasher.finish()?.to_vec())

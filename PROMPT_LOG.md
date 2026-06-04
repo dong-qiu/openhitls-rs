@@ -10439,3 +10439,59 @@ remaining API-surface rows are header rows + EAL ctx CRUD with
 no Rust counterpart.
 
 Recorded as DEV_LOG Phase T159.
+
+## I159 — RSA PSS SHA-224 支持 (2026-06-04)
+
+> 继续走 I159
+
+I159 关闭 RSA-PSS 缺 SHA-224 变体的 Structural Gap：补齐
+`RsaHashAlg` 枚举 + 全部 4 处穷尽 match 派发点，让公开 API
+`sign_pss(digest, RsaHashAlg::Sha224)` /
+`verify_pss(digest, sig, RsaHashAlg::Sha224)` 走通。
+
+改动点：
+
+  crates/hitls-crypto/src/rsa/mod.rs
+    - pub enum RsaHashAlg 新增 Sha224 变体（紧跟 Sha1，按摘要长度递增）
+    - mgf1_with_hash 的 h_len 表 + 每轮哈希派发各新增 Sha224 分支
+    - import 列表新增 Sha224
+    - 新增 lib 测试 test_rsa_pss_sign_verify_sha224：
+        2048-bit 密钥 + SHA-224 摘要 sign→verify 回路
+        反例 1：SHA-256 摘要在 Sha224 模式下被 EMSA-PSS
+                前置长度检查拒掉 → Err
+        反例 2：篡改 d224[0] → Ok(false)（结构 OK 但内容不匹配）
+
+  crates/hitls-crypto/src/rsa/pss.rs
+    - h_len const fn 新增 Sha224 => 28
+    - hash_with 派发新增 Sha224 分支，调 crate::sha2::Sha224
+    - 模块顶端注释表更新（"SHA-256/384/512" → "SHA-224/256/384/512"）
+
+  crates/hitls-crypto/src/rsa/oaep.rs
+    - l_hash 新增 Sha224 分支（PSS 用不到，但 OAEP 与 PSS
+      共用 RsaHashAlg；不补则今后任何 OAEP-SHA-224 路径会
+      编译失败 —— 一并补齐避免留坑）
+
+验证：
+
+  cargo test -p hitls-crypto --features rsa,sha2
+    test_rsa_pss_sign_verify_sha224: 1/0
+  cargo test -p hitls-crypto --features rsa,sha2 rsa: 65/0
+  cargo test -p hitls-crypto --all-features: 4485/0
+    （前 4484 + 1 新；无回归）
+  cargo fmt --all -- --check: clean
+  RUSTFLAGS="-D warnings" cargo clippy -p hitls-crypto
+    --all-features --all-targets: clean
+
+接口兼容性：
+
+  RsaHashAlg 未标 #[non_exhaustive]，严格来说新增变体对外部
+  下游算 minor breaking。仓内已全部补 Sha224 分支；外部下游
+  目前没有，实际无影响。后续可考虑给 RsaHashAlg 加
+  #[non_exhaustive]，把今后新增变体永远归为 minor。
+
+迁移 tally：本阶段仅产品代码落地，未触迁移侧统计。4 行 SDV
+RSA_{SIGN,VERIFY}_PSS_FUNC_TC003 的落地由紧跟其后的 T 阶段
+（xtask cipher.rs 拆掉 SHA-224 拒绝分支）完成，届时 RSA 列
+72/108/0/4/170 → 76/108/0/0/170，Total → 3193/3759/240/7/6480。
+
+Recorded as DEV_LOG Phase I159.
