@@ -27,6 +27,13 @@ use crate::parser::{format_byte_slice, TestCase};
 //   * CHECK_PRVKEY_FUNC_TC001 — derive a single user key, assert sign +
 //     verify round-trip succeeds with a sample message (validates that the
 //     derived private key is functional).
+//   * KEYEX_API_TC001 (added in T159) — round-trip GB/T 38635 §4.4 key
+//     agreement: both sides call `Sm9MasterKey::compute_share_key` and
+//     assert SK_A == SK_B, plus 63-byte (`SK_Long`) and 15-byte (`SK_Short`)
+//     klen variants per the C SDV. The Rust API was added in I158.
+//     KEYEX_API_TC002 stays API-surface — it drills NULL-pointer rejection
+//     on the EAL `ComputeShareKey` wrapper, which Rust's borrow checker
+//     forbids at compile time, so there's no runtime check to migrate.
 //
 // Header rows (where every arg is a bare identifier rather than a quoted
 // hex literal) are detected by `args.first().and_then(|a| a.as_hex())`
@@ -368,6 +375,81 @@ fn emit_check_prvkey(body: &mut String, stats: &mut EmitStats, case: &TestCase) 
     stats.emitted += 1;
 }
 
+/// KEYEX_API_TC001 row: `(masterKey, userIdA, userIdB)`. GB/T 38635 §4.4
+/// key agreement round-trip: derive both user keys, run
+/// `Sm9MasterKey::compute_share_key` from each side, assert the shared
+/// secrets agree at the default 32-byte klen plus the SDV-mandated
+/// `SK_Long` (63 bytes — crosses an SM3 block boundary) and `SK_Short`
+/// (15 bytes — tail-only path) klen variants.
+fn emit_keyex_api(body: &mut String, stats: &mut EmitStats, case: &TestCase) {
+    let (Some(master_key), Some(user_a), Some(user_b)) = (
+        case.args.first().and_then(|a| a.as_hex()),
+        case.args.get(1).and_then(|a| a.as_hex()),
+        case.args.get(2).and_then(|a| a.as_hex()),
+    ) else {
+        stats.skipped_api += 1;
+        return;
+    };
+    write_doc(body, case, "SM9 key exchange round-trip (GB/T 38635 §4.4)");
+    writeln!(body, "#[test]").unwrap();
+    writeln!(body, "#[allow(deprecated)]").unwrap();
+    writeln!(body, "fn tc_line{}_sm9_keyex_roundtrip() {{", case.line).unwrap();
+    writeln!(
+        body,
+        "    let master_key: &[u8] = {};",
+        format_byte_slice(master_key)
+    )
+    .unwrap();
+    writeln!(
+        body,
+        "    let user_a: &[u8] = {};",
+        format_byte_slice(user_a)
+    )
+    .unwrap();
+    writeln!(
+        body,
+        "    let user_b: &[u8] = {};",
+        format_byte_slice(user_b)
+    )
+    .unwrap();
+    writeln!(
+        body,
+        "    let master = Sm9MasterKey::from_master_secret(Sm9KeyType::Encrypt, master_key).unwrap();"
+    )
+    .unwrap();
+    writeln!(
+        body,
+        "    let key_a = master.extract_user_key(user_a).unwrap();"
+    )
+    .unwrap();
+    writeln!(
+        body,
+        "    let key_b = master.extract_user_key(user_b).unwrap();"
+    )
+    .unwrap();
+    // Default klen — `SM9_SHARED_KEY_LEN` in the C SDV is 32 (one SM3 block).
+    writeln!(body, "    for klen in [32usize, 63, 15] {{").unwrap();
+    writeln!(
+        body,
+        "        let sk_a = master.compute_share_key(&key_a, &key_b, klen).unwrap();"
+    )
+    .unwrap();
+    writeln!(
+        body,
+        "        let sk_b = master.compute_share_key(&key_b, &key_a, klen).unwrap();"
+    )
+    .unwrap();
+    writeln!(body, "        assert_eq!(sk_a.len(), klen);").unwrap();
+    writeln!(
+        body,
+        "        assert_eq!(sk_a, sk_b, \"SK_A and SK_B must agree at klen={{klen}}\");"
+    )
+    .unwrap();
+    writeln!(body, "    }}").unwrap();
+    writeln!(body, "}}\n").unwrap();
+    stats.emitted += 1;
+}
+
 pub fn emit_sm9_kat(cases: &[TestCase]) -> (String, EmitStats) {
     let mut body = String::new();
     let mut stats = EmitStats::default();
@@ -396,10 +478,14 @@ pub fn emit_sm9_kat(cases: &[TestCase]) -> (String, EmitStats) {
             emit_check_keypair(&mut body, &mut stats, case);
         } else if name.contains("CHECK_PRVKEY_FUNC_TC001") {
             emit_check_prvkey(&mut body, &mut stats, case);
+        } else if name.contains("KEYEX_API_TC001") {
+            emit_keyex_api(&mut body, &mut stats, case);
         } else {
-            // Other API_TC + KEYEX_API (Rust has no SM9 key exchange) +
-            // BUFFER_SIZE / NULL_PARAM / FREE / DUP / CMP / GET_* / SET_*
-            // / MULTI_OP — all EAL ctx CRUD with no Rust counterpart.
+            // Other API_TC + KEYEX_API_TC002 (NULL-param rejection — Rust's
+            // borrow checker forbids NULL refs at compile time, no runtime
+            // analog to migrate) + BUFFER_SIZE / NULL_PARAM / FREE / DUP /
+            // CMP / GET_* / SET_* / MULTI_OP — all EAL ctx CRUD with no
+            // Rust counterpart.
             stats.skipped_api += 1;
         }
     }
