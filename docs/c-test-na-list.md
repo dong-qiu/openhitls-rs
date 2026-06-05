@@ -74,7 +74,7 @@ Counts are the `Generation summary` footer of each generated file
 | ChaCha20-Poly1305 | 34 | 21 | 0 | 0 | 38 |
 | SipHash | 4 | 37 | 0 | 0 | 41 |
 | CBC-MAC (SM4) | 4 | 25 | 0 | 0 | 29 |
-| FrodoKEM | 8 | 90 | 0 | 5 | 103 |
+| FrodoKEM | 13 | 90 | 0 | 0 | 103 |
 | McEliece | 1 | 13 | 0 | 0 | 14 |
 | AES-CCM | 36 | 66 | 0 | 0 | 84 |
 | AES-KW | 24 | 18 | 0 | 0 | 42 |
@@ -82,7 +82,7 @@ Counts are the `Generation summary` footer of each generated file
 | SLH-DSA | 317 | 32 | 0 | 0 | 349 |
 | XMSS | 84 | 4 | 0 | 0 | 88 |
 | SM9 | 8 | 30 | 0 | 0 | 38 |
-| **Total** | **3194** | **3772** | **240** | **7** | **6494** |
+| **Total** | **3199** | **3772** | **240** | **2** | **6494** |
 
 RSA migrates the signature **verify** families from
 `test_suite_sdv_eal_rsa_sign_verify.data`: `VERIFY_PKCSV15_FUNC_TC001`
