@@ -53,7 +53,7 @@ Counts are the `Generation summary` footer of each generated file
 | Curve25519 | 19 | 115 | 36 | 0 | 170 |
 | DSA | 1200 | 141 | 26 | 0 | 767 |
 | DH | 47 | 45 | 88 | 0 | 180 |
-| SM4 | 37 | 237 | 0 | 9 | 283 |
+| SM4 | 39 | 237 | 0 | 7 | 283 |
 | SM2 | 16 | 124 | 0 | 0 | 140 |
 | ML-DSA | 105 | 731 | 3 | 0 | 779 |
 | ML-KEM | 150 | 196 | 81 | 0 | 427 |
@@ -82,7 +82,7 @@ Counts are the `Generation summary` footer of each generated file
 | SLH-DSA | 317 | 32 | 0 | 0 | 349 |
 | XMSS | 84 | 4 | 0 | 0 | 88 |
 | SM9 | 8 | 30 | 0 | 0 | 38 |
-| **Total** | **3199** | **3772** | **240** | **2** | **6494** |
+| **Total** | **3199** | **3772** | **240** | **7** | **6494** |
 
 RSA migrates the signature **verify** families from
 `test_suite_sdv_eal_rsa_sign_verify.data`: `VERIFY_PKCSV15_FUNC_TC001`

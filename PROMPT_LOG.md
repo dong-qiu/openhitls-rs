@@ -10870,3 +10870,81 @@ na-list：
   两者都属 "独立测试数据" 工作，与 C SDV 迁移无关。
 
 Recorded as DEV_LOG Phase T162.
+
+## R21 — Phase A 收官 retrospective + na-list 账目修正 (2026-06-05)
+
+> 等 #235 合并后，继续1
+
+T162 是 Phase A C→Rust SDV 迁移的天然收官点。R21 做两件事：
+
+1. 在 docs/c-test-migration-plan.md 末尾追加 §12 "Phase A
+   Retrospective"，系统沉淀本轮 T111 → T162 的执行过程
+   + meta-lesson
+2. 修复 docs/c-test-na-list.md 两处历史账目不一致
+
+§12 Retrospective 主要内容（中文 ~150 行）：
+
+  §12.1 Phase A 范围扩大约 4×（原计划 9 算法 1.5 周 →
+        实际 35 算法 ~4 周）
+  §12.2 工具链最终样貌（xtask/src/ 24 个 emitter 模块）
+  §12.3 27 个 I-phase 飞轮（T 跑迁移 → 发现差异 → I 修复
+        → T 重跑 byte-exact 通过）；包括三次 reference-interop
+        修复（I145 FrodoKEM、I157 SM4-XTS、I160 McEliece）
+  §12.4 三次 na-list 假设错误的 meta-lesson + 后续处理
+        unsupported 行的 3-step 检查法：
+          1. grep params.rs 看变体配置
+          2. 跑 self round-trip 测试
+          3. 看 xtask emitter 映射
+        3 项任一为否，工作量数量级差异巨大
+        （小时 vs 天 vs 分钟）
+  §12.5 残余 7 条 unsupported 归类（全部 SM4 上游数据限制）
+  §12.6 工具链 + 测试规模度量；"为何 49% vs 计划 95%" 解释
+  §12.7 Phase B–F 当前状态 + Phase A 留给后续的两条
+        基础设施（xtask emitter 模板库 + na-list long-tail
+        归档工具）
+
+na-list 账目修正：
+
+  SM4 per-row 表 37/237/0/9/283 → 39/237/0/7/283
+    （I157 narrative 早就把 SM4-XTS 2 行从 unsupported 转
+     emitted；per-row 表当时没跟上 —— 现在补齐）
+
+  Total unsupported 2 → 7
+    （T162 我错把 FrodoKEM 关掉的 5 行从 Total 减掉；
+     FrodoKEM 5 行原本就不在 Total 里，Total 一直只记 SM4
+     HCTR+GCM-decrypt 这 7 条；T162 是 over-decrement，
+     现在校正回 7）
+
+  校正后 per-row 表 unsupported 列加总（SM4 7 + FrodoKEM 0
+  + McEliece 0 + 其他 0 = 7）与 Total 行 unsupported 数字
+  （7）完全对齐。
+
+作用域：
+
+  docs/c-test-migration-plan.md：+150 行中文 §12（追加，
+    不动 §1–§11）
+  docs/c-test-na-list.md：4 处小数字修正
+  零代码改、零测试改、零 API surface 变化
+
+验证：
+
+  仅 docs。
+  cargo test -p hitls-crypto --all-features: 4495/0（无变化）
+  cargo fmt --all --check + RUSTFLAGS="-D warnings"
+    cargo clippy --workspace --all-features --all-targets:
+    clean（pre-existing 状态保持）
+
+迁移 tally (post-R21)：
+
+  All algos (35 rows): 3199 / 3772 / 240 / 7 / 6494
+  （修复 SM4 per-row 后，每列 per-row 加总现在与 Total 行
+   严格一致）
+
+后续影响：
+
+  Phase B/C/D/E/F 推进时可引用：
+    §12.4 na-list 假设错误的 3-step 检查法
+    §12.3 迁移→修 bug 飞轮模型
+    §12.5 残余归类边界
+
+Recorded as DEV_LOG Phase R21.
