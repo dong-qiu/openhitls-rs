@@ -29,7 +29,18 @@ fn frodo_param(symbol: &str) -> Option<&'static str> {
         "CRYPT_KEM_TYPE_FRODOKEM_640_AES" => Some("FrodoKem640Aes"),
         "CRYPT_KEM_TYPE_FRODOKEM_976_AES" => Some("FrodoKem976Aes"),
         "CRYPT_KEM_TYPE_FRODOKEM_1344_AES" => Some("FrodoKem1344Aes"),
-        _ => None, // eFrodoKEM variants: no fixed-vector reference rows here
+        // eFrodoKEM (openHiTLS-specific extension, salt_len=0 + halved
+        // seed_se_len). I162 surfaces these to the emitter — the Rust
+        // params + encapsulate / decapsulate paths already handle
+        // `salt_len = 0` cleanly (the salt buffer just zero-allocs at
+        // length 0; SHAKE absorbs no salt bytes).
+        "CRYPT_KEM_TYPE_eFRODOKEM_640_SHAKE" => Some("EFrodoKem640Shake"),
+        "CRYPT_KEM_TYPE_eFRODOKEM_976_SHAKE" => Some("EFrodoKem976Shake"),
+        "CRYPT_KEM_TYPE_eFRODOKEM_1344_SHAKE" => Some("EFrodoKem1344Shake"),
+        "CRYPT_KEM_TYPE_eFRODOKEM_640_AES" => Some("EFrodoKem640Aes"),
+        "CRYPT_KEM_TYPE_eFRODOKEM_976_AES" => Some("EFrodoKem976Aes"),
+        "CRYPT_KEM_TYPE_eFRODOKEM_1344_AES" => Some("EFrodoKem1344Aes"),
+        _ => None,
     }
 }
 

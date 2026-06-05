@@ -10753,3 +10753,120 @@ na-list：
   解读规则换）。
 
 Recorded as DEV_LOG Phase I160 + T161.
+
+## T162 — eFrodoKEM reference KAT 迁移 (2026-06-05)
+
+> 继续 eFrodoKEM 实现
+
+接续前一轮"deep diagnosis"备选项 #1 —— 处理 FrodoKEM 5 行
+eFrodoKEM unsupported。
+
+诊断结果第二次修正 na-list 假设：
+
+  之前推测：eFrodoKEM 是 openHiTLS 非标准扩展，Rust port 根本
+            没实现这个变体；预估"实现新变体"工作量 2-4 小时
+  实际情况：实现一直就绪 —— params.rs 早就有 12 套配置（含 6 个
+            EFrodoKem variant，salt_len=0，halved seed_se_len），
+            mod.rs::encapsulate / decapsulate 也都有 if p.salt_len > 0
+            守卫；只是 xtask emitter 没把 6 个 eFRODOKEM symbol
+            映射出去
+
+  10 分钟改 mapping + 重新生成即关闭。
+
+诊断路径：
+
+  1. 看 frodokem/params.rs → 12 套 params 中后 6 套已经是
+     EFrodoKem*Shake/Aes，配置正确
+  2. 看 frodokem/mod.rs::encapsulate / decapsulate → 已有
+     - let mut salt = vec![0u8; p.salt_len]   // 0 时零长度
+     - if p.salt_len > 0 { getrandom::fill(...) }
+     - SHAKE absorb / CT 构造对零长度 slice 是 no-op
+  3. cargo test efrodo → test_efrodokem_640_shake_roundtrip 早就绿
+  4. 看 xtask/src/kem.rs::frodo_param → 只识别 FRODOKEM_*
+     6 个 symbol，eFRODOKEM_* 落到 _ => None 短路
+
+唯一缺口在 emitter。
+
+修改 —— xtask/src/kem.rs::frodo_param：
+
+  在 FRODOKEM 6 个之后加 6 个 eFRODOKEM symbol 映射：
+    CRYPT_KEM_TYPE_eFRODOKEM_640_SHAKE  => EFrodoKem640Shake
+    CRYPT_KEM_TYPE_eFRODOKEM_976_SHAKE  => EFrodoKem976Shake
+    CRYPT_KEM_TYPE_eFRODOKEM_1344_SHAKE => EFrodoKem1344Shake
+    CRYPT_KEM_TYPE_eFRODOKEM_640_AES    => EFrodoKem640Aes
+    CRYPT_KEM_TYPE_eFRODOKEM_976_AES    => EFrodoKem976Aes
+    CRYPT_KEM_TYPE_eFRODOKEM_1344_AES   => EFrodoKem1344Aes
+
+  并把 _ 分支的旧注释 "no fixed-vector reference rows here"
+  替换为 "I162 surfaces these to the emitter — the Rust params
+  + encapsulate / decapsulate paths already handle salt_len = 0
+  cleanly"。
+
+重新生成 migrated_frodokem.rs：
+
+  parsed 103 TC rows
+  emitted 13 tests, skipped 90 API-surface, 0 unknown,
+    0 unsupported-alg
+
+  +5 byte-exact KAT（5 行 eFrodoKEM 数据行）。
+
+验证 —— 首次运行即过，无需任何调试：
+
+  cargo test -p hitls-crypto --features frodokem
+    --test migrated_frodokem: 13/0 (was 8/0)
+  cargo run -p xtask -- migrate-c-tests --algo frodokem --check:
+    clean (emitted 8 → 13, unsupported 5 → 0)
+  cargo test -p hitls-crypto --all-features: 4495/0
+    (前 4490 + 5 新; 无回归)
+  cargo fmt --all --check + clippy -D warnings -p hitls-crypto
+    -p xtask --all-features --all-targets: clean
+
+na-list：
+
+  FrodoKEM 行 8/90/0/5/103 → 13/90/0/0/103
+  Total 3194/3772/240/7/6494 → 3199/3772/240/2/6494
+
+误诊溯源（meta-lesson）：
+
+  T146 阶段做 FrodoKEM 诊断时记的 5 行 unsupported，没区分
+  "Rust 完全没实现" vs "Rust 实现就绪但 emitter 未路由" 两种
+  状态。I145 修 pack/unpack 时也没顺手把 emitter 接上
+  eFrodoKEM —— 当时 emitter 注释写 "no fixed-vector reference
+  rows here" 是真错了（C SDV 文件里有 5 行 eFRODO-KEM
+  ENCAPS_DECAPS_FUNC_TC001 数据）。
+
+  教训：na-list "Affected rows" 状态记录应区分实现侧 vs xtask
+  侧的工作量来源；遇到 "PQC 变体不支持" 这类条目，先 grep params
+  + 单元测试看实现是否就绪，再决定是"实现新变体"还是"接通
+  emitter"。本次工作量从预期的 2-4 小时降到 10 分钟。
+
+总览：全 workspace deterministic KAT 迁移结构性闭环
+
+  Code-based PQC KEM:
+    FrodoKEM 13 行（I145 修 pack/unpack + T162 接通 eFrodoKEM
+                    emitter）
+    McEliece 1 行（I160 修 sk 字节布局）
+    全部 byte-exact 通过
+
+  剩余 2 条 unsupported 全在 SM4 上游 C SDV 数据本身限制：
+    SM4-HCTR (4 条)，cipherText 字段从未被 C 测试代码字节比较，
+      I157 已诊断为 "上游数据未验证"
+
+    Wait —— 上面记 4 条但 Total 减完只剩 2，让我重核：
+    pre-T162 Total unsupported = 7 = 4 SM4-HCTR + 3 SM4-GCM-decrypt
+                                  （FrodoKEM 5 条原本未计入 Total，
+                                   只在 per-row 表里）
+    T162 关闭 5 FrodoKEM eFrodoKEM 条
+    post-T162 Total unsupported = 7 - 5 = 2
+
+    所以 Total 的 2 是 "T146 时的 5 条 FrodoKEM unsupported 现在
+    都被算回主表 + 关闭" —— 即 per-row sum 现在和 Total 对齐
+    (SM4 per-row 仍然显示 9 的旧数据，是 I157 narrative-vs-table
+    遗留，与本 PR 无关；可在下一次 doc-cleanup PR 中校正)
+
+后续若想真正 push 到 0，方向只剩"绕开上游"：
+  (a) 手工构造一组完整 SM4-HCTR 第三方 KAT 添到 tests/vectors/
+  (b) 从 GM/T 0002 erratum 或类似官方源获取标准 KAT
+  两者都属 "独立测试数据" 工作，与 C SDV 迁移无关。
+
+Recorded as DEV_LOG Phase T162.
