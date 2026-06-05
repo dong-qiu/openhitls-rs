@@ -57,6 +57,72 @@ pub enum RsaHashAlg {
     Sha512,
 }
 
+impl RsaHashAlg {
+    /// Hash output length in bytes. Const so `pss::h_len` callers can keep
+    /// their `const fn` colour without giving up the centralised match.
+    pub const fn output_len(self) -> usize {
+        match self {
+            Self::Sha1 => 20,
+            Self::Sha224 => 28,
+            Self::Sha256 => 32,
+            Self::Sha384 => 48,
+            Self::Sha512 => 64,
+        }
+    }
+
+    /// One-shot hash of `data` under `self`.
+    ///
+    /// This is the **single** runtime dispatch over `RsaHashAlg`; the four
+    /// previous match sites (`mgf1_with_hash` per-iteration loop,
+    /// `pss::hash_with`, `oaep::l_hash`, and `mgf1`'s h_len table — the
+    /// last collapses to `output_len()`) all delegate here. Adding a new
+    /// variant therefore needs to touch only `output_len` + `hash` in this
+    /// file, not four scattered match arms.
+    ///
+    /// SHA-1 is gated on the `sha1` feature: callers without it (PSS in
+    /// the post-T95 code paths never picks SHA-1) get `InvalidArg` rather
+    /// than a compile error, matching the prior dispatch behaviour.
+    pub(crate) fn hash(self, data: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        match self {
+            Self::Sha1 => {
+                #[cfg(feature = "sha1")]
+                {
+                    let mut h = crate::sha1::Sha1::new();
+                    h.update(data)?;
+                    Ok(h.finish()?.to_vec())
+                }
+                #[cfg(not(feature = "sha1"))]
+                {
+                    let _ = data;
+                    Err(CryptoError::InvalidArg(
+                        "SHA-1 RSA padding requires the sha1 feature",
+                    ))
+                }
+            }
+            Self::Sha224 => {
+                let mut h = crate::sha2::Sha224::new();
+                h.update(data)?;
+                Ok(h.finish()?.to_vec())
+            }
+            Self::Sha256 => {
+                let mut h = crate::sha2::Sha256::new();
+                h.update(data)?;
+                Ok(h.finish()?.to_vec())
+            }
+            Self::Sha384 => {
+                let mut h = crate::sha2::Sha384::new();
+                h.update(data)?;
+                Ok(h.finish()?.to_vec())
+            }
+            Self::Sha512 => {
+                let mut h = crate::sha2::Sha512::new();
+                h.update(data)?;
+                Ok(h.finish()?.to_vec())
+            }
+        }
+    }
+}
+
 /// An RSA public key.
 #[derive(Clone)]
 pub struct RsaPublicKey {
@@ -625,62 +691,23 @@ pub(crate) fn mgf1_with_hash(
     mask_len: usize,
     alg: RsaHashAlg,
 ) -> Result<Vec<u8>, CryptoError> {
-    use crate::sha2::{Sha224, Sha256, Sha384, Sha512};
-
-    // SHA-1 MGF1 is only available with the `sha1` feature (used by OAEP-SHA-1
-    // for interop; PSS never uses SHA-1). h_len is harmless to compute even
-    // without the feature — the per-iteration match below fails closed.
-    let h_len = match alg {
-        RsaHashAlg::Sha1 => 20,
-        RsaHashAlg::Sha224 => 28,
-        RsaHashAlg::Sha256 => 32,
-        RsaHashAlg::Sha384 => 48,
-        RsaHashAlg::Sha512 => 64,
-    };
+    // h_len and the per-iteration hash both delegate to `RsaHashAlg`'s
+    // inherent methods — the four previous dispatch sites collapse here.
+    // SHA-1 MGF1 is only available with the `sha1` feature (used by
+    // OAEP-SHA-1 for interop; PSS never uses SHA-1); without it `hash()`
+    // returns `InvalidArg`.
+    let h_len = alg.output_len();
     let iterations = mask_len.div_ceil(h_len);
     let mut t = Vec::with_capacity(iterations * h_len);
 
+    let mut input = Vec::with_capacity(seed.len() + 4);
     for counter in 0..iterations {
         let c = (counter as u32).to_be_bytes();
-        match alg {
-            RsaHashAlg::Sha1 => {
-                #[cfg(feature = "sha1")]
-                {
-                    let mut hasher = crate::sha1::Sha1::new();
-                    hasher.update(seed)?;
-                    hasher.update(&c)?;
-                    t.extend_from_slice(&hasher.finish()?);
-                }
-                #[cfg(not(feature = "sha1"))]
-                return Err(CryptoError::InvalidArg(
-                    "SHA-1 MGF1 requires the sha1 feature",
-                ));
-            }
-            RsaHashAlg::Sha224 => {
-                let mut hasher = Sha224::new();
-                hasher.update(seed)?;
-                hasher.update(&c)?;
-                t.extend_from_slice(&hasher.finish()?);
-            }
-            RsaHashAlg::Sha256 => {
-                let mut hasher = Sha256::new();
-                hasher.update(seed)?;
-                hasher.update(&c)?;
-                t.extend_from_slice(&hasher.finish()?);
-            }
-            RsaHashAlg::Sha384 => {
-                let mut hasher = Sha384::new();
-                hasher.update(seed)?;
-                hasher.update(&c)?;
-                t.extend_from_slice(&hasher.finish()?);
-            }
-            RsaHashAlg::Sha512 => {
-                let mut hasher = Sha512::new();
-                hasher.update(seed)?;
-                hasher.update(&c)?;
-                t.extend_from_slice(&hasher.finish()?);
-            }
-        }
+        input.clear();
+        input.extend_from_slice(seed);
+        input.extend_from_slice(&c);
+        let digest = alg.hash(&input)?;
+        t.extend_from_slice(&digest);
     }
 
     t.truncate(mask_len);

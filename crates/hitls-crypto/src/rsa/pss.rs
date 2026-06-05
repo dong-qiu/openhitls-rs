@@ -10,42 +10,22 @@ use hitls_types::CryptoError;
 
 use super::{mgf1_with_hash, RsaHashAlg};
 
-/// Hash output length for the given algorithm (bytes).
+/// Hash output length for the given algorithm (bytes). Const wrapper
+/// over [`RsaHashAlg::output_len`] so callers can stay `const fn`.
 pub(crate) const fn h_len(alg: RsaHashAlg) -> usize {
-    match alg {
-        RsaHashAlg::Sha1 => 20,
-        RsaHashAlg::Sha224 => 28,
-        RsaHashAlg::Sha256 => 32,
-        RsaHashAlg::Sha384 => 48,
-        RsaHashAlg::Sha512 => 64,
-    }
+    alg.output_len()
 }
 
 /// Hash a buffer with the given algorithm. Returns `Vec<u8>` of `h_len(alg)`.
+///
+/// PSS refuses SHA-1 by spec (MGF1 SHA-1 is OAEP-only in this crate), so
+/// the SHA-1 arm is short-circuited here even though [`RsaHashAlg::hash`]
+/// would attempt it (and emit `InvalidArg` without the `sha1` feature).
 fn hash_with(alg: RsaHashAlg, data: &[u8]) -> Result<Vec<u8>, CryptoError> {
-    match alg {
-        RsaHashAlg::Sha224 => {
-            let mut h = crate::sha2::Sha224::new();
-            h.update(data)?;
-            Ok(h.finish()?.to_vec())
-        }
-        RsaHashAlg::Sha256 => {
-            let mut h = crate::sha2::Sha256::new();
-            h.update(data)?;
-            Ok(h.finish()?.to_vec())
-        }
-        RsaHashAlg::Sha384 => {
-            let mut h = crate::sha2::Sha384::new();
-            h.update(data)?;
-            Ok(h.finish()?.to_vec())
-        }
-        RsaHashAlg::Sha512 => {
-            let mut h = crate::sha2::Sha512::new();
-            h.update(data)?;
-            Ok(h.finish()?.to_vec())
-        }
-        RsaHashAlg::Sha1 => Err(CryptoError::InvalidArg("SHA-1 not supported in PSS")),
+    if matches!(alg, RsaHashAlg::Sha1) {
+        return Err(CryptoError::InvalidArg("SHA-1 not supported in PSS"));
     }
+    alg.hash(data)
 }
 
 /// EMSA-PSS encoding (RFC 8017 §9.1.1) — SHA-256 wrapper for backward

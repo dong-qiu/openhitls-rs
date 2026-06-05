@@ -10948,3 +10948,98 @@ na-list 账目修正：
     §12.5 残余归类边界
 
 Recorded as DEV_LOG Phase R21.
+
+## R22 — RsaHashAlg 派发收敛到 inherent impl (2026-06-05)
+
+> 等 #236 合并后，继续1
+
+兑现 R20 留的 follow-up：原本 RSA 模块有 4 处
+match RsaHashAlg（mgf1 h_len + per-iteration、pss::h_len、
+pss::hash_with、oaep::l_hash），分散在 3 个文件里。加新 hash
+variant 要同步改 4 处。R22 把 dispatch 收敛到 RsaHashAlg 自身
+2 个 inherent 方法。
+
+新增 impl —— crates/hitls-crypto/src/rsa/mod.rs（紧跟 enum 之后）：
+
+  pub const fn output_len(self) -> usize
+    - const，无错误路径
+    - 单 match：Sha1=20, Sha224=28, Sha256=32, Sha384=48, Sha512=64
+
+  pub(crate) fn hash(self, data: &[u8]) -> Result<Vec<u8>, _>
+    - 单次哈希 dispatch
+    - SHA-1 分支带 #[cfg(feature = "sha1")] 守
+    - 无 sha1 feature 时返回 InvalidArg（保留旧 fail-closed 语义）
+    - pub(crate)：只让 crate 内 padding 模块用，不对外暴露 hash 原语
+
+4 处旧 dispatch 全改成 delegate：
+
+  rsa/mod.rs::mgf1_with_hash
+    h_len 表 5 行 + per-iteration 5 大分支 = 35 行 dispatch
+    → let h_len = alg.output_len(); + 复用
+      Vec::with_capacity(seed.len() + 4) 单次 alg.hash(&input)?
+    共 13 行；mgf1 不是 hot path（RSA-2048 + SHA-256 一次签名
+    约 8 次迭代），一次堆 alloc 性能可忽略
+
+  rsa/pss.rs::h_len
+    9 行 match → 1 行 alg.output_len()
+
+  rsa/pss.rs::hash_with
+    35 行 match（含 SHA-1 反例分支）
+    → 4 行：matches!(alg, Sha1) 短路（PSS 不接受 SHA-1）+
+            alg.hash(data)
+
+  rsa/oaep.rs::l_hash
+    32 行 match → alg.hash(&[])
+    （lHash = Hash("") for empty label per RFC 8017 §7.1）
+
+行数差：
+
+  rsa/mod.rs: -33 / +27  净 -6（含新 75 行 inherent impl）
+  rsa/pss.rs: -30 / +5   净 -25
+  rsa/oaep.rs: -29 / +4  净 -25
+  合计: -92 / +36 = 净 -56 LOC
+
+净减 56 行的同时把"加 hash variant 改 4 处"压成"改 2 处"。
+
+验证 —— 4 处 dispatch 全部 byte-exact 等价：
+
+  cargo test -p hitls-crypto --features rsa,sha1,sha2 rsa: 103/0
+    （PSS 全哈希 + PKCS#1 v1.5 全哈希 + OAEP 全哈希一片绿）
+  cargo test -p hitls-crypto --features rsa,sha1,sha2,kat-nonce
+    --test migrated_rsa: 76/0（含 I159/T160 的 RSA PSS-SHA-224
+                              4 行 byte-exact KAT）
+  cargo test -p hitls-crypto --all-features: 4495/0（无回归）
+  cargo fmt --all --check + RUSTFLAGS="-D warnings"
+    cargo clippy --workspace --all-features --all-targets: clean
+
+作用域：
+
+  纯内部重构，公开 API 完全不变：
+    - RsaHashAlg enum：variant 集不变（仍 5 个 + #[non_exhaustive]）
+    - 公开方法 sign_pss / verify_pss / verify_pss_with_salt /
+      encrypt_oaep / decrypt_oaep 签名不变
+    - feature flag 集不变
+  新增 2 个 pub(crate) inherent 方法（仅 crate 内 padding 模块用）
+  零行为变化（byte-level 输出与旧版本完全相同，4495 个测试中的
+  RSA 子集已验证）
+  外部下游零影响
+
+后续：
+
+  R20 加 #[non_exhaustive] + R22 加单点 dispatch 一起把"加
+  hash variant"的成本从"跨 3 文件改 4 处"压到"同文件改 2 处"：
+    1. RsaHashAlg enum 加 variant
+    2. output_len match 加分支
+    3. hash match 加分支（必要时加 feature gate）
+
+  3 处改动全在 rsa/mod.rs 同一文件相邻位置；其他 4 处旧
+  dispatch 现在已经不存在（全是 delegate）。
+
+  未来候选：SHA-3-{256,384,512} for RSA-PSS PKCS#1 v2.2，
+            SM3 for RSA-PSS-with-SM3 国密互通
+
+迁移 tally (post-R22)：
+
+  All algos (35 rows): 3199 / 3772 / 240 / 7 / 6494（不变；纯重构）
+
+Recorded as DEV_LOG Phase R22.
