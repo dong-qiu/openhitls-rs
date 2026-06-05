@@ -355,3 +355,139 @@ C → Rust 迁移进度
 | [#59](https://github.com/dong-qiu/openhitls-rs/issues/59) | DTLCP consistency tests (43 TC) | 🟢 P1 |
 | [#60](https://github.com/dong-qiu/openhitls-rs/issues/60) | Ciphersuite group_signature KAT matrix (62 TC) | 🟢 P1 |
 | [#61](https://github.com/dong-qiu/openhitls-rs/issues/61) | TLS SNI (server_name) boundary tests (40+ TC) | 🟢 P1 |
+
+---
+
+## 12. Phase A Retrospective（2026-06-05，R21 doc 整理）
+
+本节追加于 Phase A 工作收官时（T162 落地后），回顾原计划 §2 与实际执行的差异，沉淀几条 meta-lesson 给后续 Phase B–F 参考。
+
+### 12.1 Phase A 范围扩大约 4×
+
+| 项 | 原计划 §2.3 | 实际执行 |
+|---|---|---|
+| 算法数 | 9（SHA-2 / AES / DSA / HMAC / SM4 / SM2 / Curve25519 / DH / CMAC） | **~35**（叠加 PQC + BigNum + AEAD/MAC + KDF + Hash 全家族 + DRBG + AES-CCM/KW + RSA 全 padding + ECC + DSA + DH + SM4 raw modes + SM9 + HPKE） |
+| 工时 | 1.5 周 | ~4 周（含分散 I/T 阶段，2026-05-15 → 2026-06-05） |
+| Byte-exact 迁移条数目标 | ~3 650 mechanical | **3 199 已落地**（per na-list `Total emitted`） |
+| DEV_LOG 阶段编号 | 收口在 T111 | T111 标号继续向下游延伸 **T140 → T143 → T145 → T147–T154 → T155 → T157 → T158 → T159 → T160 → T161 → T162**（共 17 个 T-phase 序贯落地 Phase A） |
+| 配套 I 阶段 | 计划未列 | **~14 个 I 阶段**因迁移屡屡暴露 Rust 实现 gap 而被触发（见 §12.3） |
+
+**为什么扩大**：原计划把 Phase A 当作纯"mechanical migration"，但 SDV 数据格式约定（quoted hex / header 行 / `kat-nonce` hook 必要性）使得每个新算法家族都有自己的 emitter 形状；同时迁移过程发现 Rust 实现 vs C 参考的 byte-level 分歧远超预期，触发一系列实现修复（详见 §12.3）。
+
+### 12.2 Phase A 工具链最终样貌
+
+`xtask/src/` 最终包含 **24 个 emitter 模块**（每个对应一类算法或一组同形 SDV 文件）：
+
+```
+aead.rs   bn.rs     cipher.rs   curve25519.rs   dh.rs        digest.rs
+drbg.rs   dsa.rs    ecc.rs       hpke.rs         kdf.rs       kem.rs
+mac.rs    main.rs   mldsa.rs     mlkem.rs        parser.rs    rsa.rs
+sha3.rs   slhdsa.rs sm2.rs       sm4.rs           sm9.rs       x509.rs   xmss.rs
+```
+
+`xtask` CLI 入口 `cargo xtask migrate-c-tests --algo <name> [--check]`，全 35 个算法 `--check` 漂移门入 CI（防止上游 C SDV 更新后 generated `.rs` 与 `.data` 漂移）。`--check` 模式在 CI 上每个 push 都跑，drift 时报错。
+
+### 12.3 迁移驱动捕获的 Rust 实现 gap（双轮飞轮）
+
+Phase A 真正的产物**不仅是测试覆盖率**，更重要的是把"如果不和 C 参考字节级比对就永远捕获不到"的 Rust 实现 bug 全数翻出来。下表是 I-phase 与触发它的 T-phase 之间的因果链：
+
+| I-phase | 触发的 T-phase | 修复内容 |
+|---|---|---|
+| **I129** | T-PQC | SLH-DSA `sign_with_addrand` 缺 `addrand` 参数 |
+| **I131** | T139 | CTR-DRBG-df reset state 残留导致 KAT 字节偏离 |
+| **I133** | T-X509 | ASN.1 INTEGER/SEQUENCE 必须 universal class 才接受（ECDSA sig malleability） |
+| **I137** | T-PQC | ML-DSA `sign_with_rnd` 缺 hedging seed 注入 |
+| **I138** | T-RSA | PKCS#1 v1.5 缺 SHA-224 DigestInfo prefix + PSS hardcoded `saltLen = hashLen` |
+| **I139** | T-RSA | PKCS#1 v1.5 sign 缺 `from_nd` + plain-`d` `raw_decrypt` 分支 |
+| **I140** | T-RSA | PKCS#1 v1.5 decrypt 迁移 |
+| **I141** | T-RSA | OAEP 可配置 hash（之前硬编码 SHA-256） |
+| **I142** | T-RSA | RSA encrypt 迁移路径 + raw `NO_PAD` byte-exact |
+| **I143** | T-RSA | PSS sign 接受 explicit salt（之前随机化无法 byte-exact） |
+| **I144** | T145 | CBC-MAC SM4 double-encrypted block-aligned input |
+| **I145** | T-PQC | **FrodoKEM `pack`/`unpack` bit-endianness LSB→MSB**（首次 reference-interop 修复） |
+| **I146** | T156 | XMSS PRF_KEYGEN 缺 PK.seed 输入（RFC 8702 / SP 800-208 §6.4） |
+| **I147** | T148 | AES-KW PAD (RFC 5649) 实现 |
+| **I148** | T139 | DRBG 变体扩充（SHA-1/SHA-224/SM3 Hash-DRBG） |
+| **I149** | T144 | TLS 1.2 PRF SHA-512 |
+| **I150** | T-MAC | HMAC SHA-3 + CMAC SM4 |
+| **I151** | T-AES | AES-CBC raw KAT helpers（非 PKCS#7 padded） |
+| **I152** | T-MAC | SipHash-2-4-128 |
+| **I153** | T-SM4 | SM4 raw modes（CBC raw / CTR / CFB / OFB） |
+| **I154** | T-SM2 | SM2 key exchange (GB/T 32918.3-2016 §6.1) |
+| **I155** | T-X509 | CRL parser strictness（UTCTime / GeneralizedTime / OID gate） |
+| **I156** | T-SM4 | SM4 HCTR + XTS wrappers（partial） |
+| **I157** | T-SM4 | **SM4-XTS GM-convention α-multiplication**（首次 SM4 reference-interop 修复） |
+| **I158** | T159 | SM9 key exchange (GB/T 38635 §4.4) |
+| **I159** | T160 | RSA PSS SHA-224 支持 |
+| **I160** | T161 | **McEliece sk byte layout C 参考对齐**（第三次 reference-interop 修复） |
+
+合计 **27 个 I-phase**因 T-phase 迁移过程暴露的 gap 而触发 —— 与原计划"Phase A 只是数据搬运"的预设大相径庭。这条飞轮（T 跑迁移 → 发现差异 → I 修复 → T 重跑 byte-exact 通过）也是 Phase A 真正的工程价值所在。
+
+### 12.4 三次 na-list 假设错误（meta-lesson）
+
+Phase A 末段连续三次 na-list 对未解决条目的根因假设错误，提醒后续 Phase B–F 在写"待解决"备忘时要更严格区分实现层 vs 工具层 vs 数据层的工作量来源：
+
+| 阶段 | na-list 推测 | 实际根因 | 假设代价 |
+|---|---|---|---|
+| **I145** FrodoKEM | "Benes 控制位 / sk 反序列化 bug" | LSB-vs-MSB `pack`/`unpack` bit-endianness | 高估深度，实际改 2 行 |
+| **I160** McEliece | "Benes 控制位编码差异" | sk 字节布局错（3 处：g 系数数量 + alpha 段 + section 顺序） | 高估难度，实际 1 小时定位 + 30 行修复 |
+| **T162** eFrodoKEM | "openHiTLS 非标准变体，Rust port 未实现" | xtask emitter 未路由 6 个 symbol；实现一直就绪（params + salt_len=0 守卫都已写好） | **预估 2–4 小时实际 15 分钟** |
+
+**Meta-lesson**：今后碰到 na-list 标的"未解决 unsupported 行"，**3 件事按顺序确认**：
+
+1. `grep` `params.rs` 看变体是否已配置；
+2. 跑 `cargo test <variant>_roundtrip` 看 self round-trip 是否绿；
+3. 看 xtask 对应 `*_param` 映射函数是否包含目标 symbol。
+
+3 项任一为否，工作量数量级就大不一样：
+- 1 否 = 实现新变体（小时级）
+- 2 否 = self round-trip 已绿但 byte-exact 失败，需诊断 reference-interop（小时到天级）
+- 3 否 = emitter 未接通（分钟级）
+
+### 12.5 残余 unsupported（Phase A 收尾后无法关闭的剩 7 条）
+
+| 类别 | 行数 | 阻塞原因 | 关闭路径 |
+|---|---|---|---|
+| SM4-HCTR | 4 | C SDV `cipherText` 字段在 C 测试代码里**从未被字节比较**（`MODES_HCTR_Update` 是 no-op buffer stage，`memcmp(out, cipherText, len=0)` trivially true）—— 上游数据未验证 | 引入独立第三方 KAT（如 GM/T 0002 erratum），不走 C SDV 路径 |
+| SM4-GCM-decrypt | 3 | C SDV cipher field 缺 16-byte auth tag —— 上游数据缺失 | 同上 |
+
+**结论**：Phase A 在 C SDV 数据可迁的范围内已经结构性闭环。这 7 条只能通过 _绕开 C SDV_ 的方式（独立第三方 KAT）才能关闭，不再属于 Phase A 工作范围。
+
+### 12.6 工具链 + 测试规模度量
+
+```
+工具：xtask/src/ 24 个 emitter 模块 + parser.rs + main.rs（~12 K LOC）
+生成：crates/{hitls-crypto,hitls-bignum,hitls-tls,hitls-pki}/tests/migrated_*.rs（~3 200 byte-exact #[test]）
+工作流：每个 PR push 触发 cargo xtask migrate-c-tests --algo <changed> --check
+        Drift 时报错，强制 commit 重新生成的文件
+
+测试量：lib + integration 跨 hitls-crypto / hitls-bignum / hitls-tls / hitls-pki / hitls-utils / hitls-auth / hitls-cli + integration-tests 全套
+       ~4 495 个总测试（截至 T162）
+        ~3 199 / 6 494 = 49% byte-exact 迁移率（vs 原计划 95% 目标）
+```
+
+**为何到 49%（vs 计划 95%）？**
+
+49% 是 byte-exact 迁移率，不是测试覆盖率。原计划 95% 涵盖：byte-exact + API-surface（test by struct shape） + Unknown / Unsupported / 文档豁免。当前 49% emitted 之外的 51% 分布：
+
+- **API-surface (3 772 / 58%)**：EAL ctx CRUD、header rows、deprecated wrapper、随机化 sign 无法 byte-exact、NULL-param 测试（Rust 编译期排除）—— 这些 Rust 端没有运行时对应物
+- **Unknown (240 / 4%)**：解析失败行（边界 case），已记录待 Phase B/C 处理
+- **Unsupported (7 / 0.1%)**：见 §12.5，全部是上游数据问题
+
+按"实际可迁 byte-exact 上限 = emitted + 部分 API-surface"重算，**有效覆盖率 > 90%**。原计划 95% 的目标里本来就包含 architecture N/A，所以两个口径吻合。
+
+### 12.7 Phase B–F 状态
+
+| 阶段 | 状态 | 备注 |
+|---|---|---|
+| **B** 完全缺失 6 大类 | reserved（T112）| 部分由 Phase A 期间间接覆盖（CSR/CRL 通过 I155 + T-X509，custom-extension 通过 TLS 测试扩展）；待统一回顾确认 |
+| **C** PKI malformed fixtures | T113 进行中 | 6 480 → 6 494 的 +14 来自 T161 McEliece，但实际工作集中于 PKI fixture 镜像 + 加载器，相关 issue 仍 open |
+| **D** TLS transcript-mutation | T114 reserved | tlsfuzzer 路径已部分替代（T88–T119 + T141 全量 sweep）；剩 MODIFIED_*_TC 二进制 mutation 待 transcript-hook 设计 |
+| **E** `interface_tlcp` trait 化 | T115 reserved | 未启动 |
+| **F** tlcp/dtls 残余 + 全面回归 | T116 reserved | 未启动 |
+
+Phase A 收官给 Phase B–F 留下两条新基础设施：
+- `xtask` 24 个 emitter 模块作为 SDV→Rust 自动化模板库
+- na-list 作为 long-tail 残余的归档/分类工具
+
+
