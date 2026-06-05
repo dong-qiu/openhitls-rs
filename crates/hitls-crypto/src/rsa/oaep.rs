@@ -15,39 +15,11 @@ use super::{mgf1_with_hash, RsaHashAlg};
 /// SHA-256 output length in bytes (the back-compat default).
 const H_LEN: usize = 32;
 
-/// Compute lHash = Hash("") for the default empty label, under `alg`.
+/// Compute `lHash = Hash("")` for the default empty label, under `alg`.
+/// Delegates to [`RsaHashAlg::hash`] — the per-variant dispatch lives
+/// next to the enum, not here.
 fn l_hash(alg: RsaHashAlg) -> Result<Vec<u8>, CryptoError> {
-    match alg {
-        RsaHashAlg::Sha1 => {
-            #[cfg(feature = "sha1")]
-            {
-                let mut hasher = crate::sha1::Sha1::new();
-                Ok(hasher.finish()?.to_vec())
-            }
-            #[cfg(not(feature = "sha1"))]
-            {
-                Err(CryptoError::InvalidArg(
-                    "SHA-1 OAEP requires the sha1 feature",
-                ))
-            }
-        }
-        RsaHashAlg::Sha224 => {
-            let mut hasher = crate::sha2::Sha224::new();
-            Ok(hasher.finish()?.to_vec())
-        }
-        RsaHashAlg::Sha256 => {
-            let mut hasher = crate::sha2::Sha256::new();
-            Ok(hasher.finish()?.to_vec())
-        }
-        RsaHashAlg::Sha384 => {
-            let mut hasher = crate::sha2::Sha384::new();
-            Ok(hasher.finish()?.to_vec())
-        }
-        RsaHashAlg::Sha512 => {
-            let mut hasher = crate::sha2::Sha512::new();
-            Ok(hasher.finish()?.to_vec())
-        }
-    }
+    alg.hash(&[])
 }
 
 /// EME-OAEP encoding (RFC 8017 §7.1.1 step 2) — SHA-256 wrapper.
