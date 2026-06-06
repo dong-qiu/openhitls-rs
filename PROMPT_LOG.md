@@ -11960,3 +11960,72 @@ Issue #51 进度: T170 ~10/30 → T171 ~19/30; 剩 crl/pkcs12 → T172/T173.
   CI 用 cargo test 自带 stdout 捕获, 正常通过.
 
 Recorded as DEV_LOG Phase T171.
+
+### T172 — #51 CLI 覆盖第三弹：crl 子命令加 --cafile + DER↔PEM 转换 + 错误路径
+
+> 等 #247 合并后继续 T172（
+
+承接 T170 prime + T171 rand。crl 子命令之前仅 (input, text) → 打印摘要，
+C SDV TC001 8 行里 6 行涉及 -CAfile / -inform / -outform / -out，全部
+覆盖空白。第三弹关闭这部分。
+
+改动:
+  CLI 层 (main.rs Commands::Crl):
+    新增 4 个可选 arg:
+      --cafile <path>  (验证 CRL 签名)
+      --inform DER|PEM (显式输入格式)
+      -o / --out <path>(写文件)
+      --outform DER|PEM(输出格式, 默认 PEM)
+    dispatch 改为 crl::run(&CrlArgs { ... })
+
+  run() 重构 (crl.rs):
+    签名 (input, text) → CrlArgs 结构
+    4 个内部 helper:
+      load_crl(data, inform)    - PEM/DER/auto-detect 分支
+      from_pem_bytes(data)      - PEM-only 入口
+      load_ca_cert(path)        - CA 文件加载 + parse
+      encode_crl(crl, outform)  - to_pem / to_der 分发
+    新增 Format { Pem, Der } enum + parse_format(&str) 大小写无关
+
+  错误层次:
+    CRL 解析     → "CRL parse failed: ..."
+    CAfile 读     → "CAfile read failed: ..."
+    CAfile 解析   → "CAfile parse failed: ..."
+    签名 mismatch → "CRL signature verify failed: signature did not match CA"
+    inform 无效   → "unsupported format: {x} (use DER or PEM)"
+
+  测试:
+    收紧 2 处 (test_run_nonexistent_file 跨平台 +
+              test_run_invalid_data 断言 prefix)
+    新增 8 个:
+      test_run_cafile_signature_ok        (C TC001 r1)
+      test_run_cafile_signature_mismatch  (C TC001 r5)
+      test_run_cafile_missing
+      test_run_cafile_malformed
+      test_run_convert_der_to_pem         (C TC001 r7)
+      test_run_convert_pem_to_der         (C TC001 r8)
+      test_run_invalid_inform
+      test_run_inform_der_on_pem_fails
+
+C TC 未迁:
+  TC002 重复参数      (clap)
+  TC003 -help         (clap)
+  TC004-007 stub-based(? + From 类型系统证明)
+  TC008 file output   (本 PR convert_* 已覆盖)
+  TC0010 stub         (同上)
+
+测试向量:
+  ca.crt + ca.crl 来自 tests/vectors/crl/crl_verify/
+  已被 migrated_x509_parse.rs Phase C 使用, pair 已知 self-consistent.
+
+验证:
+  cargo test -p hitls-cli --all-features crl::  14/0
+  cargo test -p hitls-cli --all-features        201/0 + 5 ignored
+  cargo fmt --all --check                       clean
+  cargo clippy --workspace -- -D warnings       clean
+  grep -cE "\.is_err\(\)" crl.rs                0
+
+Issue #51 进度: T170 ~10/30 → T171 ~19/30 → T172 ~27/30;
+              剩 ~3 处 pkcs12 收尾走 T173.
+
+Recorded as DEV_LOG Phase T172.

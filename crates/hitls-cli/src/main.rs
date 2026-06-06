@@ -123,6 +123,18 @@ enum Commands {
         /// Print CRL details.
         #[arg(short, long)]
         text: bool,
+        /// CA certificate (PEM or DER) to verify the CRL signature against.
+        #[arg(long)]
+        cafile: Option<String>,
+        /// Explicit input format: "DER" or "PEM" (default: auto-detect).
+        #[arg(long)]
+        inform: Option<String>,
+        /// Write CRL to a file instead of printing summary.
+        #[arg(short, long)]
+        out: Option<String>,
+        /// Output format for `--out`: "DER" or "PEM" (default: "PEM").
+        #[arg(long)]
+        outform: Option<String>,
     },
     /// TLS client connection.
     SClient {
@@ -419,7 +431,21 @@ fn main() {
             fingerprint,
         } => x509cmd::run(input, *text, *fingerprint),
         Commands::Verify { ca_file, cert } => verify::run(ca_file, cert),
-        Commands::Crl { input, text } => crl::run(input, *text),
+        Commands::Crl {
+            input,
+            text,
+            cafile,
+            inform,
+            out,
+            outform,
+        } => crl::run(&crl::CrlArgs {
+            input,
+            text: *text,
+            cafile: cafile.as_deref(),
+            inform: inform.as_deref(),
+            out: out.as_deref(),
+            outform: outform.as_deref(),
+        }),
         Commands::SClient {
             connect,
             alpn,
