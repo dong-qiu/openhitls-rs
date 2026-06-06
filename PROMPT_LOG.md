@@ -12211,3 +12211,65 @@ Issue #45 进度: T174 ~9/53 → T175 ~16/53.
   「测试 + 产品 + 后续启动」三重价值 测试今天 + 产品 fix 今天 + 留钩子明天
 
 Recorded as DEV_LOG Phase T175.
+
+### T176 — #45 RFC 5280 §4.2 + §5.2 critical CRL extension 拒绝 + verify-side 迁移第二弹
+
+> 等 #251 合并后开始 T176
+
+承接 T175 cRLSign KU 单点突破, 关 T174 doc 列的 4 个 API 缺口里的第 2 个 —— critical-ext 拒绝 (RFC 5280 §4.2 + §5.2).
+
+RFC 引用:
+  §4.2 MUST  reject certificate (or CRL) on unrecognised critical ext
+  §5.2.5 IDP MUST be critical
+  §5.2.4 DCI MUST be critical
+  §5.2.1 AKI / §5.2.2 IssuerAltName / §5.2.3 CRLNumber / §5.2.6 FreshestCRL /
+    §5.2.7 AIA MUST NOT be critical (critical 出现 = RFC 违反)
+
+改动:
+  产品 (verify.rs::check_revocation_status, ~14 行 + 注释):
+    在 cRLSign KU 守门后、CRL 签名验证前
+    迭代 crl.extensions, 遇 ext.critical && !is_recognised_critical_crl_extension
+    返 PkiError::UnsupportedExtension("unrecognised critical CRL extension OID: {oid}")
+    OID display 用 Oid::from_der_value 解析, 失败兜底 "<unparseable>"
+
+  新增 helper is_recognised_critical_crl_extension(oid: &[u8]) -> bool:
+    白名单仅 IssuingDistributionPoint + DeltaCRLIndicator
+    与 cert-side 既有 is_recognised_critical_extension (verify.rs:491) 对称
+
+  测试 (migrated_crl_rfc5280_verify.rs 追加 4 个):
+    tc_line149_x509_crl_verify_critical_issuer_alt_name      (C TC001 r149)
+    tc_line209_x509_crl_verify_sm2_unrecognised_critical_extension (C TC004 r209)
+    verify_revocation_accepts_crl_with_critical_issuing_distribution_point  (synth +)
+    verify_revocation_rejects_crl_with_arbitrary_critical_extension          (synth -)
+
+Synthetic chain 复用 T175 Ed25519 模板:
+  positive 加 add_issuing_distribution_point(&[Uri(...)])
+  negative 加 add_extension(arbitrary_oid_der, true, vec![0x04, 0x00])
+    OID 1.3.6.1.4.1.99999.42 (private-use arc, DER 手算 9 字节)
+
+测试向量复用 (Phase C 已 mirror, 无新增 fixture):
+  extension_crl/{ca_cert.pem, user_cert.pem, test_crl_add_issuer_alternative_name.pem}
+  sm2/sm2_without_userid/extension_crl/{root.crt, server.crt, root_add_*.crl}
+
+4 个 API 缺口状态:
+  (a) cRLSign KU enforcement     ✅ T175 CLOSED
+  (b) critical-ext rejection      ✅ T176 CLOSED in this PR
+  (c) CRL_NOT_FOUND surfacing     still deferred → T177
+  (d) ALL/DEV flag split          still deferred → T178
+
+验证:
+  cargo test --test migrated_crl_rfc5280_verify        11/0 (T175 7 + T176 4)
+  cargo test --test migrated_crl_rfc5280_gap            9/0 (T174 无回归)
+  cargo test -p hitls-pki --all-features             1552/0 (无回归)
+  cargo test --workspace --all-features              全 pass
+  cargo fmt --all --check                            clean
+  cargo clippy --workspace -- -D warnings            clean
+
+Issue #45 进度: T175 ~16/53 → T176 ~20/53.
+
+沿用方法学:
+  R23 §12.8 + T175 模式 「产品 fix + matching tests + sentinel 留 pending」
+  Cert-side 模板对称扩展 (verify.rs:491 → 镜像写 CRL-side)
+  OID display 安全兜底 (避免错误诊断次生 panic)
+
+Recorded as DEV_LOG Phase T176.
