@@ -283,26 +283,42 @@ mod tests {
     #[test]
     fn test_wildcard_no_bare_domain() {
         let cert = make_cert(Some(san_dns(&["*.example.com"])), None);
-        assert!(verify_hostname(&cert, "example.com").is_err());
+        // RFC 6125 §6.4.3: `*.example.com` must not match the bare apex.
+        assert!(matches!(
+            verify_hostname(&cert, "example.com").unwrap_err(),
+            PkiError::HostnameMismatch(_)
+        ));
     }
 
     #[test]
     fn test_wildcard_no_deep_match() {
         let cert = make_cert(Some(san_dns(&["*.example.com"])), None);
-        assert!(verify_hostname(&cert, "a.b.example.com").is_err());
+        // RFC 6125 §6.4.3: `*.example.com` matches one label only, not
+        // multi-level subdomains.
+        assert!(matches!(
+            verify_hostname(&cert, "a.b.example.com").unwrap_err(),
+            PkiError::HostnameMismatch(_)
+        ));
     }
 
     #[test]
     fn test_wildcard_minimum_labels() {
-        // *.com should not match example.com (not enough labels after wildcard)
+        // *.com should not match example.com (not enough labels after wildcard).
         let cert = make_cert(Some(san_dns(&["*.com"])), None);
-        assert!(verify_hostname(&cert, "example.com").is_err());
+        assert!(matches!(
+            verify_hostname(&cert, "example.com").unwrap_err(),
+            PkiError::HostnameMismatch(_)
+        ));
     }
 
     #[test]
     fn test_partial_wildcard_rejected() {
         let cert = make_cert(Some(san_dns(&["f*o.example.com"])), None);
-        assert!(verify_hostname(&cert, "foo.example.com").is_err());
+        // RFC 6125 §6.4.3 forbids partial-label wildcards (`f*o`).
+        assert!(matches!(
+            verify_hostname(&cert, "foo.example.com").unwrap_err(),
+            PkiError::HostnameMismatch(_)
+        ));
     }
 
     #[test]
@@ -316,26 +332,38 @@ mod tests {
     fn test_ipv4_match() {
         let cert = make_cert(Some(san_ip(&[vec![192, 168, 1, 1]])), None);
         assert!(verify_hostname(&cert, "192.168.1.1").is_ok());
-        assert!(verify_hostname(&cert, "192.168.1.2").is_err());
+        // Different IP in the same /24 → must miss.
+        assert!(matches!(
+            verify_hostname(&cert, "192.168.1.2").unwrap_err(),
+            PkiError::HostnameMismatch(_)
+        ));
     }
 
     #[test]
     fn test_san_takes_precedence_over_cn() {
-        // SAN has different name than CN; hostname matches CN but not SAN → should fail
+        // SAN has different name than CN. RFC 6125 §6.4.4: when any SAN
+        // is present, CN MUST NOT be consulted — so a hostname matching
+        // only CN fails despite the CN match.
         let cert = make_cert(
             Some(san_dns(&["other.example.com"])),
             Some("www.example.com"),
         );
-        assert!(verify_hostname(&cert, "www.example.com").is_err());
+        assert!(matches!(
+            verify_hostname(&cert, "www.example.com").unwrap_err(),
+            PkiError::HostnameMismatch(_)
+        ));
         assert!(verify_hostname(&cert, "other.example.com").is_ok());
     }
 
     #[test]
     fn test_cn_fallback_no_san() {
-        // No SAN at all — should fall back to CN
+        // No SAN at all — should fall back to CN.
         let cert = make_cert(None, Some("www.example.com"));
         assert!(verify_hostname(&cert, "www.example.com").is_ok());
-        assert!(verify_hostname(&cert, "other.example.com").is_err());
+        assert!(matches!(
+            verify_hostname(&cert, "other.example.com").unwrap_err(),
+            PkiError::HostnameMismatch(_)
+        ));
     }
 
     #[test]
@@ -343,27 +371,44 @@ mod tests {
         let ipv6_bytes = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1].to_vec();
         let cert = make_cert(Some(san_ip(&[ipv6_bytes])), None);
         assert!(verify_hostname(&cert, "::1").is_ok());
-        assert!(verify_hostname(&cert, "::2").is_err());
+        // Different IPv6 address → must miss.
+        assert!(matches!(
+            verify_hostname(&cert, "::2").unwrap_err(),
+            PkiError::HostnameMismatch(_)
+        ));
     }
 
     #[test]
     fn test_ip_not_matched_against_dns_san() {
-        // Certificate has DNS SAN "192.168.1.1" (as a string, not IP), hostname is IP
+        // Certificate has DNS SAN "192.168.1.1" (as a string, not IP), hostname is IP.
+        // RFC 6125 §1.7: IP addresses MUST match iPAddress SAN, not dNSName —
+        // otherwise an attacker could register a DNS name like "192.168.1.1"
+        // and impersonate the IP.
         let cert = make_cert(Some(san_dns(&["192.168.1.1"])), None);
-        // IP addresses must match iPAddress SAN, not dNSName
-        assert!(verify_hostname(&cert, "192.168.1.1").is_err());
+        assert!(matches!(
+            verify_hostname(&cert, "192.168.1.1").unwrap_err(),
+            PkiError::HostnameMismatch(_)
+        ));
     }
 
     #[test]
     fn test_empty_hostname() {
+        // Empty hostname is rejected unconditionally — never matches anything.
         let cert = make_cert(Some(san_dns(&["www.example.com"])), None);
-        assert!(verify_hostname(&cert, "").is_err());
+        assert!(matches!(
+            verify_hostname(&cert, "").unwrap_err(),
+            PkiError::HostnameMismatch(_)
+        ));
     }
 
     #[test]
     fn test_no_san_no_cn() {
+        // No SAN and no CN → nothing to match against; any hostname fails.
         let cert = make_cert(None, None);
-        assert!(verify_hostname(&cert, "www.example.com").is_err());
+        assert!(matches!(
+            verify_hostname(&cert, "www.example.com").unwrap_err(),
+            PkiError::HostnameMismatch(_)
+        ));
     }
 
     #[test]
@@ -378,6 +423,11 @@ mod tests {
         assert!(verify_hostname(&cert, "www.example.com").is_ok());
         assert!(verify_hostname(&cert, "mail.example.com").is_ok());
         assert!(verify_hostname(&cert, "10.0.0.1").is_ok());
-        assert!(verify_hostname(&cert, "other.example.com").is_err());
+        // A name absent from every SAN entry must fail even when the
+        // domain suffix overlaps the SAN list.
+        assert!(matches!(
+            verify_hostname(&cert, "other.example.com").unwrap_err(),
+            PkiError::HostnameMismatch(_)
+        ));
     }
 }

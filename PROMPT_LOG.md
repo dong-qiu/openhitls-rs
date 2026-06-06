@@ -11144,3 +11144,71 @@ Issue 关闭进度：
   排查时间）
 
 Recorded as DEV_LOG Phase T163.
+
+## T164 — #55 章节 2：PKI hostname 验证测试断言精度化 (2026-06-06)
+
+> 1
+
+T163 收尾 verify.rs 后，#55 工作按 PKI 模块分章节扫的第二
+个目标 —— crates/hitls-pki/src/x509/hostname.rs。模块自包含 +
+错误模型最简单，按 T163 "三步法" 一次性把全部 12 处 is_err()
+收紧到 matches!(err, PkiError::HostnameMismatch(_))。
+
+模块自包含 + 错误模型简单 = 一次扫完：
+
+  verify_hostname 公开入口实现：
+    所有错误路径只走一个 variant：PkiError::HostnameMismatch(String)
+    所以本 PR 的 matches! 模式完全统一，注释承担"为什么这条失败"
+    的解释职责
+
+12 处明细：
+
+  test_wildcard_no_bare_domain        RFC 6125 §6.4.3
+                                      *.example.com 不匹配 bare apex
+  test_wildcard_no_deep_match         §6.4.3 wildcard 仅匹配 1 个 label
+  test_wildcard_minimum_labels        *.com 不匹配 example.com（缺 label）
+  test_partial_wildcard_rejected      §6.4.3 禁 partial-label wildcard
+  test_ipv4_match (mismatch 行)        同段不同地址
+  test_san_takes_precedence_over_cn   §6.4.4 SAN 存在时 CN MUST NOT 用
+  test_cn_fallback_no_san             无 SAN 回退 CN，CN 不匹
+  test_ipv6_match (mismatch 行)        不同 IPv6 地址
+  test_ip_not_matched_against_dns_san §1.7 IP MUST 匹 iPAddress SAN
+  test_empty_hostname                 空字符串无条件拒绝
+  test_no_san_no_cn                   无 SAN 且无 CN
+  test_multiple_san_entries (缺席行)  hostname 不在任何 SAN entry
+
+每处加 1-3 行内联注释引用 RFC 6125 相应章节。
+
+验证：
+
+  cargo test -p hitls-pki --all-features --lib hostname: 15/0
+    (12 negative + 3 ok 路径)
+  grep -c "\.is_err()" hostname.rs: 0（全部 12 处清完）
+  cargo test --workspace --all-features: 8529/0（无回归）
+  cargo fmt --all --check + clippy -D warnings -p hitls-pki
+    --all-features --all-targets: clean
+
+作用域：
+
+  仅测试断言精度化：
+    零产品代码改、零 API surface 变化、零测试数量变化
+    外部下游零影响
+
+#55 整体进度：
+
+  T163 verify.rs                     6 处   6/83
+  T164 hostname.rs                  12 处  18/83
+  剩余 certificate.rs (12) + cms/ (19) + pkcs12/ (6) +
+       其他小文件 (8) ≈ 45 处
+
+后续 T165+ 推荐目标：
+
+  x509/certificate.rs (12 处，核心 cert 解析；多 ASN.1 路径)
+  或 cms/mod.rs (7) + cms/enveloped.rs (8) +
+     cms/encrypted.rs (4) = 19 处 CMS 全套一次扫
+
+迁移 tally (post-T164)：
+
+  All algos (35 rows): 3199 / 3772 / 240 / 7 / 6494（不变）
+
+Recorded as DEV_LOG Phase T164.
