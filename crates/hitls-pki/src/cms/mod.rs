@@ -2031,8 +2031,10 @@ mod tests {
             assert!(matches!(result.unwrap_err(), PkiError::CmsError(_)));
         }
         // If parse fails, that's also a valid failure path (covered by
-        // `test_cms_parse_truncated` below — `from_der` would surface
-        // `PkiError::Asn1Error`).
+        // `test_cms_parse_truncated` below — `from_der` surfaces the
+        // ASN.1 decode error wrapped via CMS-layer `cerr` into
+        // `PkiError::CmsError`, since the outer ContentInfo decode
+        // routes through that helper rather than the raw `Asn1Error`).
     }
 
     #[test]
