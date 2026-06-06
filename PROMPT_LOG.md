@@ -11759,3 +11759,86 @@ T168 三步法（T163-T168 实战验证，T168 实现首次零迭代）：
   All algos (35 rows): 3199 / 3772 / 240 / 7 / 6494（不变）
 
 Recorded as DEV_LOG Phase T169.
+
+## R23 — `docs/c-test-migration-plan.md` 加 §12.8 (codify T163-T169 方法学) (2026-06-06)
+
+> 等 #244 合并后开始 1
+
+承接 T169 (#55 100% 关闭) 之后，本 PR 把 T163-T169 实战累积
+的方法学正式写进 migration-plan retrospective。纯 docs 改动，
+给 Phase B/C 后续任务（#44/#45/#51/#58-#61 等）当复用基线。
+
+新增 §12.8 "Phase B 准备阶段：PKI 弱断言精度化方法学"
+6 个子节：
+
+  12.8.1 三条 meta-lesson（L1/L2/L3）
+  12.8.2 T168 三步法（inventory → grep variant 来源 → 写 matches!）
+  12.8.3 工具组合 eprintln! + rtk proxy --nocapture
+  12.8.4 三类弱断言形态分类表
+         （标准收紧 66 + 冗余清理 16 + OR 改 matches! 7 = 87 sites）
+  12.8.5 TLS-trust 决策路径全清意义
+  12.8.6 给 Phase B/C 后续任务的指引
+
+更新 §12.7 Phase B 状态行 ——
+  "Phase B 准备阶段：弱断言精度化 (#55) 100% 关闭
+   (T163–T169, 2026-06-06)；剩余 issue (#43/#44/#47/#48/#51/
+   #58/#59/#60/#61) 仍 open"
+
+三条 meta-lesson 简要：
+
+  Lesson 1 (T166)
+    多步骤错误路径的失败点比表面看起来更早
+    （PBKDF2 → CBC → cipher OID match 例）
+
+  Lesson 2 (T167)
+    同一抽象层级的不同入口可对同样错误用不同 variant
+    —— 取决于是否做 domain-layer pre-validation
+
+  Lesson 3 (T168)
+    写 matches! 前先 grep 模块顶层入口是否有 cerr/perr
+    类 wrapper helper —— 有则全部走 domain variant；
+    没有则走底层 raw variant (Asn1Error)
+
+T168 三步法：
+
+  1. inventory: grep -nE "\.is_err\(\)" target.rs
+  2. grep variant 来源:
+     grep -nE "fn cerr|fn perr|PkiError::SpecificVariant|
+              map_err.*PkiError" target.rs
+  3. 写 matches! + 1-3 行注释引用 wrapper helper / 源码行号
+
+T168 提前执行 Step 2 后 6 处全部首次运行通过，首次零迭代命中。
+
+作用域：
+
+  纯 docs 改动 —— 零代码改、零产品 surface 变化、零测试改动
+  外部下游零影响
+
+验证：
+
+  仅 docs；无 lint 概念
+  cargo fmt --all --check + RUSTFLAGS="-D warnings"
+    cargo clippy --workspace --all-features --all-targets: clean
+    （与改前等价，未影响）
+
+作为本会话累计成果的封口：
+
+  本会话从 Phase A 收官（R21 retrospective）+ McEliece
+  (I160/T161) + eFrodoKEM (T162) + R22 RsaHashAlg 重构开始，
+  到 T163-T169 #55 100% 关闭 + R23 方法学进 retrospective 结束，
+  共 15 个 PR：
+
+    I158 + I159 + I160                       (3 个 I)
+    T159 + T160 + T161 + T162                (4 个 PQC/RSA T)
+    R20 + R21 + R22 + R23                    (4 个 R)
+    T163 + T164 + T165 + T166 + T167 + T168
+      + T169                                  (7 个 #55 T)
+
+  Total: 3 + 4 + 4 + 7 = 18 个 phase，归并到 ~15 个 PR
+  （部分 phase 合并到同 PR，如 I160/T161 合并）
+
+迁移 tally (post-R23)：
+
+  All algos (35 rows): 3199 / 3772 / 240 / 7 / 6494（不变）
+
+Recorded as DEV_LOG Phase R23.
