@@ -11899,3 +11899,64 @@ C TCs 未迁（6/15）：
 Issue #51 进度：0/30 → ~10/30（剩 rand/crl/pkcs12 → T171-T173）。
 
 Recorded as DEV_LOG Phase T170.
+
+### T171 — #51 CLI 覆盖第二弹：rand 子命令加 -out + binary + 错误路径精度化
+
+> 请继续刚才未完成的工作
+
+承接 T170 prime 之后的 #51 第二弹。rand_cmd 之前仅 (num, format) → stdout
+两模式 (hex / base64)，C SDV 13 TC 里很多 -out + binary + 大量 stub-based
+失败路径无法对照。第二弹关掉 C 覆盖空白里能关的部分。
+
+改动:
+  CLI 层 (main.rs Commands::Rand):
+    新增 -o / --out <path> 可选 arg
+    dispatch 改 rand_cmd::run(num, format, out.as_deref())
+
+  run() 重构 (rand_cmd.rs):
+    签名 (num, format) → (num, format, out: Option<&str>)
+    新增 binary format 模式 (默认 hex 不变, base64 不变)
+    错误消息 (use hex or base64) → (use hex, base64, or binary)
+    提 2 个内部 helper:
+      write_text(s, out)    — stdout 时 println!, file 时 fs::write
+      write_binary(buf, out)— stdout 时 stdout().write_all (raw),
+                              file 时 fs::write
+
+  测试 (rand_cmd::tests):
+    test_cli_rand_zero_bytes:
+      is_err() → assert_eq!(err.to_string(),
+                            "num must be between 1 and 1048576")
+    新增 9 个:
+      test_cli_rand_too_large            (1_048_577 → 同错)
+      test_cli_rand_at_lower_bound       (1 → OK)
+      test_cli_rand_at_upper_bound       (1 MiB → OK)
+      test_cli_rand_unknown_format       ("yaml" → 完整错误字串)
+      test_cli_rand_binary_stdout        (binary 模式 stdout)
+      test_cli_rand_hex_to_file          (写文件 + 读回 64 hex chars)
+      test_cli_rand_base64_to_file       (写文件 + base64 decode 验长)
+      test_cli_rand_binary_to_file       (写文件 + raw 长度对等)
+      test_cli_rand_out_unwritable_dir   (/nonexistent_rand_dir → I/O err)
+
+C TC 未迁:
+  TC004 -help                     (clap)
+  TC005 -out 不带值                (clap)
+  TC003 数字解析错误               (clap 在 main 层拒, 不到 run())
+  TC005-0012 stub-based BSL/UIO   (Rust ? + From 类型系统证明)
+  TC0014 SM mode                  (CMVP feature 默认不编译)
+
+验证:
+  rtk proxy cargo test -p hitls-cli --all-features rand_cmd::
+                                          12/0
+  cargo test -p hitls-cli --all-features  193/0 + 5 ignored
+  cargo fmt --all --check                 clean
+  cargo clippy --workspace -- -D warnings clean
+  grep -cE "\.is_err\(\)" rand_cmd.rs     0
+
+Issue #51 进度: T170 ~10/30 → T171 ~19/30; 剩 crl/pkcs12 → T172/T173.
+
+踩坑:
+  test_cli_rand_binary_stdout 直接 cargo test 跑会让 rtk 摘要管道
+  broken-pipe (binary stdout raw 字节). rtk proxy cargo test 直通绕开.
+  CI 用 cargo test 自带 stdout 捕获, 正常通过.
+
+Recorded as DEV_LOG Phase T171.
