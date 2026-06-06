@@ -414,6 +414,20 @@ impl CertificateVerifier {
 
             // Find a CRL from this issuer
             if let Some(crl) = self.find_crl_for_issuer(issuer) {
+                // RFC 5280 §6.3.3(f): the issuer of the CRL must have the cRLSign
+                // bit asserted in its KeyUsage extension. If the issuer cert has
+                // no KeyUsage extension, every usage is implicitly permitted
+                // (RFC 5280 §4.2.1.3) and the check passes.
+                if let Some(ku) = issuer.key_usage() {
+                    if !ku.has(KeyUsage::CRL_SIGN) {
+                        return Err(PkiError::KeyUsageViolation(
+                            "CRL issuer certificate lacks cRLSign key usage \
+                             (RFC 5280 §6.3.3(f))"
+                                .into(),
+                        ));
+                    }
+                }
+
                 // Verify CRL signature
                 let sig_valid = crl.verify_signature(issuer).map_err(|e| {
                     PkiError::InvalidCrl(format!("CRL signature verification failed: {}", e))
