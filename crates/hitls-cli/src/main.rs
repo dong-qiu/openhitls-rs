@@ -252,9 +252,12 @@ enum Commands {
         /// Number of bytes to generate.
         #[arg(short, long, default_value = "32")]
         num: usize,
-        /// Output format: hex or base64.
+        /// Output format: hex, base64, or binary.
         #[arg(short, long, default_value = "hex")]
         format: String,
+        /// Write output to a file instead of stdout.
+        #[arg(short, long)]
+        out: Option<String>,
     },
     /// Public key utility (sign/verify/encrypt/decrypt/derive).
     Pkeyutl {
@@ -472,7 +475,7 @@ fn main() {
             *cert_compression,
         ),
         Commands::List { filter } => list::run(filter),
-        Commands::Rand { num, format } => rand_cmd::run(*num, format),
+        Commands::Rand { num, format, out } => rand_cmd::run(*num, format, out.as_deref()),
         Commands::Pkeyutl {
             op,
             input,
