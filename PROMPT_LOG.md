@@ -11212,3 +11212,96 @@ T163 收尾 verify.rs 后，#55 工作按 PKI 模块分章节扫的第二
   All algos (35 rows): 3199 / 3772 / 240 / 7 / 6494（不变）
 
 Recorded as DEV_LOG Phase T164.
+
+## T165 — #55 章节 3：PKI Certificate 解析测试断言精度化 (2026-06-06)
+
+> 1
+
+承接 T163/T164 的"三步法"，第 3 章 —— crates/hitls-pki/src/
+x509/certificate.rs。错误模型比 hostname.rs 复杂：路径有两条
+（DER 解析与 PEM 顶层），但每条都有明确的 PkiError variant
+映射。11 处全部收紧 + 1 处故意保留 OR 模式。
+
+错误模型 Certificate::{from_der, from_pem}：
+
+  from_der → 所有 ASN.1 解析错统一 PkiError::Asn1Error
+  from_pem PEM 层解析错 → PkiError::Asn1Error
+  from_pem 找不到 CERTIFICATE label → PkiError::InvalidCert
+
+11 处明细：
+
+  test_certificate_from_pem_missing_block
+    PEM 仅含 PRIVATE KEY label → InvalidCert(_)
+
+  test_certificate_from_der_truncated (×2)
+    空 + 截断 DER → Asn1Error(_)
+
+  test_certificate_from_der_wrong_outer_tag (×3)
+    SET / OCTET STRING / INTEGER 顶层 tag → Asn1Error(_)
+
+  test_certificate_from_der_empty_outer_sequence_rejected
+    [0x30, 0x00]（空 SEQUENCE） → Asn1Error(_)
+
+  test_certificate_from_der_length_overrun_rejected
+    length 100 但只有 3 字节 → Asn1Error(_)
+
+  test_certificate_from_pem_garbage_body_rejected
+    base64 garbage "!!!" 在 BEGIN/END 之间 → Asn1Error(_)
+    （PEM parser 顶层 map_err 把 PEM 层错误统一包成 Asn1Error）
+
+  test_certificate_from_pem_no_blocks_rejected (×2)
+    空字符串 / 非 PEM 文本 → InvalidCert(_)
+    （PEM parser 返回 Ok([])，from_pem 在 find CERTIFICATE
+     label 时 ok_or_else 触发 InvalidCert）
+
+故意保留 1 处 OR 模式 —— test_certificate_verify_signature_
+wrong_issuer (L1117)：
+
+  let result = cert1.verify_signature(&cert2);
+  assert!(result.is_err() || !result.unwrap());
+
+  wrong-issuer 签名验证可能：
+    decode 阶段失败 → Err(Asn1Error)
+    verify 返回 false → Ok(false)
+  两条路径都正确，无单一 variant 可锁，故意保留 OR
+
+验证：
+
+  cargo test -p hitls-pki --all-features --lib certificate: 24/0
+    （11 negative + 13 ok/structural 路径）
+  grep -c "\.is_err()" certificate.rs: 1（仅故意保留的 OR 模式）
+  cargo test --workspace --all-features: 8529/0（无回归）
+  cargo fmt --all --check + RUSTFLAGS="-D warnings"
+    cargo clippy -p hitls-pki --all-features --all-targets:
+    clean
+
+作用域：
+
+  仅测试断言精度化：
+    零产品代码改、零 API surface 变化、零测试数量变化
+    外部下游零影响
+
+#55 累计进度：
+
+  T163 verify.rs                     6 处   6/83
+  T164 hostname.rs                  12 处  18/83
+  T165 certificate.rs               11 处  29/83
+  剩余 cms/ (19) + pkcs12/ (6) + 其他 (8) +
+       verify.rs 旧 paired is_err() 冗余 (~16) ≈ 49 处
+
+后续 T166+ 推荐目标（按工作量从小到大）：
+
+  1. 小文件杂项一次扫：crl (2) + signing (1) + pkcs8/mod (1)
+     + ocsp (3) + pkcs8/encrypted (3) + x509/mod 剩 (~4)
+     = ~14 处跨 6 文件
+  2. CMS 子集：cms/mod.rs (7 处)
+  3. CMS 全套：mod (7) + enveloped (8) + encrypted (4) = 19 处
+  4. pkcs12/mod.rs (6 处)
+  5. verify.rs 冗余清理：T163 后剩 ~16 个"is_err() + 已有
+     matches!" 的冗余 is_err()，价值低可一次扫
+
+迁移 tally (post-T165)：
+
+  All algos (35 rows): 3199 / 3772 / 240 / 7 / 6494（不变）
+
+Recorded as DEV_LOG Phase T165.

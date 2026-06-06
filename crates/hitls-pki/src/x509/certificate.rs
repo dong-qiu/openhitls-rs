@@ -954,16 +954,30 @@ mod tests {
 
     #[test]
     fn test_certificate_from_pem_missing_block() {
+        // PEM parses fine, but only the PRIVATE KEY block is present;
+        // `from_pem` searches for a CERTIFICATE label and returns
+        // `InvalidCert` when none is found.
         let bad_pem = "-----BEGIN PRIVATE KEY-----\nMC4=\n-----END PRIVATE KEY-----\n";
-        let err = Certificate::from_pem(bad_pem);
-        assert!(err.is_err());
+        assert!(matches!(
+            Certificate::from_pem(bad_pem).unwrap_err(),
+            PkiError::InvalidCert(_)
+        ));
     }
 
     #[test]
     fn test_certificate_from_der_truncated() {
-        // Truncated DER should fail
-        assert!(Certificate::from_der(&[]).is_err());
-        assert!(Certificate::from_der(&[0x30, 0x03, 0x01]).is_err());
+        // Truncated DER should fail at ASN.1 decode (`PkiError::Asn1Error`).
+        // The empty input has no outer SEQUENCE tag at all; the second
+        // input has a SEQUENCE tag claiming 3 bytes of body but only 1
+        // byte is provided.
+        assert!(matches!(
+            Certificate::from_der(&[]).unwrap_err(),
+            PkiError::Asn1Error(_)
+        ));
+        assert!(matches!(
+            Certificate::from_der(&[0x30, 0x03, 0x01]).unwrap_err(),
+            PkiError::Asn1Error(_)
+        ));
     }
 
     // ================================================================
@@ -976,14 +990,25 @@ mod tests {
     /// Wrong outermost tag (not SEQUENCE) must reject. ITU-T X.690 §8.1
     /// requires Certificate to be encoded as SEQUENCE; a SET (0x31) or any
     /// other tag at the outer position is malformed and must not parse.
+    /// All three inputs trip the `PkiError::Asn1Error` arm in `from_der`'s
+    /// outer-SEQUENCE map_err.
     #[test]
     fn test_certificate_from_der_wrong_outer_tag() {
         // type=SET (0x31), length=0
-        assert!(Certificate::from_der(&[0x31, 0x00]).is_err());
+        assert!(matches!(
+            Certificate::from_der(&[0x31, 0x00]).unwrap_err(),
+            PkiError::Asn1Error(_)
+        ));
         // type=OCTET STRING (0x04), length=2, value=ab
-        assert!(Certificate::from_der(&[0x04, 0x02, 0xAB, 0xCD]).is_err());
+        assert!(matches!(
+            Certificate::from_der(&[0x04, 0x02, 0xAB, 0xCD]).unwrap_err(),
+            PkiError::Asn1Error(_)
+        ));
         // type=INTEGER (0x02)
-        assert!(Certificate::from_der(&[0x02, 0x01, 0x05]).is_err());
+        assert!(matches!(
+            Certificate::from_der(&[0x02, 0x01, 0x05]).unwrap_err(),
+            PkiError::Asn1Error(_)
+        ));
     }
 
     /// Empty SEQUENCE must reject — a Certificate has at minimum a TBSCertificate
@@ -992,7 +1017,12 @@ mod tests {
     #[test]
     fn test_certificate_from_der_empty_outer_sequence_rejected() {
         // SEQUENCE of length 0 (well-formed ASN.1 but missing required body).
-        assert!(Certificate::from_der(&[0x30, 0x00]).is_err());
+        // Fails at the first inner-decode step (TBSCertificate read) →
+        // `PkiError::Asn1Error`.
+        assert!(matches!(
+            Certificate::from_der(&[0x30, 0x00]).unwrap_err(),
+            PkiError::Asn1Error(_)
+        ));
     }
 
     /// Length-prefix that overruns the buffer must reject without panicking.
@@ -1000,25 +1030,43 @@ mod tests {
     /// outer length-prefix lies about the body size.
     #[test]
     fn test_certificate_from_der_length_overrun_rejected() {
-        // SEQUENCE claiming 100 bytes but only providing 3.
+        // SEQUENCE claiming 100 bytes but only providing 3 → ASN.1 decoder
+        // refuses the truncated body → `PkiError::Asn1Error`.
         let buf = [0x30, 0x64, 0x01, 0x02, 0x03];
-        assert!(Certificate::from_der(&buf).is_err());
+        assert!(matches!(
+            Certificate::from_der(&buf).unwrap_err(),
+            PkiError::Asn1Error(_)
+        ));
     }
 
     /// PEM with the right BEGIN/END marker but base64 garbage inside must
-    /// reject at parse time, not silently succeed with empty fields.
+    /// reject at parse time, not silently succeed with empty fields. The PEM
+    /// parser surfaces the base64 decode failure as `PkiError::Asn1Error`
+    /// (the `map_err` arm at `from_pem`'s top wraps every PEM-layer
+    /// failure into the ASN.1 variant for uniformity).
     #[test]
     fn test_certificate_from_pem_garbage_body_rejected() {
         let bad = "-----BEGIN CERTIFICATE-----\n!!!\n-----END CERTIFICATE-----\n";
-        assert!(Certificate::from_pem(bad).is_err());
+        assert!(matches!(
+            Certificate::from_pem(bad).unwrap_err(),
+            PkiError::Asn1Error(_)
+        ));
     }
 
     /// PEM input with no PEM blocks at all (just plain text) must reject —
-    /// not be interpreted as a 0-byte DER encoding.
+    /// not be interpreted as a 0-byte DER encoding. The parse succeeds
+    /// returning zero blocks; the no-CERTIFICATE-block branch in
+    /// `from_pem` then surfaces `PkiError::InvalidCert`.
     #[test]
     fn test_certificate_from_pem_no_blocks_rejected() {
-        assert!(Certificate::from_pem("").is_err());
-        assert!(Certificate::from_pem("not a pem file at all").is_err());
+        assert!(matches!(
+            Certificate::from_pem("").unwrap_err(),
+            PkiError::InvalidCert(_)
+        ));
+        assert!(matches!(
+            Certificate::from_pem("not a pem file at all").unwrap_err(),
+            PkiError::InvalidCert(_)
+        ));
     }
 
     /// Parser must accept a well-formed certificate at every roundtrip
