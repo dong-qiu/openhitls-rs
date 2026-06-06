@@ -428,6 +428,27 @@ impl CertificateVerifier {
                     }
                 }
 
+                // RFC 5280 §4.2: "A certificate-using system MUST reject the
+                // certificate if it encounters a critical extension it does not
+                // recognize or a critical extension that contains information
+                // that it cannot process." The same rule applies to CRLs being
+                // used in certificate validation. Per RFC 5280 §5.2 only the
+                // IssuingDistributionPoint (§5.2.5) and DeltaCRLIndicator
+                // (§5.2.4) extensions are specified to appear critical; all
+                // others (AuthorityKeyIdentifier, IssuerAltName, CRLNumber,
+                // FreshestCRL, AuthorityInformationAccess) MUST be non-critical
+                // and a critical occurrence of any of them is a violation.
+                for ext in &crl.extensions {
+                    if ext.critical && !is_recognised_critical_crl_extension(&ext.oid) {
+                        let oid_display = Oid::from_der_value(&ext.oid)
+                            .map(|o| o.to_string())
+                            .unwrap_or_else(|_| "<unparseable>".to_string());
+                        return Err(PkiError::UnsupportedExtension(format!(
+                            "unrecognised critical CRL extension OID: {oid_display}"
+                        )));
+                    }
+                }
+
                 // Verify CRL signature
                 let sig_valid = crl.verify_signature(issuer).map_err(|e| {
                     PkiError::InvalidCrl(format!("CRL signature verification failed: {}", e))
@@ -497,6 +518,29 @@ fn is_recognised_critical_extension(oid: &[u8]) -> bool {
         known::subject_alt_name(),
         known::subject_key_identifier(),
         known::authority_key_identifier(),
+    ]
+    .iter()
+    .any(|known_oid| known_oid.to_der_value() == oid)
+}
+
+/// Whether `oid` identifies a CRL extension that may legitimately appear with
+/// `critical = true` in a CRL `tbsCertList.crlExtensions` field.
+///
+/// Per RFC 5280 §5.2 only two CRL-level extensions are specified to appear
+/// critical:
+///
+/// * IssuingDistributionPoint (§5.2.5) — `MUST` be critical when present
+/// * DeltaCRLIndicator (§5.2.4) — `MUST` be critical when present
+///
+/// All other CRL extensions defined in RFC 5280 (AuthorityKeyIdentifier §5.2.1,
+/// IssuerAltName §5.2.2, CRLNumber §5.2.3, FreshestCRL §5.2.6,
+/// AuthorityInformationAccess §5.2.7) are specified non-critical and any
+/// critical occurrence is a spec violation that MUST be rejected per RFC 5280
+/// §4.2. Unknown / private OIDs marked critical are likewise rejected.
+fn is_recognised_critical_crl_extension(oid: &[u8]) -> bool {
+    [
+        known::issuing_distribution_point(),
+        known::delta_crl_indicator(),
     ]
     .iter()
     .any(|known_oid| known_oid.to_der_value() == oid)
