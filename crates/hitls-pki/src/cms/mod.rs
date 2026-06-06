@@ -2009,10 +2009,7 @@ mod tests {
         // different message digest, the signed-attribute messageDigest
         // mismatches → `cerr("messageDigest mismatch")` →
         // `PkiError::CmsError(_)`.
-        assert!(matches!(
-            result.unwrap_err(),
-            PkiError::CmsError(_)
-        ));
+        assert!(matches!(result.unwrap_err(), PkiError::CmsError(_)));
     }
 
     #[test]
@@ -2031,10 +2028,7 @@ mod tests {
             // The wrapper always routes failures through `cerr`, so the
             // variant is `PkiError::CmsError(_)` regardless of which
             // inner check fires.
-            assert!(matches!(
-                result.unwrap_err(),
-                PkiError::CmsError(_)
-            ));
+            assert!(matches!(result.unwrap_err(), PkiError::CmsError(_)));
         }
         // If parse fails, that's also a valid failure path (covered by
         // `test_cms_parse_truncated` below — `from_der` would surface
@@ -2095,10 +2089,7 @@ mod tests {
         // `find_signer_cert` exhausts the cert iterator and falls
         // through to `Err(cerr("signer cert not found by
         // SubjectKeyIdentifier"))` → `PkiError::CmsError(_)`.
-        assert!(matches!(
-            result.unwrap_err(),
-            PkiError::CmsError(_)
-        ));
+        assert!(matches!(result.unwrap_err(), PkiError::CmsError(_)));
     }
 
     #[test]
@@ -2405,10 +2396,7 @@ mod tests {
         // `PkiError::CmsError(_)`.
         let cms2 = CmsMessage::from_der(&cms.raw).unwrap();
         let result = cms2.verify_signatures(Some(b"Wrong data"), &[]);
-        assert!(matches!(
-            result.unwrap_err(),
-            PkiError::CmsError(_)
-        ));
+        assert!(matches!(result.unwrap_err(), PkiError::CmsError(_)));
     }
 
     #[test]
@@ -2426,10 +2414,7 @@ mod tests {
         // verification"))` arm → `PkiError::CmsError(_)`.
         let cms2 = CmsMessage::from_der(&cms.raw).unwrap();
         let result = cms2.verify_signatures(None, &[]);
-        assert!(matches!(
-            result.unwrap_err(),
-            PkiError::CmsError(_)
-        ));
+        assert!(matches!(result.unwrap_err(), PkiError::CmsError(_)));
     }
 
     #[test]

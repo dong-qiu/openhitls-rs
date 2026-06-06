@@ -730,10 +730,7 @@ mod tests {
         // `PkiError::CryptoError(_)` by `decrypt_kek`'s
         // `map_err(PkiError::from)` chain.
         let result = cms.decrypt_kek(&wrong_kek);
-        assert!(matches!(
-            result.unwrap_err(),
-            PkiError::CryptoError(_)
-        ));
+        assert!(matches!(result.unwrap_err(), PkiError::CryptoError(_)));
     }
 
     #[test]
@@ -1013,10 +1010,7 @@ mod tests {
         // `decrypt_kek` → `map_err(PkiError::from)` chain.
         let wrong_kek = [0x42u8; 15];
         let result = cms.decrypt_kek(&wrong_kek);
-        assert!(matches!(
-            result.unwrap_err(),
-            PkiError::CryptoError(_)
-        ));
+        assert!(matches!(result.unwrap_err(), PkiError::CryptoError(_)));
     }
 
     #[test]

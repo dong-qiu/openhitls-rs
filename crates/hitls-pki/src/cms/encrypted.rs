@@ -253,10 +253,7 @@ mod tests {
         // wrapped to `PkiError::CryptoError(_)` by the
         // `map_err(PkiError::from)` chain in `decrypt_symmetric`.
         let result = cms.decrypt_symmetric(&wrong_key);
-        assert!(matches!(
-            result.unwrap_err(),
-            PkiError::CryptoError(_)
-        ));
+        assert!(matches!(result.unwrap_err(), PkiError::CryptoError(_)));
     }
 
     #[test]
@@ -294,19 +291,13 @@ mod tests {
         // `CryptoError`.)
         let result =
             CmsMessage::encrypt_symmetric(plaintext, &[0x42; 15], CmsEncryptionAlg::Aes128Gcm);
-        assert!(matches!(
-            result.unwrap_err(),
-            PkiError::CmsError(_)
-        ));
+        assert!(matches!(result.unwrap_err(), PkiError::CmsError(_)));
 
         // AES-256 expects 32 bytes, give 16 — same CMS-layer
         // pre-validation, same `CmsError` variant.
         let result2 =
             CmsMessage::encrypt_symmetric(plaintext, &[0x42; 16], CmsEncryptionAlg::Aes256Gcm);
-        assert!(matches!(
-            result2.unwrap_err(),
-            PkiError::CmsError(_)
-        ));
+        assert!(matches!(result2.unwrap_err(), PkiError::CmsError(_)));
     }
 
     #[test]
@@ -349,10 +340,7 @@ mod tests {
         // "tampered ciphertext" because GCM's auth check fires
         // identically for both.
         let result = cms.decrypt_symmetric(&key);
-        assert!(matches!(
-            result.unwrap_err(),
-            PkiError::CryptoError(_)
-        ));
+        assert!(matches!(result.unwrap_err(), PkiError::CryptoError(_)));
     }
 
     #[test]
