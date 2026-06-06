@@ -12092,3 +12092,58 @@ Issue #51 关闭进度 (最终):
        走 Pkcs12Error → starts_with("pkcs12 error:") 单一前缀
 
 Recorded as DEV_LOG Phase T173.
+
+### T174 — #45 CRL RFC 5280 parse-side gap-closure 第一弹：9 个 xtask Phase C 漏迁的 PARSE_FILE 行
+
+> 请看看接下来应该干什么
+
+承接 #51 收官 (T170-T173 关 #51), 重新调研 #44 + #45 后选定 #45 (实际缺口 ~53 行 vs #44 ~14 行).
+本 PR 是 #45 的 PARSE_FILE 第一弹, 新增 9 个集成测试覆盖 xtask Phase C 漏迁的
+4 个 TC 家族 (TC004 / TC009 / TC011 / TC013).
+
+改动:
+  新文件 (crates/hitls-pki/tests/migrated_crl_rfc5280_gap.rs):
+    9 个 #[test] 函数 + 内联 load_crl / parse_crl_result helper
+    NOT modifying auto-generated migrated_x509_parse.rs (规避 xtask --check drift gate)
+
+  0 处产品代码改动.
+
+测试映射 (按 C 行):
+  TC004 line 17  Teletex     → tc_line17 (positive, UTF-8 归一化 OK)
+  TC004 line 20  Universal   → tc_line20 (GAP SENTINEL: Rust UniversalString 未实现)
+  TC004 line 23  BMPString   → tc_line23 (PARTIAL SENTINEL: CN OK / ST 乱码)
+  TC009 line 59  no crlnumber→ tc_line59 (positive, crl_number()=None)
+  TC009 line 62  >20 octets  → tc_line62 (GAP SENTINEL: RFC 5280 §5.2.3 未强制)
+  TC011 line 101 reason=7    → tc_line101 (positive, from_u8(7)=None)
+  TC013 line 122 cert issuer → tc_line122 (positive, populated)
+  TC013 line 125 null issuer → tc_line125 (negative, Err)
+  TC013 line 128 changed dn  → tc_line128 (positive, populated)
+
+4 个产品缺口暴露 (写入测试 doc + na-list 候选):
+  (1) UniversalString DN 解码 (X.690 §8.21.7 UTF-32BE 未实现)
+  (2) BMPString DN 解码部分错误 (BMP 范围 OK / 非平凡映射乱码)
+  (3) CRLNumber 长度强制 (RFC 5280 §5.2.3 MUST NOT > 20 octets 未强制)
+  (4) revocation reason 保留值 (Rust from_u8(7) → None, C 保留 raw int)
+
+VERIFY-side 延期 4 个 API 缺口 (写入文件顶部 doc, 留给 T175/T176):
+  (a) VFY_FLAG_CRL_ALL vs CRL_DEV 不可区分
+  (b) CRL_NOT_FOUND 不暴露 (Rust soft-fail)
+  (c) critical-ext 不处理
+  (d) CRL-signer cRLSign KU 不强制
+
+验证:
+  cargo test -p hitls-pki --all-features --test migrated_crl_rfc5280_gap  9/0
+  cargo test -p hitls-pki --all-features                                  458/0
+  cargo fmt --all --check                                                 clean
+  cargo clippy --workspace -- -D warnings                                 clean
+  grep -cE "\.is_err\(\)" migrated_crl_rfc5280_gap.rs                     2 (gap sentinels w/ 注解, 非弱断言)
+
+Issue #45 进度: 0/53 → ~9/53. 剩 VERIFY_TC001/TC002 ALL-flag + TC003 + TC004 (21) +
+                TC005 (22) → T175/T176.
+
+沿用方法学:
+  R23 §12.8 + T168 zero-iteration  先验产品 API 再写断言
+  T146/T156 gap-sentinel 模式       pin 当前行为 + 引用 RFC + 指向 future fix
+  「测试现在 + 暴露未来工作」双重价值 今 9 测试 / 明产品 fix 测试先红再绿驱动 issue 关闭
+
+Recorded as DEV_LOG Phase T174.
