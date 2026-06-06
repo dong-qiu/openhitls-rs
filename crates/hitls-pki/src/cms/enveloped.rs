@@ -724,9 +724,16 @@ mod tests {
         let cms =
             CmsMessage::encrypt_kek(plaintext, &kek, kek_id, CmsEncryptionAlg::Aes128Gcm).unwrap();
 
-        // Attempt decrypt with wrong key — should fail
+        // Attempt decrypt with wrong key — AES-KW unwrap detects the
+        // integrity-check IV mismatch in the unwrapped block and
+        // returns a `CryptoError`, wrapped to
+        // `PkiError::CryptoError(_)` by `decrypt_kek`'s
+        // `map_err(PkiError::from)` chain.
         let result = cms.decrypt_kek(&wrong_kek);
-        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            PkiError::CryptoError(_)
+        ));
     }
 
     #[test]
@@ -870,8 +877,13 @@ mod tests {
             raw: vec![],
         };
         let result = cms.decrypt_kek(&[0u8; 16]);
-        assert!(result.is_err());
-        let err_msg = format!("{:?}", result.unwrap_err());
+        // `decrypt_kek` short-circuits at its `enveloped_data
+        // .as_ref().ok_or_else(|| cerr("not EnvelopedData"))` arm →
+        // `PkiError::CmsError("not EnvelopedData")`. The error-message
+        // substring assertion below pins the cerr identity.
+        let err = result.unwrap_err();
+        assert!(matches!(err, PkiError::CmsError(_)));
+        let err_msg = format!("{err:?}");
         assert!(err_msg.contains("not EnvelopedData"));
     }
 
@@ -888,8 +900,12 @@ mod tests {
             raw: vec![],
         };
         let result = cms.decrypt_rsa(&[1], &[1], &[1], &[1], &[1]);
-        assert!(result.is_err());
-        let err_msg = format!("{:?}", result.unwrap_err());
+        // Same `not EnvelopedData` short-circuit as the
+        // `decrypt_kek_not_enveloped` test above →
+        // `PkiError::CmsError(_)`.
+        let err = result.unwrap_err();
+        assert!(matches!(err, PkiError::CmsError(_)));
+        let err_msg = format!("{err:?}");
         assert!(err_msg.contains("not EnvelopedData"));
     }
 
@@ -927,8 +943,13 @@ mod tests {
             raw: vec![],
         };
         let result = cms.decrypt_kek(&[0u8; 16]);
-        assert!(result.is_err());
-        let err_msg = format!("{:?}", result.unwrap_err());
+        // `decrypt_kek` iterates `recipient_infos`, finds only
+        // `KeyTransport` (not Kek), and falls through to
+        // `cerr("no KekRecipientInfo found")` →
+        // `PkiError::CmsError(_)`.
+        let err = result.unwrap_err();
+        assert!(matches!(err, PkiError::CmsError(_)));
+        let err_msg = format!("{err:?}");
         assert!(err_msg.contains("no KekRecipientInfo"));
     }
 
@@ -965,8 +986,13 @@ mod tests {
             raw: vec![],
         };
         let result = cms.decrypt_rsa(&[1], &[1], &[1], &[1], &[1]);
-        assert!(result.is_err());
-        let err_msg = format!("{:?}", result.unwrap_err());
+        // Mirror of the above test for `decrypt_rsa`: only Kek
+        // recipient is present, so `decrypt_rsa` falls through to
+        // `cerr("no KeyTransRecipientInfo found")` →
+        // `PkiError::CmsError(_)`.
+        let err = result.unwrap_err();
+        assert!(matches!(err, PkiError::CmsError(_)));
+        let err_msg = format!("{err:?}");
         assert!(err_msg.contains("no KeyTransRecipientInfo"));
     }
 
@@ -980,10 +1006,17 @@ mod tests {
         let cms =
             CmsMessage::encrypt_kek(plaintext, &kek, kek_id, CmsEncryptionAlg::Aes128Gcm).unwrap();
 
-        // Try decrypt with 15-byte key
+        // Try decrypt with 15-byte key. AES-KW key unwrap requires
+        // a 16/24/32-byte KEK; the underlying AES key constructor
+        // returns a `CryptoError`, wrapped to
+        // `PkiError::CryptoError(_)` by the
+        // `decrypt_kek` → `map_err(PkiError::from)` chain.
         let wrong_kek = [0x42u8; 15];
         let result = cms.decrypt_kek(&wrong_kek);
-        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            PkiError::CryptoError(_)
+        ));
     }
 
     #[test]
@@ -1003,8 +1036,13 @@ mod tests {
             .encrypted_content = None;
 
         let result = cms.decrypt_kek(&kek);
-        assert!(result.is_err());
-        let err_msg = format!("{:?}", result.unwrap_err());
+        // After unwrapping the CEK successfully, `decrypt_content`
+        // tries `eci.encrypted_content.as_ref()`; with the slot
+        // emptied above the `ok_or_else(|| cerr("no encrypted
+        // content"))` fires → `PkiError::CmsError(_)`.
+        let err = result.unwrap_err();
+        assert!(matches!(err, PkiError::CmsError(_)));
+        let err_msg = format!("{err:?}");
         assert!(err_msg.contains("no encrypted content"));
     }
 
@@ -1026,8 +1064,14 @@ mod tests {
             .params = None;
 
         let result = cms.decrypt_kek(&kek);
-        assert!(result.is_err());
-        let err_msg = format!("{:?}", result.unwrap_err());
+        // After unwrapping the CEK, `decrypt_content` reads
+        // `content_encryption_algorithm.params.as_ref()`; with the
+        // slot cleared the `ok_or_else(|| cerr("no content
+        // encryption params (nonce)"))` fires →
+        // `PkiError::CmsError(_)`.
+        let err = result.unwrap_err();
+        assert!(matches!(err, PkiError::CmsError(_)));
+        let err_msg = format!("{err:?}");
         assert!(err_msg.contains("no content encryption params"));
     }
 

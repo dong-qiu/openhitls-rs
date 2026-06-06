@@ -11404,3 +11404,117 @@ Recorded as DEV_LOG Phase T165.
   All algos (35 rows): 3199 / 3772 / 240 / 7 / 6494（不变）
 
 Recorded as DEV_LOG Phase T166.
+
+## T167 — #55 章节 5：PKI CMS 全套一次扫 (2026-06-06)
+
+> 1
+
+继 T163-T166 之后，把整个 CMS 子树一次性扫掉 —— cms/mod.rs 7
++ cms/enveloped.rs 8 + cms/encrypted.rs 4 = 19 处全部收紧。
+本 PR 沉淀第二条 meta-lesson："同一抽象层级的不同入口可对
+同样错误用不同 variant"。
+
+错误模型：
+
+  mod.rs 内定义：
+    fn cerr(msg: &str) -> PkiError { PkiError::CmsError(msg.into()) }
+  enveloped/encrypted: use super::cerr;
+  Crypto 操作失败的 .map_err(PkiError::from) 链
+    → PkiError::CryptoError(_)（via #[from] CryptoError）
+
+19 处实际变体分布：
+
+  cms/mod.rs        7 处 → 全部 CmsError(_)
+  cms/enveloped.rs  6 CmsError + 2 CryptoError
+                    （wrong KEK 走 AES-KW；15-byte KEK 走 AES key 构造）
+  cms/encrypted.rs  2 CmsError + 2 CryptoError
+                    （CmsError：CMS 层 pre-validation 拒 wrong-len；
+                     CryptoError：GCM auth tag fail）
+  合计              15 CmsError + 4 CryptoError
+
+踩坑 1 — test_cms_parse_truncated：
+
+  第一次假设 PkiError::Asn1Error(_)（与 certificate.rs::from_der
+  truncated 同款 ASN.1 顶层错），跑测失败 —— 实际 CMS 层在 from_der
+  内用 cerr(&format!("ContentInfo: decode: {e}")) 包装底层 ASN.1
+  error → 出口仍是 CmsError(_)。
+
+踩坑 2 — test_cms_encrypted_data_wrong_key_length：
+
+  第一次假设 PkiError::CryptoError(_)（与 enveloped.rs::
+  test_decrypt_kek_wrong_key_length 同款 wrong-len 错），跑测失败
+  —— 实际 encrypted.rs 的 encrypt_symmetric 调 AES 前做了 key-len
+  pre-validation 直接发 cerr(...) → CmsError(_)，根本不到 AES 层。
+  enveloped.rs 的 decrypt_kek 不做 CMS 层 pre-validation 直接交给
+  AES → CryptoError(_)。
+
+新 meta-lesson（写入 #55 后续章节方法学）：
+
+  同一抽象层级的不同入口可对同样错误用不同 variant —— 取决于
+  该入口是否做 CMS 层 pre-validation 还是直接 delegate 到底层。
+
+    enveloped::test_decrypt_kek_wrong_key_length
+      入口 decrypt_kek(&[u8; 15])
+      做 pre-validation? 否
+      variant CryptoError(_)
+
+    encrypted::test_cms_encrypted_data_wrong_key_length
+      入口 encrypt_symmetric(.., &[u8; 15], ..)
+      做 pre-validation? 是
+      variant CmsError(_)
+
+  两个测试的业务错完全一样（15 字节 AES 密钥非法），但 variant
+  不同。收紧断言时不能只看测试名 —— 必须看入口代码具体短路顺序。
+
+  工具组合（沿用 T166）：eprintln!("variant: {err:?}") + rtk
+  proxy cargo test ... -- --nocapture 是定位真实 variant 的标准
+  做法（rtk proxy 绕开默认摘要让 stderr 流过）。
+
+注释策略 —— 每处加 1-3 行注释解释：
+
+  错误流到达 cerr 的具体路径（哪个 ok_or_else / map_err /
+    return Err(cerr(...))）
+  选 variant 的理由（与 format!("{err:?}") 已有的 substring 断言
+    一致性）
+  当同函数族返回不同 variant 时，显式 contrast 注释
+    （如 // Distinct from enveloped.rs where wrong length reaches
+     crypto layer and surfaces as CryptoError）
+
+验证：
+
+  cargo test -p hitls-pki --all-features --lib cms: 82/0
+  cargo test --workspace --all-features: 8529/0（无回归）
+  cargo fmt --all --check + RUSTFLAGS="-D warnings"
+    cargo clippy -p hitls-pki --all-features --all-targets:
+    clean
+
+作用域：
+
+  仅测试断言精度化。
+  零产品代码改、零 API surface 变化、零测试数量变化。
+  外部下游零影响。
+
+#55 累计进度：
+
+  T163 verify.rs          6 处   6/83
+  T164 hostname.rs       12 处  18/83
+  T165 certificate.rs    11 处  29/83
+  T166 6 小文件杂项     10 处  39/83
+  T167 cms/ 全套        19 处  58/83
+  剩余 pkcs12/ (6) + verify.rs 老 paired 冗余 (~16) +
+       其他 (~3) ≈ 25 处
+
+  已过 70% 大关：58/83 = 69.9%
+
+后续 T168+ 推荐目标：
+
+  1. pkcs12/mod.rs (6 处)，约 0.5 天
+  2. verify.rs 老 paired is_err() 冗余清理 (~16 处)，约 0.5 天
+  3. 剩余 ~3 处零散站点
+  完成上述 ~25 处后 #55 100% 关闭
+
+迁移 tally (post-T167)：
+
+  All algos (35 rows): 3199 / 3772 / 240 / 7 / 6494（不变）
+
+Recorded as DEV_LOG Phase T167.

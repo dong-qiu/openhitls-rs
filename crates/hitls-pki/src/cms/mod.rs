@@ -1855,7 +1855,14 @@ mod tests {
             params: None,
         };
 
-        assert!(verify_signature_with_cert(message, message, &signature, &sig_alg, &cert).is_err());
+        // Tampered Ed25519 sig: `kp.verify` returns `Ok(false)` and the
+        // dispatcher's `if ok { Ok(()) } else { Err(cerr(...)) }` branch
+        // produces `PkiError::CmsError("Ed25519 signature verification
+        // failed")`.
+        assert!(matches!(
+            verify_signature_with_cert(message, message, &signature, &sig_alg, &cert).unwrap_err(),
+            PkiError::CmsError(_)
+        ));
     }
 
     #[test]
@@ -1998,7 +2005,14 @@ mod tests {
         let ca = crate::x509::Certificate::from_pem(CMS_CA_CERT).unwrap();
         let wrong_content = b"wrong content that was not signed";
         let result = msg.verify_signatures(Some(wrong_content), &[ca]);
-        assert!(result.is_err());
+        // Wrong detached content → `verify_signer_info` computes a
+        // different message digest, the signed-attribute messageDigest
+        // mismatches → `cerr("messageDigest mismatch")` →
+        // `PkiError::CmsError(_)`.
+        assert!(matches!(
+            result.unwrap_err(),
+            PkiError::CmsError(_)
+        ));
     }
 
     #[test]
@@ -2012,16 +2026,33 @@ mod tests {
         if let Ok(msg) = msg {
             let ca = crate::x509::Certificate::from_pem(CMS_CA_CERT).unwrap();
             let result = msg.verify_signatures(None, &[ca]);
-            assert!(result.is_err());
+            // Verify path: the tampered byte in the signature region
+            // makes `verify_signer_info` fail somewhere along the chain.
+            // The wrapper always routes failures through `cerr`, so the
+            // variant is `PkiError::CmsError(_)` regardless of which
+            // inner check fires.
+            assert!(matches!(
+                result.unwrap_err(),
+                PkiError::CmsError(_)
+            ));
         }
-        // If parse fails, that's also a valid failure path
+        // If parse fails, that's also a valid failure path (covered by
+        // `test_cms_parse_truncated` below — `from_der` would surface
+        // `PkiError::Asn1Error`).
     }
 
     #[test]
     fn test_cms_parse_truncated() {
+        // Truncated DER fails inside `from_der`'s outer-ContentInfo
+        // walk, but the failure travels through the CMS layer's
+        // `map_err(|e| cerr(format!("ContentInfo: decode: {e}")))`
+        // wrapper rather than surfacing the raw ASN.1 variant — so
+        // the observed variant is `PkiError::CmsError(_)`, not
+        // `Asn1Error`. The two cases distinguish themselves only by
+        // message substring.
         let truncated = &CMS_RSA_PKCS1_ATTACHED[..50];
         let result = CmsMessage::from_der(truncated);
-        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), PkiError::CmsError(_)));
     }
 
     // -----------------------------------------------------------------------
@@ -2061,7 +2092,13 @@ mod tests {
         let sid = SignerIdentifier::SubjectKeyIdentifier(vec![0x01, 0x02, 0x03]);
         let certs = vec![cert];
         let result = find_signer_cert(&sid, &certs);
-        assert!(result.is_err(), "should not find cert by non-matching SKI");
+        // `find_signer_cert` exhausts the cert iterator and falls
+        // through to `Err(cerr("signer cert not found by
+        // SubjectKeyIdentifier"))` → `PkiError::CmsError(_)`.
+        assert!(matches!(
+            result.unwrap_err(),
+            PkiError::CmsError(_)
+        ));
     }
 
     #[test]
@@ -2362,10 +2399,16 @@ mod tests {
         let cms =
             CmsMessage::sign_detached(data, &cert_der, &key_der, CmsDigestAlg::Sha256).unwrap();
 
-        // DER roundtrip; verify with wrong data should fail
+        // DER roundtrip; verify with wrong data should fail. The
+        // signed-attribute messageDigest mismatches the computed digest
+        // of "Wrong data" → `cerr("messageDigest mismatch")` →
+        // `PkiError::CmsError(_)`.
         let cms2 = CmsMessage::from_der(&cms.raw).unwrap();
         let result = cms2.verify_signatures(Some(b"Wrong data"), &[]);
-        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            PkiError::CmsError(_)
+        ));
     }
 
     #[test]
@@ -2376,10 +2419,17 @@ mod tests {
         let cms =
             CmsMessage::sign_detached(data, &cert_der, &key_der, CmsDigestAlg::Sha256).unwrap();
 
-        // DER roundtrip; verify without providing external data should fail
+        // DER roundtrip; verify without providing external data should
+        // fail. Detached mode + None detached_data + None encap_content
+        // → `verify_signatures` short-circuits at the
+        // `(None, None) => return Err(cerr("no content data for
+        // verification"))` arm → `PkiError::CmsError(_)`.
         let cms2 = CmsMessage::from_der(&cms.raw).unwrap();
         let result = cms2.verify_signatures(None, &[]);
-        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            PkiError::CmsError(_)
+        ));
     }
 
     #[test]

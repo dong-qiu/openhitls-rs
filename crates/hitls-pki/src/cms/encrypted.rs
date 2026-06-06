@@ -248,8 +248,15 @@ mod tests {
         let cms =
             CmsMessage::encrypt_symmetric(plaintext, &key, CmsEncryptionAlg::Aes128Gcm).unwrap();
 
+        // Wrong AES-GCM key → the GCM auth tag verification fails →
+        // `gcm_decrypt` returns `CryptoError::AeadTagVerifyFail`,
+        // wrapped to `PkiError::CryptoError(_)` by the
+        // `map_err(PkiError::from)` chain in `decrypt_symmetric`.
         let result = cms.decrypt_symmetric(&wrong_key);
-        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            PkiError::CryptoError(_)
+        ));
     }
 
     #[test]
@@ -277,15 +284,29 @@ mod tests {
     #[test]
     fn test_cms_encrypted_data_wrong_key_length() {
         let plaintext = b"test";
-        // AES-128 expects 16 bytes, give 15
+        // AES-128 expects 16 bytes, give 15. `encrypt_symmetric`
+        // pre-validates the KEK size *at the CMS layer* (before
+        // touching the AES key constructor) and raises
+        // `cerr("key length 15 does not match algorithm (expected 16)")`
+        // → `PkiError::CmsError(_)`. (Distinct from
+        // `enveloped.rs::test_decrypt_kek_wrong_key_length` where the
+        // wrong length reaches the crypto layer and surfaces as
+        // `CryptoError`.)
         let result =
             CmsMessage::encrypt_symmetric(plaintext, &[0x42; 15], CmsEncryptionAlg::Aes128Gcm);
-        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            PkiError::CmsError(_)
+        ));
 
-        // AES-256 expects 32 bytes, give 16
+        // AES-256 expects 32 bytes, give 16 — same CMS-layer
+        // pre-validation, same `CmsError` variant.
         let result2 =
             CmsMessage::encrypt_symmetric(plaintext, &[0x42; 16], CmsEncryptionAlg::Aes256Gcm);
-        assert!(result2.is_err());
+        assert!(matches!(
+            result2.unwrap_err(),
+            PkiError::CmsError(_)
+        ));
     }
 
     #[test]
@@ -321,8 +342,17 @@ mod tests {
                 }
             }
         }
+        // Tampered ciphertext (one byte flipped in the first block) →
+        // GCM auth tag verification fails → same
+        // `PkiError::CryptoError(_)` wrapper as the wrong-key case
+        // above; the variant doesn't distinguish "wrong key" from
+        // "tampered ciphertext" because GCM's auth check fires
+        // identically for both.
         let result = cms.decrypt_symmetric(&key);
-        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            PkiError::CryptoError(_)
+        ));
     }
 
     #[test]
