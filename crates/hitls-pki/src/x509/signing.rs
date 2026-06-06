@@ -416,9 +416,13 @@ mod tests {
 
     #[test]
     fn test_curve_id_to_oid_unsupported() {
+        // SM2 curves aren't in this module's NIST/Brainpool whitelist;
+        // `curve_id_to_oid`'s catch-all returns
+        // `PkiError::InvalidCert("unsupported curve: <id>")`.
         let result = curve_id_to_oid(EccCurveId::Sm2Prime256);
-        assert!(result.is_err());
-        let err_msg = format!("{}", result.unwrap_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, PkiError::InvalidCert(_)));
+        let err_msg = format!("{err}");
         assert!(err_msg.contains("unsupported curve"));
     }
 }

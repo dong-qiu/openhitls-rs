@@ -57,6 +57,7 @@ mod tests {
     };
     use super::*;
 
+    use hitls_types::PkiError;
     use hitls_utils::hex::hex;
 
     // Self-signed RSA 2048 test certificate (SHA-256, CN=Test RSA, O=OpenHiTLS, C=CN)
@@ -186,8 +187,12 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
         let rsa_cert = Certificate::from_der(&rsa_data).unwrap();
         let ecdsa_data = hex(ECDSA_CERT_HEX);
         let ecdsa_cert = Certificate::from_der(&ecdsa_data).unwrap();
-        // RSA cert verified with ECDSA cert's key should fail
-        // (the algorithm OID mismatch or key parsing will cause an error)
+        // RSA cert verified with ECDSA cert's key should fail. The
+        // failure can take two valid paths and there's no single
+        // variant to lock: (a) the inner RSA-PKCS#1 verify decodes
+        // the ECDSA SPKI as an RSA key with garbage modulus and
+        // returns `Ok(false)`; (b) the SPKI's OID lookup rejects the
+        // mismatched algorithm and returns `Err(_)`. OR stays.
         let result = rsa_cert.verify_signature(&ecdsa_cert);
         assert!(result.is_err() || !result.unwrap());
     }
@@ -1030,23 +1035,39 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
 
     #[test]
     fn test_parse_missing_issuer() {
-        // Should fail — issuer is mandatory
+        // Issuer is mandatory in TBSCertificate per RFC 5280 §4.1.2.4.
+        // Its absence trips one of the `read_sequence` / `read_*` calls
+        // inside `Certificate::from_der`'s field-by-field walk, which
+        // map uniformly into `PkiError::Asn1Error`.
         let result = Certificate::from_der(CERTCHECK_NO_ISSUER);
-        assert!(result.is_err(), "missing issuer should fail parsing");
+        assert!(
+            matches!(result.unwrap_err(), PkiError::Asn1Error(_)),
+            "missing issuer should fail parsing"
+        );
     }
 
     #[test]
     fn test_parse_missing_pubkey() {
-        // Should fail — public key is mandatory
+        // Subject public key is mandatory in TBSCertificate per
+        // RFC 5280 §4.1.2.7. Same `PkiError::Asn1Error` path as above.
         let result = Certificate::from_der(CERTCHECK_NO_PUBKEY);
-        assert!(result.is_err(), "missing pubkey should fail parsing");
+        assert!(
+            matches!(result.unwrap_err(), PkiError::Asn1Error(_)),
+            "missing pubkey should fail parsing"
+        );
     }
 
     #[test]
     fn test_parse_missing_sig_alg() {
-        // Should fail — signature algorithm is mandatory
+        // `signatureAlgorithm` is mandatory in Certificate per
+        // RFC 5280 §4.1.1.2 (and must match TBSCertificate's inner
+        // `signature` field). Missing it fails at the outer-SEQUENCE
+        // walk in `from_der` → `PkiError::Asn1Error`.
         let result = Certificate::from_der(CERTCHECK_NO_SIG_ALG);
-        assert!(result.is_err(), "missing sig alg should fail parsing");
+        assert!(
+            matches!(result.unwrap_err(), PkiError::Asn1Error(_)),
+            "missing sig alg should fail parsing"
+        );
     }
 
     #[test]
@@ -1474,6 +1495,10 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
         let mut sig = kp.sign(message).unwrap();
         sig[10] ^= 0xFF; // Tamper
         let result = verify_ed448(message, &sig, &spki);
+        // Tampered Ed448 sig can fail two valid ways: (a) the inner
+        // Ed448 verify rejects the modified sig with `Ok(false)`;
+        // (b) the byte flip lands on the sig's structural header and
+        // the EdDSA layer returns `Err(_)`. OR stays.
         assert!(result.is_err() || !result.unwrap());
     }
 
