@@ -486,3 +486,183 @@ fn verify_revocation_rejects_crl_with_arbitrary_critical_extension() {
         other => panic!("expected PkiError::UnsupportedExtension, got: {other:?}"),
     }
 }
+
+// ---------------------------------------------------------------------------
+// FILE_VERIFY_FUNC_TC005 — three-tier chain (root CA + intermediate CA + leaf)
+// exercising the multi-CRL revocation walk under VFY_FLAG_CRL_ALL.
+// ---------------------------------------------------------------------------
+
+/// SDV_X509_CRL_FILE_VERIFY_FUNC_TC005 (line 254): ALL flag with the root-CRL
+/// slot deliberately empty (rootCRL = ""). C expects `CRL_NOT_FOUND` because
+/// the strict-ALL policy requires CRL coverage for every cert in the chain.
+/// The Rust default is soft-fail; the new `set_require_crl(true)` API mirrors
+/// the strict policy, so this row is the trophy test for that API.
+#[test]
+fn tc_line254_x509_crl_verify_tc005_strict_mode_missing_root_crl() {
+    let root_ca = load_cert("cert/test_for_crl/sm2/sm2_without_userid/crl_verify/certs/root.crt");
+    let intermediate = load_cert(
+        "cert/test_for_crl/sm2/sm2_without_userid/crl_verify/intermediate/certs/intermediate.crt",
+    );
+    let usr2 = load_cert(
+        "cert/test_for_crl/sm2/sm2_without_userid/crl_verify/intermediate/certs/usr2.crt",
+    );
+    let intermediate_crl = load_crl(
+        "cert/test_for_crl/sm2/sm2_without_userid/crl_verify/intermediate/crl/intermediate.crl",
+    );
+
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(root_ca);
+    // Deliberately do NOT add a CRL for the root issuer — only the intermediate CRL.
+    verifier.add_crl(intermediate_crl);
+    verifier.set_check_revocation(true);
+    verifier.set_require_crl(true);
+
+    let err = verifier
+        .verify_cert(&usr2, std::slice::from_ref(&intermediate))
+        .expect_err("strict-mode missing root CRL must surface as InvalidCrl");
+    match err {
+        PkiError::InvalidCrl(msg) => assert!(
+            msg.contains("no CRL found for issuer"),
+            "expected 'no CRL found' diagnostic, got: {msg}"
+        ),
+        other => panic!("expected PkiError::InvalidCrl, got: {other:?}"),
+    }
+}
+
+/// SDV_X509_CRL_FILE_VERIFY_FUNC_TC005 (line 260): three-tier chain with
+/// `root_updated.crl` (no revocations) + `intermediate.crl` (no revocations
+/// of usr2) + ALL flag. Verify succeeds (chain length 3).
+#[test]
+fn tc_line260_x509_crl_verify_tc005_three_tier_no_revocation() {
+    let root_ca = load_cert("cert/test_for_crl/sm2/sm2_without_userid/crl_verify/certs/root.crt");
+    let intermediate = load_cert(
+        "cert/test_for_crl/sm2/sm2_without_userid/crl_verify/intermediate/certs/intermediate.crt",
+    );
+    let usr2 = load_cert(
+        "cert/test_for_crl/sm2/sm2_without_userid/crl_verify/intermediate/certs/usr2.crt",
+    );
+    let root_updated_crl =
+        load_crl("cert/test_for_crl/sm2/sm2_without_userid/crl_verify/crl/root_updated.crl");
+    let intermediate_crl = load_crl(
+        "cert/test_for_crl/sm2/sm2_without_userid/crl_verify/intermediate/crl/intermediate.crl",
+    );
+
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(root_ca);
+    verifier.add_crl(root_updated_crl);
+    verifier.add_crl(intermediate_crl);
+    verifier.set_check_revocation(true);
+
+    let chain = verifier
+        .verify_cert(&usr2, std::slice::from_ref(&intermediate))
+        .expect("three-tier chain should validate with all CRLs present and no revocations");
+    assert_eq!(chain.len(), 3, "chain should be [usr2, intermediate, root]");
+}
+
+/// SDV_X509_CRL_FILE_VERIFY_FUNC_TC005 (line 263): same three-tier chain as
+/// r260 but the root CRL is `root.crl` instead of `root_updated.crl`. The
+/// `root.crl` fixture revokes the intermediate CA's serial number — verify
+/// MUST fail with CertRevoked when the revocation walk reaches the
+/// intermediate→root step. Verified by `openssl crl -in root.crl -text` that
+/// the intermediate CA's serial is on the list.
+#[test]
+fn tc_line263_x509_crl_verify_tc005_intermediate_revoked_by_root_crl() {
+    let root_ca = load_cert("cert/test_for_crl/sm2/sm2_without_userid/crl_verify/certs/root.crt");
+    let intermediate = load_cert(
+        "cert/test_for_crl/sm2/sm2_without_userid/crl_verify/intermediate/certs/intermediate.crt",
+    );
+    let usr2 = load_cert(
+        "cert/test_for_crl/sm2/sm2_without_userid/crl_verify/intermediate/certs/usr2.crt",
+    );
+    let root_crl = load_crl("cert/test_for_crl/sm2/sm2_without_userid/crl_verify/crl/root.crl");
+    let intermediate_crl = load_crl(
+        "cert/test_for_crl/sm2/sm2_without_userid/crl_verify/intermediate/crl/intermediate.crl",
+    );
+
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(root_ca);
+    verifier.add_crl(root_crl);
+    verifier.add_crl(intermediate_crl);
+    verifier.set_check_revocation(true);
+
+    let err = verifier
+        .verify_cert(&usr2, std::slice::from_ref(&intermediate))
+        .expect_err("root.crl revokes the intermediate CA → CertRevoked");
+    assert!(
+        matches!(err, PkiError::CertRevoked),
+        "expected PkiError::CertRevoked, got: {err:?}"
+    );
+}
+
+/// SDV_X509_CRL_FILE_VERIFY_FUNC_TC005 (line 269): same three-tier chain as
+/// r263 but the target is `usr1.crt` (a sibling of usr2 under the same
+/// intermediate). The intermediate is still revoked by `root.crl`, so verify
+/// fails with CertRevoked regardless of which leaf is selected.
+#[test]
+fn tc_line269_x509_crl_verify_tc005_usr1_via_revoked_intermediate() {
+    let root_ca = load_cert("cert/test_for_crl/sm2/sm2_without_userid/crl_verify/certs/root.crt");
+    let intermediate = load_cert(
+        "cert/test_for_crl/sm2/sm2_without_userid/crl_verify/intermediate/certs/intermediate.crt",
+    );
+    let usr1 = load_cert(
+        "cert/test_for_crl/sm2/sm2_without_userid/crl_verify/intermediate/certs/usr1.crt",
+    );
+    let root_crl = load_crl("cert/test_for_crl/sm2/sm2_without_userid/crl_verify/crl/root.crl");
+    let intermediate_crl = load_crl(
+        "cert/test_for_crl/sm2/sm2_without_userid/crl_verify/intermediate/crl/intermediate.crl",
+    );
+
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(root_ca);
+    verifier.add_crl(root_crl);
+    verifier.add_crl(intermediate_crl);
+    verifier.set_check_revocation(true);
+
+    let err = verifier
+        .verify_cert(&usr1, std::slice::from_ref(&intermediate))
+        .expect_err("intermediate is revoked → CertRevoked propagates to usr1 verify");
+    assert!(
+        matches!(err, PkiError::CertRevoked),
+        "expected PkiError::CertRevoked, got: {err:?}"
+    );
+}
+
+/// Synthetic positive: strict mode with all CRLs present → verify succeeds.
+#[test]
+fn verify_revocation_strict_mode_accepts_all_crls_present() {
+    let (ca, ca_chain, crl, target) = synth_chain(KeyUsage::KEY_CERT_SIGN | KeyUsage::CRL_SIGN);
+
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(ca);
+    verifier.add_crl(crl);
+    verifier.set_check_revocation(true);
+    verifier.set_require_crl(true);
+
+    verifier
+        .verify_cert(&target, &ca_chain)
+        .expect("strict-mode require_crl with a matching CRL should pass");
+}
+
+/// Synthetic negative: strict mode with no CRLs registered → verify fails
+/// with `InvalidCrl` mentioning "no CRL found".
+#[test]
+fn verify_revocation_strict_mode_rejects_missing_crl() {
+    let (ca, ca_chain, _crl, target) = synth_chain(KeyUsage::KEY_CERT_SIGN | KeyUsage::CRL_SIGN);
+
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(ca);
+    // Deliberately do NOT add the CRL.
+    verifier.set_check_revocation(true);
+    verifier.set_require_crl(true);
+
+    let err = verifier
+        .verify_cert(&target, &ca_chain)
+        .expect_err("strict-mode require_crl with no CRL must reject");
+    match err {
+        PkiError::InvalidCrl(msg) => assert!(
+            msg.contains("no CRL found for issuer"),
+            "expected 'no CRL found' diagnostic, got: {msg}"
+        ),
+        other => panic!("expected PkiError::InvalidCrl, got: {other:?}"),
+    }
+}
