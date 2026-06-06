@@ -719,7 +719,14 @@ mod tests {
         let pk = fake_private_key();
         let cert = fake_certificate(1);
         let p12 = Pkcs12::create(Some(&pk), &[&cert], "correct").unwrap();
-        assert!(Pkcs12::from_der(&p12, "wrong").is_err());
+        // Wrong password derives a different HMAC key → `verify_mac`
+        // fails at the constant-time tag compare, which routes through
+        // `perr("HMAC: ...")` (the local `Pkcs12Error` wrapper) →
+        // `PkiError::Pkcs12Error(_)`.
+        assert!(matches!(
+            Pkcs12::from_der(&p12, "wrong").unwrap_err(),
+            PkiError::Pkcs12Error(_)
+        ));
     }
 
     /// Phase T84 regression: PKCS#12 password-MAC verification rejects a
@@ -746,10 +753,18 @@ mod tests {
         let target = original_len.saturating_sub(5);
         p12[target] ^= 0x40;
         let result = Pkcs12::from_der(&p12, "pw");
+        // The tamper hits either the MAC tag, the salt-length prefix,
+        // or an iteration field. All three failure paths route through
+        // `from_der`'s `perr` wrapper (`PkiError::Pkcs12Error`) — the
+        // MAC tag tamper fails the constant-time HMAC compare; the
+        // salt / iteration tamper fails an ASN.1 decode step that's
+        // wrapped via `perr(format!(...))`. Same exit variant either
+        // way.
+        let err = result.unwrap_err();
         assert!(
-            result.is_err(),
+            matches!(err, PkiError::Pkcs12Error(_)),
             "tampered byte at offset {target} of {original_len}-byte PFX \
-             must not parse cleanly with the original password"
+             must surface as Pkcs12Error, got: {err:?}"
         );
     }
 
@@ -968,9 +983,16 @@ mod tests {
 
     #[test]
     fn test_p12_wrong_password() {
-        // Try parsing with wrong password — should fail with MAC verification error
+        // Try parsing with wrong password — same `verify_mac` →
+        // `perr("HMAC: ...")` path as `test_pkcs12_wrong_password_fails`
+        // above, but against a real OpenSSL-generated PFX rather than
+        // a Rust-built one. → `PkiError::Pkcs12Error(_)`.
         let result = Pkcs12::from_der(P12_1, "wrong_password");
-        assert!(result.is_err(), "wrong password should fail");
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, PkiError::Pkcs12Error(_)),
+            "wrong password should surface Pkcs12Error, got: {err:?}"
+        );
     }
 
     #[test]
@@ -1038,12 +1060,30 @@ mod tests {
 
     #[test]
     fn test_pkcs12_empty_data() {
-        // Empty input should fail
-        assert!(Pkcs12::from_der(&[], "password").is_err());
-        // Truncated/garbage input should fail
-        assert!(Pkcs12::from_der(&[0x30, 0x00], "password").is_err());
-        // Random garbage should fail
-        assert!(Pkcs12::from_der(&[0xFF; 64], "password").is_err());
+        // All three malformed inputs fail at `from_der`'s first
+        // `read_sequence` step. The underlying ASN.1 decoder error is
+        // wrapped via `perr(format!("PFX: {e}"))` →
+        // `PkiError::Pkcs12Error(_)` (not the raw `Asn1Error` —
+        // PKCS#12 normalises its parse failures into the
+        // domain-specific variant, same shape as CMS's `cerr` wrapper
+        // and unlike `Certificate::from_der` which surfaces
+        // `Asn1Error` directly).
+        assert!(matches!(
+            Pkcs12::from_der(&[], "password").unwrap_err(),
+            PkiError::Pkcs12Error(_)
+        ));
+        // Empty SEQUENCE (well-formed ASN.1 but no body) → fails at
+        // the inner version-INTEGER decode.
+        assert!(matches!(
+            Pkcs12::from_der(&[0x30, 0x00], "password").unwrap_err(),
+            PkiError::Pkcs12Error(_)
+        ));
+        // 64 bytes of 0xFF — 0xFF isn't a valid ASN.1 tag, so the
+        // outer SEQUENCE read trips at the first byte.
+        assert!(matches!(
+            Pkcs12::from_der(&[0xFF; 64], "password").unwrap_err(),
+            PkiError::Pkcs12Error(_)
+        ));
     }
 
     #[test]

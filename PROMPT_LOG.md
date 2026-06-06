@@ -11518,3 +11518,120 @@ Recorded as DEV_LOG Phase T166.
   All algos (35 rows): 3199 / 3772 / 240 / 7 / 6494（不变）
 
 Recorded as DEV_LOG Phase T167.
+
+## T168 — #55 章节 6：PKI PKCS#12 一次扫（首次零迭代命中）(2026-06-06)
+
+> 1
+
+继 T163-T167 之后，把 crates/hitls-pki/src/pkcs12/mod.rs 全部
+6 处 .is_err() 一次性收紧到 Pkcs12Error。本 PR 首次实现零迭代
+—— T166 / T167 累积的 meta-lesson 实战验证。
+
+错误模型：
+
+  pkcs12/mod.rs 定义本地 helper（L679）：
+    fn perr(msg: &str) -> PkiError { PkiError::Pkcs12Error(msg.into()) }
+  from_der 所有错误路径全部经 perr 包装：
+    PFX SEQUENCE / version / authSafe CI / [0] / authSafe octet /
+    HMAC compare / AuthSafe SEQUENCE OF ContentInfo 等
+  关键：底层 ASN.1 decoder 报错被 perr 重包成 Pkcs12Error，
+       不会泄出 raw Asn1Error。
+
+6 处明细：
+
+  test_pkcs12_wrong_password_fails        Pkcs12Error
+  test_pkcs12_rejects_tampered_mac_constant_time
+                                          Pkcs12Error
+  test_p12_wrong_password                 Pkcs12Error
+  test_pkcs12_empty_data (3 路径)         Pkcs12Error × 3
+
+首次零迭代 hit：
+
+  T166/T167 累积教训：写 matches! 前先 grep from_der 源码看
+  是否有 cerr / perr 类 wrapper helper。
+
+  本次提前执行：
+    grep -nE "pub fn from_der|fn perr|PkiError::Pkcs12Error"
+        pkcs12/mod.rs
+
+  结果一目了然 —— perr helper 存在，所有 map_err arm 都路由到
+  Pkcs12Error。直接写 6 个 matches!(err, Pkcs12Error(_))，
+  首次运行 24/0 全过，无需 eprintln 调试 + rtk proxy --nocapture
+  回查。
+
+与 T167 (CMS) 的对比：
+
+  certificate.rs   无 wrapper            Asn1Error(_)
+  cms/mod.rs       cerr → CmsError       CmsError(_)
+  pkcs12/mod.rs    perr → Pkcs12Error    Pkcs12Error(_)
+
+  三种 ASN.1-顶层入口三种 variant —— 由各模块各自决定是否在
+  解析层做 domain-specific 包装。这是写 matches! 时必须 grep
+  源码的第三层依据。
+
+沉淀的 meta-lesson 三条（截至 T168）：
+
+  Lesson 1 (T166)：
+    收紧断言时不要假设最显然的 variant；多步骤错误路径的失败
+    点比表面看起来更早。
+
+  Lesson 2 (T167)：
+    同一抽象层级的不同入口可对同样错误用不同 variant ——
+    取决于该入口是否做 domain-layer pre-validation 还是直接
+    delegate 到底层。
+
+  Lesson 3 (T168)：
+    写 matches! 前先 grep 模块顶层入口（from_der / decrypt /
+    verify_* 等）是否有 cerr / perr 类 wrapper helper —— 有则
+    全部走 domain variant；没有则走底层 raw variant
+    （如 Asn1Error）。
+
+T168 三步法：
+
+  1. inventory: grep -nE "\.is_err\(\)" target.rs
+  2. grep variant 来源:
+     grep -nE "fn cerr|fn perr|PkiError::SpecificVariant|
+              map_err.*PkiError" target.rs
+  3. 写 matches! + 注释引用 wrapper helper / 源码行号
+
+  三步走完后基本能零迭代命中（如本次 T168）。
+
+验证：
+
+  cargo test -p hitls-pki --all-features --lib pkcs12: 24/0
+  grep -c "\.is_err()" pkcs12/mod.rs: 0（全 6 处清完）
+  cargo test --workspace --all-features: 8529/0（无回归）
+  cargo fmt --all --check + RUSTFLAGS="-D warnings"
+    cargo clippy -p hitls-pki --all-features --all-targets: clean
+
+作用域：
+
+  仅测试断言精度化。
+  零产品代码改、零 API surface 变化、零测试数量变化。
+  外部下游零影响。
+
+#55 累计进度（77.1%）：
+
+  T163 verify.rs           6   6/83
+  T164 hostname.rs        12  18/83
+  T165 certificate.rs     11  29/83
+  T166 6 小文件杂项      10  39/83
+  T167 cms/ 全套          19  58/83
+  T168 pkcs12/mod.rs       6  64/83 (77.1%)
+  剩余 verify.rs 老 paired 冗余 (~16) + 其他 (~3) ≈ 19 处
+
+后续 T169+ 推荐目标：
+
+  verify.rs 老 paired is_err() 冗余清理 (~16 处) —— T163 之后
+    剩下的 "is_err() + matches!() 配对" 中去掉冗余 is_err()；
+    纯语法精简无变体判断；约半天 / 1 个 PR
+
+  剩余 ~3 处零散站点
+
+  两批做完 #55 100% 关闭
+
+迁移 tally (post-T168)：
+
+  All algos (35 rows): 3199 / 3772 / 240 / 7 / 6494（不变）
+
+Recorded as DEV_LOG Phase T168.
