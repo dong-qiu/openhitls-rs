@@ -12029,3 +12029,66 @@ Issue #51 进度: T170 ~10/30 → T171 ~19/30 → T172 ~27/30;
               剩 ~3 处 pkcs12 收尾走 T173.
 
 Recorded as DEV_LOG Phase T172.
+
+### T173 — #51 CLI 覆盖第四弹（收官）：pkcs12 子命令错误路径精度化
+
+> 等 #248 合并后继续 T173
+
+承接 T170/T171/T172 之后, T173 关闭 issue #51 端到端.
+pkcs12 模块测试 4 → 13; .is_err() 计数清零.
+纯测试新增 + 0 处产品代码改动 — 与前三弹的「测试 + refactor/feature」
+模式形成对照: pkcs12 module 已经稳定, CLI run/run_export 错误处理
+已就绪, 本 PR 仅补缺失的负向 coverage.
+
+改动:
+  测试 helper 抽取:
+    build_test_pk_der()    - 原内联在 export_roundtrip 的 PK DER 构造
+    build_test_cert_der()  - 同上的 cert DER 构造
+    tmp(name)              - 路径工厂 (同 T171/T172)
+    default_opts()         - 默认 Pkcs12Options + struct-update 模式
+
+  新增 9 个负向路径测试:
+    test_pkcs12_wrong_password_fails          (C TC002 r5-r8)
+    test_pkcs12_missing_input_file            (C TC003 r4 跨平台)
+    test_pkcs12_malformed_p12_data            (T168 perr 复用)
+    test_pkcs12_no_input_no_export            (CLI guard assert_eq!)
+    test_pkcs12_export_missing_inkey_file     (C TC003 r2)
+    test_pkcs12_export_missing_cert_file      (C TC003 r3)
+    test_pkcs12_export_inkey_no_private_key_block  (C TC003 r6)
+    test_pkcs12_export_cert_file_with_no_certificate_blocks
+                                              (C TC003 r7 pin silent-accept)
+    test_pkcs12_nocerts_mode                  (sym 对 nokeys)
+
+C TC 未迁:
+  TC001 真实 fixture (Rust stub PK/cert 已覆盖路径)
+  TC002 密码长度边界 (Rust 不验)
+  TC004-006 PBE/MAC 算法选择 (Rust feature 缺口)
+  TC007 -name friendly alias  (API 不支持)
+  TC008 file:/pass: 协议      (未实现)
+  TC009 interactive prompt    (Rust CLI 非交互)
+  TC010-012 input-driven      (C tutil 框架特有)
+  TC011 stub                  (? + From)
+
+验证:
+  cargo test -p hitls-cli --all-features pkcs12::  13/0
+  cargo test -p hitls-cli --all-features           210/0 + 5 ignored
+  cargo fmt --all --check                          clean
+  cargo clippy --workspace -- -D warnings          clean
+  grep -cE "\.is_err\(\)" pkcs12.rs                0
+
+Issue #51 关闭进度 (最终):
+  T170 ~10/30 → T171 ~19/30 → T172 ~27/30 → T173 30/30 (100%)
+  跨 4 个 PR 共 36 net new tests (超出 30 因为 prime/rand/crl 都做了
+  产品层改动让原本不可测的错误路径变可测):
+    prime:  10 (含 composite path refactor)
+    rand:    9 (含 -out + binary feature)
+    crl:     8 (含 --cafile + DER/PEM convert feature)
+    pkcs12:  9 (纯测试)
+  #51 issue 可关闭.
+
+沿用方法学:
+  R23 §12.8 grep before assert_eq!
+  T168 PKCS#12 perr zero-iteration: 第一遍即知 from_der 全路径
+       走 Pkcs12Error → starts_with("pkcs12 error:") 单一前缀
+
+Recorded as DEV_LOG Phase T173.

@@ -123,7 +123,7 @@ fn run_export(
 mod tests {
     use super::*;
 
-    fn create_test_p12(password: &str) -> Vec<u8> {
+    fn build_test_pk_der() -> Vec<u8> {
         use hitls_utils::asn1::Encoder;
         let mut alg_inner = Vec::new();
         let mut e = Encoder::new();
@@ -147,12 +147,39 @@ mod tests {
         pki_inner.extend_from_slice(&key_octet);
         let mut e6 = Encoder::new();
         e6.write_sequence(&pki_inner);
-        let pk = e6.finish();
-        let cert_inner = vec![0x30, 0x03, 0x02, 0x01, 0x01];
-        let mut e7 = Encoder::new();
-        e7.write_sequence(&cert_inner);
-        let cert = e7.finish();
+        e6.finish()
+    }
+
+    fn build_test_cert_der() -> Vec<u8> {
+        use hitls_utils::asn1::Encoder;
+        let inner = vec![0x30, 0x03, 0x02, 0x01, 0x01];
+        let mut e = Encoder::new();
+        e.write_sequence(&inner);
+        e.finish()
+    }
+
+    fn create_test_p12(password: &str) -> Vec<u8> {
+        let pk = build_test_pk_der();
+        let cert = build_test_cert_der();
         hitls_pki::pkcs12::Pkcs12::create(Some(&pk), &[&cert], password).unwrap()
+    }
+
+    fn tmp(name: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("hitls_pkcs12_test_{name}"))
+    }
+
+    fn default_opts<'a>() -> Pkcs12Options<'a> {
+        Pkcs12Options {
+            input: None,
+            password: "",
+            info: false,
+            nokeys: false,
+            nocerts: false,
+            export: false,
+            inkey: None,
+            cert_file: None,
+            output: None,
+        }
     }
 
     #[test]
@@ -296,5 +323,239 @@ mod tests {
         let _ = fs::remove_file(&tmp_key);
         let _ = fs::remove_file(&tmp_cert);
         let _ = fs::remove_file(&tmp_p12);
+    }
+
+    // ---- C SDV migrated / negative-path tests ----
+
+    // C TC002 r5/r6/r7/r8: wrong password on decode → PASSWD_FAIL
+    #[test]
+    fn test_pkcs12_wrong_password_fails() {
+        let p12_data = create_test_p12("correctpass");
+        let tmp_p12 = tmp("wrongpw.p12");
+        fs::write(&tmp_p12, &p12_data).unwrap();
+        let opts = Pkcs12Options {
+            input: tmp_p12.to_str(),
+            password: "wrongpass",
+            info: true,
+            ..default_opts()
+        };
+        // from_der returns PkiError::Pkcs12Error(_) (HMAC mismatch). The CLI propagates it via `?`,
+        // and Display for PkiError::Pkcs12Error renders as "PKCS#12 error: ...".
+        let err = run(&opts).unwrap_err();
+        let s = err.to_string();
+        assert!(
+            s.starts_with("pkcs12 error:"),
+            "expected PkiError::Pkcs12Error display ('pkcs12 error: ...'), got: {s}"
+        );
+        let _ = fs::remove_file(&tmp_p12);
+    }
+
+    // C TC003 r4: -in noexistfile (decode mode) → BSL_FAIL / I/O "path not found"
+    #[test]
+    fn test_pkcs12_missing_input_file() {
+        let path = tmp("nonexistent_subdir").join("missing.p12");
+        let path_s = path.to_str().unwrap();
+        let opts = Pkcs12Options {
+            input: Some(path_s),
+            password: "any",
+            info: true,
+            ..default_opts()
+        };
+        let err = run(&opts).unwrap_err();
+        let s = err.to_string();
+        assert!(
+            s.contains("No such file") || s.contains("cannot find"),
+            "expected POSIX/Windows 'path not found' I/O error, got: {s}"
+        );
+    }
+
+    // Decode garbage bytes → Pkcs12 parse failure surfaces via PkiError::Pkcs12Error.
+    // Per the T168 audit (PKCS#12 §6), every from_der error path is wrapped by the local
+    // `perr` helper into PkiError::Pkcs12Error, so even ASN.1-shape failures surface as such.
+    #[test]
+    fn test_pkcs12_malformed_p12_data() {
+        let tmp_p12 = tmp("garbage.p12");
+        fs::write(&tmp_p12, [0xFF; 64]).unwrap();
+        let opts = Pkcs12Options {
+            input: tmp_p12.to_str(),
+            password: "any",
+            info: true,
+            ..default_opts()
+        };
+        let err = run(&opts).unwrap_err();
+        let s = err.to_string();
+        assert!(
+            s.starts_with("pkcs12 error:"),
+            "expected PkiError::Pkcs12Error display ('pkcs12 error: ...'), got: {s}"
+        );
+        let _ = fs::remove_file(&tmp_p12);
+    }
+
+    // CLI-level guard: no --input + no --export → explicit error
+    #[test]
+    fn test_pkcs12_no_input_no_export() {
+        let opts = default_opts();
+        let err = run(&opts).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "--input is required when not in --export mode"
+        );
+    }
+
+    // C TC003 r2: -export -inkey noexistfile → BSL_FAIL / I/O error
+    #[test]
+    fn test_pkcs12_export_missing_inkey_file() {
+        let cert_pem = hitls_utils::pem::encode("CERTIFICATE", &build_test_cert_der());
+        let cert_p = tmp("missing_inkey_cert.pem");
+        fs::write(&cert_p, &cert_pem).unwrap();
+        let out_p = tmp("missing_inkey_out.p12");
+
+        let missing_key = tmp("nonexistent_subdir").join("missing.key");
+        let missing_key_s = missing_key.to_str().unwrap();
+        let cert_p_s = cert_p.to_str().unwrap();
+        let out_p_s = out_p.to_str().unwrap();
+
+        let opts = Pkcs12Options {
+            input: None,
+            password: "anypass",
+            export: true,
+            inkey: Some(missing_key_s),
+            cert_file: Some(cert_p_s),
+            output: Some(out_p_s),
+            ..default_opts()
+        };
+        let err = run(&opts).unwrap_err();
+        let s = err.to_string();
+        assert!(
+            s.contains("No such file") || s.contains("cannot find"),
+            "got: {s}"
+        );
+        let _ = fs::remove_file(&cert_p);
+    }
+
+    // C TC003 r3: -export -CAfile noexistfile (cert file) → BSL_FAIL / I/O error
+    #[test]
+    fn test_pkcs12_export_missing_cert_file() {
+        let key_pem = hitls_utils::pem::encode("PRIVATE KEY", &build_test_pk_der());
+        let key_p = tmp("missing_cert_key.pem");
+        fs::write(&key_p, &key_pem).unwrap();
+        let out_p = tmp("missing_cert_out.p12");
+
+        let missing_cert = tmp("nonexistent_subdir").join("missing.crt");
+        let missing_cert_s = missing_cert.to_str().unwrap();
+        let key_p_s = key_p.to_str().unwrap();
+        let out_p_s = out_p.to_str().unwrap();
+
+        let opts = Pkcs12Options {
+            input: None,
+            password: "anypass",
+            export: true,
+            inkey: Some(key_p_s),
+            cert_file: Some(missing_cert_s),
+            output: Some(out_p_s),
+            ..default_opts()
+        };
+        let err = run(&opts).unwrap_err();
+        let s = err.to_string();
+        assert!(
+            s.contains("No such file") || s.contains("cannot find"),
+            "got: {s}"
+        );
+        let _ = fs::remove_file(&key_p);
+    }
+
+    // C TC003 r6 spirit: inkey file has no PRIVATE KEY PEM block → explicit error
+    #[test]
+    fn test_pkcs12_export_inkey_no_private_key_block() {
+        let not_a_key = hitls_utils::pem::encode("CERTIFICATE", &build_test_cert_der());
+        let cert_p = tmp("no_pk_block_cert.pem");
+        let key_p = tmp("no_pk_block_key.pem");
+        fs::write(&cert_p, &not_a_key).unwrap();
+        fs::write(&key_p, &not_a_key).unwrap();
+        let out_p = tmp("no_pk_block_out.p12");
+
+        let key_p_s = key_p.to_str().unwrap();
+        let cert_p_s = cert_p.to_str().unwrap();
+        let out_p_s = out_p.to_str().unwrap();
+
+        let opts = Pkcs12Options {
+            input: None,
+            password: "anypass",
+            export: true,
+            inkey: Some(key_p_s),
+            cert_file: Some(cert_p_s),
+            output: Some(out_p_s),
+            ..default_opts()
+        };
+        let err = run(&opts).unwrap_err();
+        assert_eq!(err.to_string(), "no PRIVATE KEY block found in key file");
+        let _ = fs::remove_file(&cert_p);
+        let _ = fs::remove_file(&key_p);
+    }
+
+    // C TC003 r7 spirit: -CAfile pointing at a PEM file with no CERTIFICATE blocks → empty
+    // cert list. Pkcs12::create accepts that, but the resulting P12 has zero certs — assert that
+    // explicitly so a future regression where this silently becomes an error is caught.
+    #[test]
+    fn test_pkcs12_export_cert_file_with_no_certificate_blocks() {
+        let key_pem = hitls_utils::pem::encode("PRIVATE KEY", &build_test_pk_der());
+        let key_p = tmp("nocert_key.pem");
+        fs::write(&key_p, &key_pem).unwrap();
+        // Cert file contains only an unrelated PEM block (no CERTIFICATE label).
+        let no_cert_pem = hitls_utils::pem::encode("X509 CRL", &[0x30, 0x03, 0x02, 0x01, 0x01]);
+        let cert_p = tmp("nocert_certs.pem");
+        fs::write(&cert_p, &no_cert_pem).unwrap();
+        let out_p = tmp("nocert_out.p12");
+
+        let key_p_s = key_p.to_str().unwrap();
+        let cert_p_s = cert_p.to_str().unwrap();
+        let out_p_s = out_p.to_str().unwrap();
+
+        let opts = Pkcs12Options {
+            input: None,
+            password: "anypass",
+            export: true,
+            inkey: Some(key_p_s),
+            cert_file: Some(cert_p_s),
+            output: Some(out_p_s),
+            ..default_opts()
+        };
+        run(&opts).unwrap();
+        // Round-trip parse the generated P12 → should have 0 certs.
+        let p12_data = fs::read(&out_p).unwrap();
+        let parsed = hitls_pki::pkcs12::Pkcs12::from_der(&p12_data, "anypass").unwrap();
+        assert!(parsed.private_key.is_some());
+        assert_eq!(parsed.certificates.len(), 0);
+
+        let _ = fs::remove_file(&key_p);
+        let _ = fs::remove_file(&cert_p);
+        let _ = fs::remove_file(&out_p);
+    }
+
+    // Decode with nocerts=true → output PEM has the PRIVATE KEY but no CERTIFICATE blocks
+    #[test]
+    fn test_pkcs12_nocerts_mode() {
+        let p12_data = create_test_p12("nocerts");
+        let tmp_p12 = tmp("nocerts.p12");
+        let tmp_out = tmp("nocerts.pem");
+        fs::write(&tmp_p12, &p12_data).unwrap();
+        let tmp_p12_s = tmp_p12.to_str().unwrap();
+        let tmp_out_s = tmp_out.to_str().unwrap();
+        let opts = Pkcs12Options {
+            input: Some(tmp_p12_s),
+            password: "nocerts",
+            nocerts: true,
+            output: Some(tmp_out_s),
+            ..default_opts()
+        };
+        run(&opts).unwrap();
+        let pem = fs::read_to_string(&tmp_out).unwrap();
+        assert!(pem.contains("PRIVATE KEY"), "missing PRIVATE KEY block");
+        assert!(
+            !pem.contains("CERTIFICATE"),
+            "CERTIFICATE block should be suppressed: {pem}"
+        );
+        let _ = fs::remove_file(&tmp_p12);
+        let _ = fs::remove_file(&tmp_out);
     }
 }
