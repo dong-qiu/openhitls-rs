@@ -1183,7 +1183,7 @@ mod tests {
         // (a) the inner crypto verify returns `Ok(false)`; (b) the
         // signer's SPKI fails to parse for the sig-alg family →
         // `Err(_)`. There's no single variant to lock; OR stays.
-        assert!(result.is_err() || !result.unwrap());
+        assert!(matches!(result, Ok(false) | Err(_)));
     }
 
     #[test]
@@ -1233,7 +1233,7 @@ mod tests {
         // (a) `Ok(false)` (signature no longer matches the modified
         // tbs); (b) `Err(_)` if the tamper accidentally corrupts an
         // ASN.1 length-prefix in tbs_raw. OR stays.
-        assert!(result.is_err() || !result.unwrap());
+        assert!(matches!(result, Ok(false) | Err(_)));
     }
 
     #[test]

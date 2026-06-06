@@ -11635,3 +11635,127 @@ T168 三步法：
   All algos (35 rows): 3199 / 3772 / 240 / 7 / 6494（不变）
 
 Recorded as DEV_LOG Phase T168.
+
+## T169 — #55 终章：PKI 弱断言精度化 100% 关闭 (2026-06-06)
+
+> 直接 1+2 合并一个 PR
+
+承接 T163-T168 之后，本 PR 终结 #55 工作。两类改动：
+
+(A) 16 处冗余 is_err 清理 (verify.rs)
+    T163 后剩下的 "is_err() + matches!() 配对" 中
+    删除冗余 assert!(result.is_err()); 行
+    纯语法精简，零变体判断
+    14 单行 + 2 个 4-line 块 = 16 sites / 22 lines
+
+(B) 7 处 OR 模式改 matches!
+    intentional dual-path 模式
+      assert!(result.is_err() || !result.unwrap())
+    改为
+      assert!(matches!(result, Ok(false) | Err(_)))
+    语义等价但更精确
+    分布：verify (1) + ocsp (2) + x509/mod (2) + crl (1) + cert (1) = 7
+
+合计 23 sites 处理（超出预估 19 因多行 assert! 块按 site 算）。
+
+hitls-pki/src 全树 .is_err() 计数 = 0 —— #55 完全关闭。
+
+TLS-trust 决策路径全清：
+
+  verify_cert / verify_signature / hostname / OCSP / CRL /
+  CMS / PKCS#12 / PKCS#8 所有 PKI 测试现在用 specific
+  PkiError variant 或 specific (Ok(false) | Err) 模式锁定语义，
+  no more bare is_err()。
+
+  未来 regression 时，错误路径被路由到错的 variant 立即报 test
+  失败 —— 不会再有 "弱断言放行"。
+
+工具 —— Python 批量精确处理：
+
+  (A) 按 1-indexed 行号删除：
+    single_lines = [882, 895, 907, 1095, 1173, 1190, 1218,
+                    1279, 1339, 1352, 1854, 1871, 1938, 2008]
+    blocks = [(1468, 1471), (1554, 1557)]
+    to_delete = set(L-1 for L in single_lines)
+    for s, e in blocks:
+        to_delete |= set(range(s-1, e))
+    new = [line for i, line in enumerate(lines)
+           if i not in to_delete]
+
+  (B) str.replace：因 OR 模式字符串本身唯一，replace_all 安全：
+    content = content.replace(
+      'assert!(result.is_err() || !result.unwrap());',
+      'assert!(matches!(result, Ok(false) | Err(_)));',
+    )
+
+为什么 matches!(result, Ok(false) | Err(_)) 等价但更精确：
+
+  语义等价：两路 valid failure
+    Err parse 失败 / Ok(false) verify 不通过
+  更精确：pattern match 锁定 Ok(false)
+    而非短路 !result.unwrap()（后者依赖 unwrap 顺序）
+  不需 PartialEq：Ok(false) 是 literal pattern，built-in 支持
+  保持原 inline 注释：解释为什么是两路
+
+验证：
+
+  cargo test -p hitls-pki --all-features --lib: 458/0
+  grep -rcE "\.is_err\(\)" crates/hitls-pki/src/: 0
+  cargo test --workspace --all-features: 8529/0（无回归）
+  cargo fmt --all --check + RUSTFLAGS="-D warnings"
+    cargo clippy -p hitls-pki --all-features --all-targets: clean
+
+#55 终章累计（100%）：
+
+  T163 verify.rs          6   6/87
+  T164 hostname.rs       12  18/87
+  T165 certificate.rs    11  29/87
+  T166 6 小文件杂项     10  39/87
+  T167 cms/ 子树         19  58/87
+  T168 pkcs12/mod.rs      6  64/87
+  T169 verify 冗余 + 7 OR 23  87/87
+
+  87 sites 完成（超出 #55 issue 描述的 83 因多行 assert 块每个
+  算 1 site）。
+
+T163-T169 沉淀的 3 条 meta-lesson：
+
+  Lesson 1 (T166)
+    多步骤错误路径的失败点比表面看起来更早
+    （PBKDF2 → CBC → cipher OID match 例）
+
+  Lesson 2 (T167)
+    同一抽象层级的不同入口可对同样错误用不同 variant
+    —— 取决于是否做 domain-layer pre-validation
+
+  Lesson 3 (T168)
+    写 matches! 前先 grep 模块顶层入口是否有 cerr/perr
+    类 wrapper helper —— 有则全部走 domain variant；没有
+    则走底层 raw variant (Asn1Error)
+
+T168 三步法（T163-T168 实战验证，T168 实现首次零迭代）：
+
+  1. inventory: grep -nE "\.is_err\(\)" target.rs
+  2. grep variant 来源:
+     grep -nE "fn cerr|fn perr|PkiError::SpecificVariant|
+              map_err.*PkiError" target.rs
+  3. 写 matches! + 注释引用 wrapper helper / 源码行号
+
+作用域：
+
+  仅测试断言精度化；零产品代码改、零 API surface 变化、
+  零测试数量变化。
+  外部下游零影响。
+
+后续：
+
+  #55 issue 现可在 GitHub 上关闭。本 PR merge 后建议手动 close。
+
+  未来 PR 维护者复用三条 meta-lesson + 三步法处理类似 "弱断言
+  精度化" 任务。
+
+迁移 tally (post-T169)：
+
+  All algos (35 rows): 3199 / 3772 / 240 / 7 / 6494（不变）
+
+Recorded as DEV_LOG Phase T169.

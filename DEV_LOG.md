@@ -414,6 +414,7 @@ Category summary:
 | 414 | I146 | Impl | **XMSS PRF_KEYGEN + PRF_msg RFC 8702 / SP 800-208 conformance fix** (resolves the T156-diagnosed reference-interop divergence; 7th bug found via the migration discipline, cf. SLH-DSA/I129, CTR-DRBG-df/I131, ASN.1/I133, ML-DSA/I137, CBC-MAC/I144, FrodoKEM/I145) — `crates/hitls-crypto/src/xmss/hash.rs` `prf_keygen` was implemented as the **original RFC 8391 §5.1 `PRF`** construction `H(toByte(3, plen) || SK.seed || ADRS)`, but RFC 8702 / NIST SP 800-208 §6.4 specifies a distinct **`PRF_KEYGEN`** for the WOTS+ secret-key derivation: `H(toByte(4, plen) || SK.seed || PK.seed || ADRS)` (binds `PK.seed` to prevent multi-target attacks; uses a distinct domain-separation byte `4` = `PADDING_PRF_KEYGEN`). The two bugs combined — wrong padding byte (`3` vs `4`) + missing `PK.seed` input — meant **every** WOTS+ sk-element in keygen/sign differed from the C reference → every leaf differed → `compute_root` produced a different `PK.root` → every signature differed. **Why it survived round-trip + T155 VERIFY KAT:** verify never calls `prf_keygen` (it recovers sk-elements from the signature itself via `wots_pk_from_sig` + `chain`), so the bug was invisible to `generate → sign → verify` self-tests and to verifying a C signature against a C public key. The mismatch only surfaces when Rust *generates* a key from a fixed seed and compares the public root against C's. **Also fixed** `prf_msg`: removed a spurious `msg` parameter from the PRF input — the C `PrfmsgGeneric` is `H(toByte(3, plen) || SK.prf || toByte(idx, 32))` with no message dependency; the buggy Rust version XOR'd `msg` in at the end, making `R` message-dependent and producing signatures that wouldn't byte-match C even after the PRF_KEYGEN fix. **Diagnosis path:** T156 diagnostic probe (single SHA2_10_256 GENKEY row) printed Rust's leaf[0], leaf[1] and `compute_root` output; comparing the in-source Rust `prf_keygen` against C `XPrfGeneric` in `xmss_hash.c` revealed both the padding byte and the missing-seed bugs at the same time. **Verified:** new permanent KAT lib test `test_xmss_compute_root_kat_sha2_10_256` (pins the first SDV GENKEY row's expected `PK.root` against `compute_root` from fixed seeds) passes; full `xmss` lib suite **63/0** (was 62/0 — net +1 new KAT test + the existing 62 unchanged); T155 `migrated_xmss` 42/0 unchanged (VERIFY KAT still passes as expected — it never depended on `prf_keygen`); `fmt` + `clippy -D warnings --all-features --all-targets` clean. **Production impact:** the externally-visible byte encoding of XMSS public keys (`PK.root`) and signatures (`R` + WOTS+ chains) now matches the RFC 8702 reference; previously a Rust-generated XMSS key/signature was not byte-compatible with any standard implementation. **Unblocks:** the 42 T156-deferred SIGN+GENKEY KAT migrations can now land as a follow-up (planned as T157) with the previously-prototyped `kat-nonce`-gated hooks | 2026-05-31 |
 | 415 | T157 | Test | C→Rust XMSS / XMSS-MT SIGN_KAT_TC001 + GENKEY_KAT_TC001 migration — re-lands the T156-prototype hooks after the I146 PRF_KEYGEN fix (XMSS coverage 42/88 → **84/88 (95.5%)**). Four new `kat-nonce`-gated public APIs on `XmssKeyPair` and `XmssMtKeyPair` (all `#[doc(hidden)] + #[deprecated(note = "test-only: …")]`): **`from_private_key(param_id, full_key_4n: &[u8], leaf_idx: u64)`** wraps the C row's pre-computed full secret key (`SK.seed || SK.prf || PK.seed || PK.root`) with an explicit leaf-counter — skips randomised keygen + trusts the row's `PK.root` (used by SIGN_KAT). **`from_seeds(param_id, sk_seed, sk_prf, pk_seed)`** mirrors `generate()`'s body with caller-supplied seeds (used by GENKEY_KAT; relies on the I146-fixed `compute_root` to reproduce C's `PK.root` byte-exact). XmssMtKeyPair gets the same two hooks. Emitter additions in `xtask/src/xmss.rs`: new `emit_sign_kat` (6-arg row `(algId, index, key, msg, sig, result)`; dispatches on the algId prefix and asserts `kp.sign(msg) == sig` byte-exact for CRYPT_SUCCESS rows or `kp.sign(msg).is_err()` for `CRYPT_XMSS_ERR_KEY_EXPIRED` rows — those have `index == 1 << h` and exercise the state-check); new `emit_genkey_kat` (3-arg row `(algId, key_3n, expected_root_2n)`; splits the key into three N-byte seeds and asserts both `kp.public_key()[4..4 + n] == expected_root[n..2n]` (`PK.root`) and `[4 + n..4 + 2n] == expected_root[..n]` (`PK.seed`)). New `xmss_n` / `xmssmt_n` helpers map the C algId to the security parameter `n` for slicing. The generated file's cfg gate widens to `all(feature = "xmss", feature = "kat-nonce")` (same pattern as SLH-DSA / HPKE). Result: `migrated_xmss.rs` — 42 → **84 byte-exact tests** (+42 = 14 GENKEY + 28 SIGN — 14 ok + 14 rej), all passing first run. **Production impact:** additive `kat-nonce`-only APIs (not compiled into the default build). No regression — `migrated_xmss` 84/0 (`-p hitls-crypto --all-features`); xtask `--check` drift gate passes; builds clean without `kat-nonce` (cfg gating verified); existing `xmss` lib tests 63/0 unchanged; `fmt` + `clippy -D warnings --all-features --all-targets` clean; na-list tally → 3098 emitted (XMSS 84/4/0/0/88, Total 3098/3729/240/109/6442). Remaining 4 XMSS rows are permanent API-surface: `API_NEW_TC001` + `GENKEY_TC001` (non-KAT) + `GETSET_KEY_TC001` + `GETSET_KEY_TC002`, all of which exercise EAL ctx CRUD only and have no Rust counterpart | 2026-05-31 |
 | 416 | T158 | Test | C→Rust SM9 (GB/T 38635) round-trip KAT migration (Phase A continued — first SM9 family). New emitter `xtask/src/sm9.rs` + `sm9` dispatch arm in `xtask/src/main.rs` pointing at **three** files (`crypto/sm9/test_suite_sdv_eal_sm9_{sign,crypt,exchange}.data`). The C SDV files are **API-test format** (no byte-exact KAT vectors) with a header-row convention (`SDV_X:argName1:argName2:…` followed by a data row with quoted hex), so the migration scope is **round-trip checks** with a fixed master secret per row. Migrated 7 round-trip tests: **SIGN_API_TC001 + TC002** (2 sign+verify rows; each asserts `master.verify(uid, msg, &sig).unwrap() == true` plus a negative wrong-message check), **CRYPT_API_TC001 + TC002** (2 same-user encrypt+decrypt rows), **CRYPT_API_TC003** (1 cross-user row — encrypt to B + decrypt with B's key + assert A's key cannot decrypt), **CHECK_KEYPAIR_FUNC_TC001** (1 dual-user extract + sign+verify both + negative cross-identity verify), **CHECK_PRVKEY_FUNC_TC001** (1 single-user extract + sign+verify round-trip). One new `kat-nonce`-gated public API on `Sm9MasterKey` (`#[doc(hidden)] + #[deprecated(note = "test-only: …")]`): **`from_master_secret(key_type, master_secret: &[u8])`** wraps the C row's fixed 32-byte `ks` and recomputes `master_public` via the same `ks * P2` (Sign) / `ks * P1` (Encrypt) derivation as `generate()`'s body. Header-row detection: rows where `args.first().as_hex().is_none()` (all-symbol arg list, no quoted hex) route to API-surface so they are counted but not migrated. SM9 row distribution: 38 total = 7 migrated + 31 API-surface (15 header rows + 14 ctx-CRUD rows + 2 `KEYEX_API_TC001/TC002` rows, the last of which are added to the na-list Structural Gaps table — Rust `Sm9MasterKey` has no SM9 key-exchange method per GB/T 38635 §4.4). **Production impact:** additive `kat-nonce`-only API. No regression — `migrated_sm9` 7/0 (`-p hitls-crypto --all-features`); xtask `--check` drift gate passes; builds clean without `kat-nonce` (cfg gating verified); existing `sm9` lib tests unchanged; `fmt` + `clippy -D warnings --all-features --all-targets` clean; na-list tally → 3105 emitted (SM9 7/31/0/0/38, Total 3105/3760/240/109/6480) | 2026-05-31 |
+| 444 | T169 | Test | **#55 终章：PKI 弱断言精度化 100% 关闭**（16 处冗余 is_err 清理 + 7 处 OR 模式改 matches!；全 PKI 树 .is_err() 计数 = 0）。承接 T163-T168 之后，本 PR 终结 #55 工作：（A）verify.rs **16 处** assert!(result.is_err()) 紧跟 assert!(matches!(...)) 或 match unwrap_err() 的冗余 is_err 行删除（14 单行 + 2 个 4-line assert! 块）—— 纯语法精简，零变体判断；（B）verify.rs / ocsp.rs / x509/mod.rs / crl.rs / certificate.rs 共 **7 处** intentional OR 模式 assert!(result.is_err() OR !result.unwrap()) 全部改写为 assert!(matches!(result, Ok(false) | Err(_))) —— 语义等价但更精确：明确锁定 Ok(false) 或 Err(_) 两种 valid failure paths，pattern match 而非短路评估。两种改动共 **23 sites** 完成（超出预估 19 因为多行 assert! 块按 site 而非 line 算）。**TLS-trust 决策路径全清**：verify_cert / verify_signature / hostname / OCSP / CRL / CMS / PKCS#12 / PKCS#8 等所有 PKI 测试现在用 specific PkiError variant 或 specific (Ok(false) | Err) 模式锁定语义，no more bare is_err()。**用 Python 脚本批量精确处理**：（A）按 1-indexed 行号删除；（B）`str.replace` 因 OR 模式字符串本身唯一，replace_all 安全。**验证**：cargo test -p hitls-pki --all-features --lib：458/0；grep -rcE "\.is_err\(\)" crates/hitls-pki/src/：**0**（整树 0 计数）；cargo test --workspace --all-features：**8529/0**（无回归）；cargo fmt --all --check + RUSTFLAGS="-D warnings" cargo clippy -p hitls-pki --all-features --all-targets：clean。**作用域**：仅测试断言精度化；零产品代码改、零 API surface 变化、零测试数量变化、外部下游零影响。**Issue 关闭进度**：#55 进度 64/83（T168）→ **83/83 (100%)**（T169，最后 23 处 = 16 冗余 + 7 OR）。**T163-T169 累计 86 sites**（66 真实收紧 + 16 冗余清理 + 4 改 matches!；超出 #55 issue 描述的 83 因为多行 assert! 块按 site 算）。**#55 issue 现可关闭**。**T163-T169 沉淀的 3 条 meta-lesson**：(1)（T166）多步骤错误路径的失败点比表面看起来更早；(2)（T167）同一抽象层级的不同入口可对同样错误用不同 variant —— 取决于是否做 domain-layer pre-validation；(3)（T168）写 matches! 前先 grep 模块顶层入口是否有 cerr/perr 类 wrapper helper —— 有则全部走 domain variant；没有则走底层 raw variant (Asn1Error)。**T168 三步法**（T163-T168 实战验证）：inventory → grep variant 来源 → 写 matches! + 注释引用 wrapper helper / 源码行号 | 2026-06-06 |
 | 443 | T168 | Test | **#55 章节 6：PKI PKCS#12 一次扫**（关闭 pkcs12/mod.rs 全部 6 处弱断言；首次零迭代完成 —— T167 meta-lesson 实战验证）。承接 T163-T167 之后，把 `crates/hitls-pki/src/pkcs12/mod.rs` 全部 6 处 `.is_err()` 一次性收紧到 `matches!(err, PkiError::Pkcs12Error(_))`。错误模型：pkcs12 模块定义本地 helper `perr(msg) -> PkiError::Pkcs12Error(msg.into())`（L679）；`from_der` 所有错误路径（外层 PFX SEQUENCE 解码、version INTEGER、authSafe ContentInfo、context-specific [0] tag、authSafe OCTET STRING、MAC verify HMAC compare、AuthenticatedSafe SEQUENCE OF ContentInfo 等）都包装到 `Pkcs12Error` 出口 —— 即便底层是 ASN.1 decoder 报错也由 perr 重包，不会泄出 raw `Asn1Error`。所以 6 处全部走同一 variant：（1）`test_pkcs12_wrong_password_fails`（错密码 → HMAC mismatch → `perr("HMAC: ...")`）；（2）`test_pkcs12_rejects_tampered_mac_constant_time`（PFX 倒数第 5 字节翻转 → 命中 MAC tag / salt-length / iteration field 之一 → 三条路径都过 perr）；（3）`test_p12_wrong_password`（同 1 但用真实 OpenSSL PFX 而非 Rust 自建）；（4-6）`test_pkcs12_empty_data` 三种 malformed DER 输入（空 / `[0x30, 0x00]` 空 SEQUENCE / 64 字节 0xFF）—— 全部在 `from_der` 第一个 `read_sequence` 或 inner `read_integer` 阶段失败，被 perr 包装成 `Pkcs12Error`。**首次零迭代 hit**：T166 的 pkcs8 wrong-len + T167 的两处 truncated/wrong-len 都因「假设最显然 variant」翻车。本次提前读 `from_der` 源码确认 perr 包装器（**沉淀的 meta-lesson 实战验证**：grep variant before writing matches!）—— 6 处全部首次运行通过，无需 eprintln 调试。**与 cms/T167 的对比**：cms/mod.rs::from_der 用 cerr 包装 → CmsError；pkcs12/mod.rs::from_der 用 perr 包装 → Pkcs12Error；certificate.rs::from_der 不包装 → Asn1Error。**三种 ASN.1-顶层入口三种 variant**，由各模块各自决定是否在解析层做 domain-specific 包装。**验证**：`cargo test -p hitls-pki --all-features --lib pkcs12`：24/0；`grep -c "\\.is_err()" pkcs12/mod.rs`：**0**（全 6 处清完）；`cargo test --workspace --all-features`：**8529/0**（无回归）；`cargo fmt --all --check` + `RUSTFLAGS="-D warnings" cargo clippy -p hitls-pki --all-features --all-targets`：clean。**作用域**：仅测试断言精度化；零产品代码改、零 API surface 变化、零测试数量变化、外部下游零影响。**Issue 关闭进度**：#55 进度 58/83（T167）→ **64/83 (77.1%)**（T168，verify.rs + hostname.rs + certificate.rs + 6 小文件 + CMS + PKCS#12）；剩 ~19 处跨 verify.rs 老 paired 冗余 (~16) + 其他 (~3) | 2026-06-06 |
 | 442 | T167 | Test | **#55 章节 5：PKI CMS 全套一次扫**（关闭 cms/ 子树 19 处弱断言；新增第二条 meta-lesson "同一抽象层级不同入口可对同样错误用不同 variant"）。承接 T163-T166 之后，把整个 CMS 子树一次性扫掉：`cms/mod.rs` 7 处 + `cms/enveloped.rs` 8 处 + `cms/encrypted.rs` 4 处 = **19 处全部收紧**。三文件错误模型清楚：mod.rs 内定义 `cerr(msg) -> PkiError::CmsError(msg.into())`，所有 CMS 显式错误路径都走该 helper；enveloped/encrypted 子模块 `use super::cerr;` 复用；Crypto 操作失败的 `.map_err(PkiError::from)` 链则路由到 `PkiError::CryptoError(_)`。**实际变体分布**：cms/mod.rs 7/7 → `CmsError(_)`（tampered Ed25519 sig + 3 个 verify_signatures wrong/tampered/no-data + truncated DER + find_signer_cert SKI not found + 2 个 sign verify failures）；cms/enveloped.rs **6 `CmsError(_)`**（not-EnvelopedData ×2 + no-recipient ×2 + no-encrypted-content + no-params）+ **2 `CryptoError(_)`**（wrong KEK → AES-KW integrity fail；15-byte KEK → AES key 构造拒）；cms/encrypted.rs **2 `CryptoError(_)`**（wrong key + tampered ciphertext，都走 GCM auth tag fail）+ **2 `CmsError(_)`**（key_len=15/16 wrong-length 在 encrypt_symmetric 内 CMS 层 pre-validation 即拒，不到 AES 层）。合计 **15 CmsError + 4 CryptoError**。**踩坑 + 新 meta-lesson**：第一次假设 `test_cms_parse_truncated` → `Asn1Error(_)`（与 certificate.rs 同款 ASN.1 顶层错），跑测失败 —— 实际 CMS 层在 `from_der` 内用 `cerr(&format!("ContentInfo: decode: {e}"))` 包装底层 ASN.1 error → 出口仍是 `CmsError(_)`。同理 `test_cms_encrypted_data_wrong_key_length` 第一次假设 `CryptoError(_)`（如 enveloped.rs 同款测试），跑测失败 —— 实际 encrypted.rs 的 `encrypt_symmetric` 调 AES 前做 key-len pre-validation 直接发 `cerr(...)` → `CmsError(_)`。**新 meta-lesson**：**同一抽象层级的不同入口可能对同样错误用不同 variant** —— 取决于该入口是否做 CMS 层 pre-validation 还是直接 delegate 到底层。enveloped.rs `decrypt_kek` 不验长直接交给 AES → CryptoError；encrypted.rs `encrypt_symmetric` CMS 层先验 → CmsError。修：依然是 `eprintln! + rtk proxy --nocapture`（T166 工具组合）查真实 variant。**每处加 1-3 行注释**解释 cerr 路径 + 在同函数族返回不同 variant 处显式 contrast 注释（cf. enveloped vs encrypted wrong-len 对照）。**验证**：`cargo test -p hitls-pki --all-features --lib cms`：82/0；`cargo test --workspace --all-features`：**8529/0**（无回归）；`cargo fmt --all --check` + `RUSTFLAGS="-D warnings" cargo clippy -p hitls-pki --all-features --all-targets`：clean。**作用域**：仅测试断言精度化；零产品代码改、零 API surface 变化、零测试数量变化、外部下游零影响。**Issue 关闭进度**：#55 进度 39/83（T166）→ **58/83**（T167，verify.rs + hostname.rs + certificate.rs + 6 小文件 + CMS 全套）；剩 ~25 处跨 pkcs12/ (6) + verify.rs 老 paired 冗余 (~16) + 其他 (~3) | 2026-06-06 |
 | 441 | T166 | Test | **#55 章节 4：PKI 小文件杂项一次扫**（关闭 6 文件 10 处弱断言 + 5 处 OR 模式加注释说明）。继 T163 (verify.rs) / T164 (hostname.rs) / T165 (certificate.rs) 之后，本 PR 把所有 ≤3 site 的 PKI 小文件一并扫掉。覆盖 6 文件：（1）`x509/crl.rs` 2 处 = 1 收紧（`test_parse_crl_no_next_update_is_rejected` → `PkiError::InvalidCrl(_)`，I155 strict UTCTime 之后的失败路径）+ 1 OR 注释（`test_verify_crl_signature_wrong_issuer` wrong-CA sig verify 两路）；（2）`x509/signing.rs` 1 处 = 1 收紧（`test_curve_id_to_oid_unsupported` SM2 curve 不在 NIST/Brainpool 白名单 → `PkiError::InvalidCert(_)` 含 "unsupported curve" message）；（3）`x509/ocsp.rs` 3 处 = 1 收紧（`test_ocsp_response_malformed` 0xFF DER → `PkiError::Asn1Error(_)`）+ 2 OR 注释（`test_ocsp_verify_signature_wrong_key` wrong-key sig + `test_ocsp_verify_signature_tampered` tampered tbs 都是两路失败）；（4）`pkcs8/mod.rs` 1 处 = 1 收紧（`test_pkcs8_invalid_version` version=5 触发显式 reject → `CryptoError::DecodeAsn1Fail`；用 `.err()` 而非 `.unwrap_err()` 因 `Pkcs8PrivateKey` 没 derive Debug）；（5）`pkcs8/encrypted.rs` 3 处 = 3 收紧（`test_encrypted_pkcs8_wrong_password` PBKDF2 derives 错 key + CBC decrypt + 后置 SEQUENCE 验证 fail → `CryptoError::InvalidPadding`；`test_encrypted_pkcs8_invalid_key_len` 两条：key_len=24 falls 到 cipher-OID match catch-all → `CryptoError::InvalidArg(_)`，key_len=8 fails earlier 在 AES key 构造 → `CryptoError::InvalidKey`，**两个不同 variant 因为失败路径不同**）；（6）`x509/mod.rs` 5 处 = 3 收紧（`test_parse_missing_issuer` + `test_parse_missing_pubkey` + `test_parse_missing_sig_alg`，全部 `Certificate::from_der` 漏 mandatory field → `PkiError::Asn1Error(_)`）+ 2 OR 注释（`test_*_verify_signature_wrong_key` RSA cert vs ECDSA key + `test_verify_ed448_bad_signature` 篡改 sig，都是两路）+ 加 `use hitls_types::PkiError;` import 让测试模块能看到该 variant。**踩坑教训**：pkcs8/encrypted key_len=8 第一次假设 `InvalidArg(_)`，跑测失败 —— 实际 variant 是 `CryptoError::InvalidKey`（AES key 构造在 PBKDF2 之后但在 OID match 之前 fails）。用 `eprintln!` debug-print + `rtk proxy` 绕开 rtk 摘要才看到真实 variant。**结论再强调一次（meta-lesson）**：收紧断言时不要假设最显然的 variant，必须沿调用栈追到真实失败点；尤其是多步骤错误路径（如 PBKDF2 → CBC → cipher OID match）。**验证**：`cargo test -p hitls-pki --all-features --lib`：**458/0**；`cargo test --workspace --all-features`：**8529/0**（无回归）；`cargo fmt --all --check` + `RUSTFLAGS="-D warnings" cargo clippy -p hitls-pki --all-features --all-targets`：clean。**作用域**：仅测试断言精度化 + 1 个 test-module import 添加（`use hitls_types::PkiError;`）；零产品代码改、零 API surface 变化、零测试数量变化、外部下游零影响。**Issue 关闭进度**：#55 进度 29/83（T165）→ **39/83**（T166，verify.rs + hostname.rs + certificate.rs + 6 个小文件）；剩 ~44 处跨 cms/ (19) + pkcs12/ (6) + verify.rs 老 paired `is_err()` 冗余清理 (~16) + 其他 (~3) | 2026-06-06 |
@@ -29229,6 +29230,150 @@ T168 三步法（基于这三条 lesson）：
 - 两批做完 **#55 100% 关闭**
 
 ### 迁移 tally（post-T168）
+
+| Category | Emitted | API-surface | Unknown | Unsupported | Total |
+|----------|--------:|------------:|--------:|------------:|------:|
+| All algos (35 rows in tally) | **3199** | **3772** | **240** | **7** | **6494** |
+
+（纯测试精度化，迁移侧统计不变。）
+
+## Phase T169 — #55 终章：PKI 弱断言精度化 100% 关闭（16 处冗余清理 + 7 处 OR 模式改 matches!）
+
+### 总结
+
+承接 T163-T168 之后，本 PR **终结 #55 工作**。两类改动：
+
+- **(A) 16 处冗余 `is_err()` 清理**（verify.rs）—— T163 后剩下的 "is_err() + matches!() 配对" 中删除冗余 `assert!(result.is_err());` 行；纯语法精简，零变体判断。
+- **(B) 7 处 OR 模式改 `matches!`**（verify.rs / ocsp.rs / x509/mod.rs / crl.rs / certificate.rs）—— intentional dual-path 模式 `assert!(result.is_err() || !result.unwrap())` 改为 `assert!(matches!(result, Ok(false) | Err(_)));`；语义等价但更精确。
+
+两类合计 **23 sites** 处理 —— 超出原预估 19，因为多行 `assert!(...)` 块每个按 1 site 算而非 4 lines。
+
+### `hitls-pki/src` 全树 `.is_err()` 计数 = 0
+
+```
+$ grep -rcE "\.is_err\(\)" crates/hitls-pki/src/
+0
+```
+
+**#55 完全关闭**。
+
+### (A) 16 处冗余清理细节
+
+verify.rs 的弱-strong 配对：
+
+```rust
+// 之前
+assert!(result.is_err());                                      // ← 冗余
+assert!(matches!(result.unwrap_err(), PkiError::IssuerNotFound));
+
+// 之后
+assert!(matches!(result.unwrap_err(), PkiError::IssuerNotFound));
+```
+
+14 个单行 + 2 个 4-line 块（L1468-1471 + L1554-1557 的多行 `assert!(\n    result.is_err(),\n    "msg",\n);` 形式）= 共 16 sites，22 lines 删除。
+
+### (B) 7 处 OR 模式重写
+
+intentional dual-path "sig verify 可能返回 Err 也可能 Ok(false)"：
+
+```rust
+// 之前
+assert!(result.is_err() || !result.unwrap());
+
+// 之后
+assert!(matches!(result, Ok(false) | Err(_)));
+```
+
+- **语义等价**：两路 valid failure（Err parse 失败 / Ok(false) verify 不通过）
+- **更精确**：pattern match 锁定 `Ok(false)` 而非短路 `!result.unwrap()`（后者依赖 unwrap 顺序）
+- **不需 PartialEq**：`Ok(false)` 是 literal pattern，built-in 支持
+- **保持原 inline 注释**：解释为什么是两路
+
+分布：verify.rs (1) + ocsp.rs (2) + x509/mod.rs (2) + crl.rs (1) + certificate.rs (1) = 7 sites。
+
+### TLS-trust 决策路径全清
+
+`verify_cert` / `verify_signature` / `hostname verify` / OCSP / CRL / CMS / PKCS#12 / PKCS#8 **所有 PKI 测试**现在用 specific `PkiError` variant 或 specific `(Ok(false) | Err)` 模式锁定语义，**no more bare `is_err()`**。
+
+未来 regression 时，错误路径被路由到错的 variant 立即报 test 失败 —— 不会再有"弱断言放行"。
+
+### 工具：Python 批量精确处理
+
+(A) 用 1-indexed 行号删除：
+
+```python
+single_lines = [882, 895, 907, 1095, 1173, 1190, 1218, 1279, 1339, 1352,
+                1854, 1871, 1938, 2008]
+blocks = [(1468, 1471), (1554, 1557)]
+to_delete = set(L - 1 for L in single_lines)
+for s, e in blocks:
+    to_delete |= set(range(s - 1, e))
+new = [line for i, line in enumerate(lines) if i not in to_delete]
+```
+
+(B) 用 `str.replace`：因 OR 模式字符串本身唯一，`replace_all` 安全：
+
+```python
+content = content.replace(
+    'assert!(result.is_err() || !result.unwrap());',
+    'assert!(matches!(result, Ok(false) | Err(_)));',
+)
+```
+
+### 验证
+
+- `cargo test -p hitls-pki --all-features --lib`：**458/0**。
+- `grep -rcE "\.is_err\(\)" crates/hitls-pki/src/`：**0**（整树 0 计数）。
+- `cargo test --workspace --all-features`：**8529/0**（无回归）。
+- `cargo fmt --all -- --check`：clean。
+- `RUSTFLAGS="-D warnings" cargo clippy -p hitls-pki --all-features --all-targets`：clean。
+
+### 作用域
+
+- 仅测试断言精度化；零产品代码改、零 API surface 变化、零测试数量变化。
+- 外部下游零影响。
+
+### 文件改动
+
+- `crates/hitls-pki/src/x509/verify.rs` —— 删 16 处冗余 + 改 1 处 OR
+- `crates/hitls-pki/src/x509/ocsp.rs` —— 改 2 处 OR
+- `crates/hitls-pki/src/x509/mod.rs` —— 改 2 处 OR
+- `crates/hitls-pki/src/x509/crl.rs` —— 改 1 处 OR
+- `crates/hitls-pki/src/x509/certificate.rs` —— 改 1 处 OR
+
+### #55 终章累计（**100%**）
+
+| 阶段 | 模块 | 收紧/清理 | 累计 |
+|---|---|---|---|
+| T163 | x509/verify.rs | 6 | 6 |
+| T164 | x509/hostname.rs | 12 | 18 |
+| T165 | x509/certificate.rs | 11 | 29 |
+| T166 | 6 小文件杂项 | 10 | 39 |
+| T167 | cms/ 子树 | 19 | 58 |
+| T168 | pkcs12/mod.rs | 6 | 64 |
+| **T169** | **verify 冗余 + 7 OR** | **23** | **87** |
+
+**87 sites 完成**（超出 #55 issue 描述的 83 因多行 assert 块每个算 1 site）。
+
+### T163-T169 沉淀的 3 条 meta-lesson（写入 c-test-migration-plan §12.4 后续 retrospective 候选）
+
+1. **(T166)** 多步骤错误路径的失败点比表面看起来更早（PBKDF2 → CBC → cipher OID match 例）
+2. **(T167)** 同一抽象层级的不同入口可对同样错误用不同 variant —— 取决于是否做 domain-layer pre-validation
+3. **(T168)** 写 `matches!` 前先 grep 模块顶层入口是否有 cerr/perr 类 wrapper helper —— 有则全部走 domain variant；没有则走底层 raw variant（如 Asn1Error）
+
+### T168 三步法（T163-T168 实战验证，T168 实现首次零迭代）
+
+1. **inventory**：`grep -nE "\.is_err\(\)" target.rs`
+2. **grep variant 来源**：`grep -nE "fn cerr|fn perr|PkiError::SpecificVariant|map_err.*PkiError" target.rs`
+3. **写 `matches!` + 注释**：引用 wrapper helper / 源码行号
+
+### 后续
+
+**#55 issue 现可在 GitHub 上关闭**。本 PR merge 后建议手动 close。
+
+未来 PR 维护者复用三条 meta-lesson + 三步法处理类似 "弱断言精度化" 任务。
+
+### 迁移 tally（post-T169）
 
 | Category | Emitted | API-surface | Unknown | Unsupported | Total |
 |----------|--------:|------------:|--------:|------------:|------:|

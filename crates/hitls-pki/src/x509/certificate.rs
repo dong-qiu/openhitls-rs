@@ -1162,7 +1162,7 @@ mod tests {
 
         // cert1 verified against cert2's key should fail
         let result = cert1.verify_signature(&cert2);
-        assert!(result.is_err() || !result.unwrap());
+        assert!(matches!(result, Ok(false) | Err(_)));
     }
 
     #[test]

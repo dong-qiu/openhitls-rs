@@ -194,7 +194,7 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
         // returns `Ok(false)`; (b) the SPKI's OID lookup rejects the
         // mismatched algorithm and returns `Err(_)`. OR stays.
         let result = rsa_cert.verify_signature(&ecdsa_cert);
-        assert!(result.is_err() || !result.unwrap());
+        assert!(matches!(result, Ok(false) | Err(_)));
     }
 
     #[test]
@@ -1499,7 +1499,7 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
         // Ed448 verify rejects the modified sig with `Ok(false)`;
         // (b) the byte flip lands on the sig's structural header and
         // the EdDSA layer returns `Err(_)`. OR stays.
-        assert!(result.is_err() || !result.unwrap());
+        assert!(matches!(result, Ok(false) | Err(_)));
     }
 
     #[test]

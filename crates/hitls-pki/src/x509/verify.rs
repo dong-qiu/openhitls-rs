@@ -879,7 +879,6 @@ zYvWHlcn
         let ee = end_entity();
         // No intermediates provided — should fail
         let result = verifier.verify_cert(&ee, &[]);
-        assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), PkiError::IssuerNotFound));
     }
 
@@ -892,7 +891,6 @@ zYvWHlcn
         let ee = end_entity();
         let intermediates = [intermediate_ca()];
         let result = verifier.verify_cert(&ee, &intermediates);
-        assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), PkiError::CertExpired));
     }
 
@@ -904,7 +902,6 @@ zYvWHlcn
         let ee = end_entity();
         let intermediates = [intermediate_ca()];
         let result = verifier.verify_cert(&ee, &intermediates);
-        assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), PkiError::MaxDepthExceeded(1)));
     }
 
@@ -1092,7 +1089,6 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
         let mut verifier = CertificateVerifier::new();
         verifier.add_trusted_cert(root);
         let result = verifier.verify_cert(&leaf, &[wrong_inter]);
-        assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), PkiError::IssuerNotFound));
     }
 
@@ -1170,7 +1166,6 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
         let mut verifier = CertificateVerifier::new();
         verifier.add_trusted_cert(root);
         let result = verifier.verify_cert(&leaf, &[inter]);
-        assert!(result.is_err());
         match result.unwrap_err() {
             PkiError::BasicConstraintsViolation(_) => {}
             e => panic!("expected BasicConstraintsViolation, got: {e:?}"),
@@ -1187,7 +1182,6 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
         let mut verifier = CertificateVerifier::new();
         verifier.add_trusted_cert(root);
         let result = verifier.verify_cert(&leaf, &[inter]);
-        assert!(result.is_err());
         match result.unwrap_err() {
             PkiError::BasicConstraintsViolation(_) => {}
             e => panic!("expected BasicConstraintsViolation, got: {e:?}"),
@@ -1215,7 +1209,6 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
         let mut verifier = CertificateVerifier::new();
         verifier.add_trusted_cert(root);
         let result = verifier.verify_cert(&leaf, &[inter1, inter2]);
-        assert!(result.is_err());
         match result.unwrap_err() {
             PkiError::BasicConstraintsViolation(_) => {}
             e => panic!("expected BasicConstraintsViolation, got: {e:?}"),
@@ -1276,7 +1269,6 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
         verifier.add_trusted_cert(root);
         verifier.set_max_depth(2);
         let result = verifier.verify_cert(&leaf, &[inter1, inter2]);
-        assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), PkiError::MaxDepthExceeded(2)));
     }
 
@@ -1336,7 +1328,6 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
         verifier.add_trusted_cert(root);
         verifier.set_verification_time(1_735_689_600); // 2025-01-01
         let result = verifier.verify_cert(&leaf, &[inter]);
-        assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), PkiError::CertExpired));
     }
 
@@ -1349,7 +1340,6 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
         verifier.add_trusted_cert(root.clone());
         verifier.set_verification_time(1_735_689_600); // 2025-01-01
         let result = verifier.verify_cert(&root, &[]);
-        assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), PkiError::CertExpired));
     }
 
@@ -1465,10 +1455,6 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
         v.set_required_eku(known::kp_server_auth());
         let client = Certificate::from_der(EKU_CLIENT_GOOD).unwrap();
         let result = v.verify_cert(&client, &[eku_ca()]);
-        assert!(
-            result.is_err(),
-            "clientAuth cert should fail serverAuth check"
-        );
         match result.unwrap_err() {
             PkiError::ExtKeyUsageViolation(_) => {}
             e => panic!("expected ExtKeyUsageViolation, got: {e:?}"),
@@ -1551,10 +1537,6 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
         v.set_required_eku(known::kp_code_signing());
         let server = Certificate::from_der(EKU_SERVER_GOOD).unwrap();
         let result = v.verify_cert(&server, &[eku_ca()]);
-        assert!(
-            result.is_err(),
-            "serverAuth cert should fail codeSigning check"
-        );
         match result.unwrap_err() {
             PkiError::ExtKeyUsageViolation(_) => {}
             e => panic!("expected ExtKeyUsageViolation, got: {e:?}"),
@@ -1851,7 +1833,6 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
         let mut v = CertificateVerifier::new();
         v.add_trusted_cert(ca);
         let result = v.verify_cert(&ee, &[]);
-        assert!(result.is_err(), "DNS outside permitted should fail");
         match result.unwrap_err() {
             PkiError::NameConstraintsViolation(_) => {}
             e => panic!("expected NameConstraintsViolation, got: {e:?}"),
@@ -1868,7 +1849,6 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
         let mut v = CertificateVerifier::new();
         v.add_trusted_cert(ca);
         let result = v.verify_cert(&ee, &[]);
-        assert!(result.is_err(), "DNS in excluded should fail");
         match result.unwrap_err() {
             PkiError::NameConstraintsViolation(_) => {}
             e => panic!("expected NameConstraintsViolation, got: {e:?}"),
@@ -1935,7 +1915,6 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
         let mut v = CertificateVerifier::new();
         v.add_trusted_cert(ca);
         let result = v.verify_cert(&ee, &[]);
-        assert!(result.is_err(), "excluded should override permitted");
         match result.unwrap_err() {
             PkiError::NameConstraintsViolation(_) => {}
             e => panic!("expected NameConstraintsViolation, got: {e:?}"),
@@ -2005,7 +1984,6 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
         verifier.set_verification_time(1_763_164_800);
 
         let result = verifier.verify_cert(&server2, &[]);
-        assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), PkiError::CertRevoked));
     }
 
@@ -2348,6 +2326,6 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
         let leaf = Certificate::from_pem(SIGPARAM_RSA_PSS_LEAF).unwrap();
         let result = leaf.verify_signature(&root);
         // Should fail — wrong key
-        assert!(result.is_err() || !result.unwrap());
+        assert!(matches!(result, Ok(false) | Err(_)));
     }
 }
