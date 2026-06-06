@@ -16,6 +16,7 @@ pub struct CertificateVerifier {
     max_depth: u32,
     verification_time: Option<i64>,
     check_revocation: bool,
+    require_crl: bool,
     required_eku: Option<Oid>,
 }
 
@@ -34,6 +35,7 @@ impl CertificateVerifier {
             max_depth: 10,
             verification_time: None,
             check_revocation: false,
+            require_crl: false,
             required_eku: None,
         }
     }
@@ -87,6 +89,23 @@ impl CertificateVerifier {
     /// Enable or disable revocation checking (default: disabled).
     pub fn set_check_revocation(&mut self, check: bool) -> &mut Self {
         self.check_revocation = check;
+        self
+    }
+
+    /// Configure strict-mode CRL coverage (default: disabled).
+    ///
+    /// When `require == true`, the revocation walk inside `verify_cert` returns
+    /// `PkiError::InvalidCrl` if it cannot find any CRL whose `issuer` DN matches
+    /// the in-chain issuer cert's subject DN for every step of the chain. When
+    /// `false` (the default), missing CRLs are silently skipped (soft-fail) —
+    /// matching the OpenSSL / openhitls-C "no CRL → continue" behaviour and the
+    /// many real-world deployments where not every CA in a chain publishes a
+    /// CRL on every revalidation.
+    ///
+    /// Strict mode has no effect when revocation checking is disabled
+    /// (`set_check_revocation(false)`).
+    pub fn set_require_crl(&mut self, require: bool) -> &mut Self {
+        self.require_crl = require;
         self
     }
 
@@ -413,7 +432,14 @@ impl CertificateVerifier {
             let issuer = &chain[i + 1];
 
             // Find a CRL from this issuer
-            if let Some(crl) = self.find_crl_for_issuer(issuer) {
+            let crl = self.find_crl_for_issuer(issuer);
+            if crl.is_none() && self.require_crl {
+                return Err(PkiError::InvalidCrl(format!(
+                    "no CRL found for issuer (DN: {}); strict-mode `require_crl` is enabled",
+                    issuer.subject
+                )));
+            }
+            if let Some(crl) = crl {
                 // RFC 5280 §6.3.3(f): the issuer of the CRL must have the cRLSign
                 // bit asserted in its KeyUsage extension. If the issuer cert has
                 // no KeyUsage extension, every usage is implicitly permitted
@@ -476,8 +502,9 @@ impl CertificateVerifier {
                     return Err(PkiError::CertRevoked);
                 }
             }
-            // If no CRL found for this issuer, skip (soft-fail).
-            // A strict mode could return an error here.
+            // If no CRL found for this issuer and strict mode is off, skip
+            // (soft-fail). The strict-mode early-return at the top of the loop
+            // body handles the `require_crl == true` case.
         }
         Ok(())
     }

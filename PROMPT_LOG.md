@@ -12273,3 +12273,66 @@ Issue #45 进度: T175 ~16/53 → T176 ~20/53.
   OID display 安全兜底 (避免错误诊断次生 panic)
 
 Recorded as DEV_LOG Phase T176.
+
+### T177 — #45 CRL_NOT_FOUND surfacing via set_require_crl(bool) + TC005 三层链 ALL-flag 迁移
+
+> 等 #252 合入后开始 T177
+
+承接 T175 cRLSign KU + T176 critical-ext, 关 T174 doc 列的 4 个 API 缺口里的第 3 个 —— CRL_NOT_FOUND surfacing.
+
+当前 Rust 行为 vs C 期待:
+  Rust verifier 默认 soft-fail (匹配 OpenSSL 默认 + openhitls C flag=0)
+  C 的 VFY_FLAG_CRL_ALL 期待 chain 每步必须有 CRL 否则 CRL_NOT_FOUND
+
+T177 引入新的 opt-in 严格模式, 两边都被支持, caller 显式选择.
+
+改动:
+  产品 (verify.rs, ~30 行):
+    CertificateVerifier 加 require_crl: bool 字段 (默认 false)
+    new() 初始化 false
+    新 public API set_require_crl(require: bool) builder-style
+    check_revocation_status: find_crl_for_issuer 返 None && require_crl
+                              → Err(PkiError::InvalidCrl("no CRL found for issuer ..."))
+    更新原 "soft-fail" 注释明确两条路径
+
+  测试 (migrated_crl_rfc5280_verify.rs 追加 6 个):
+    tc_line254 (TC005 r1)  strict mode 缺 root CRL → InvalidCrl  (trophy)
+    tc_line260 (TC005 r3)  三层链全 CRL 无撤销 ALL → Ok(3)
+    tc_line263 (TC005 r4)  root.crl 撤销 intermediate → CertRevoked
+    tc_line269 (TC005 r6)  同 r4 leaf 改 usr1 → CertRevoked
+    verify_revocation_strict_mode_accepts_all_crls_present  (synth +)
+    verify_revocation_strict_mode_rejects_missing_crl       (synth -)
+
+跨工具 fixture validation:
+  openssl x509 -in intermediate.crt 取 serial
+  openssl crl -in root.crl -text 列 revoked certs
+  → 确认 root.crl 撤销 intermediate.crt 的 serial 完全一致
+
+零 breaking change: 默认 require_crl=false 保持原 soft-fail 行为.
+
+4 个 API 缺口状态终板:
+  (a) cRLSign KU enforcement     ✅ T175
+  (b) critical-ext rejection      ✅ T176
+  (c) CRL_NOT_FOUND surfacing     ✅ T177 in this PR
+  (d) ALL/DEV flag split          仍 pending → T178+
+                                  (评估是否真 feature gap vs 实现选择差异;
+                                   大多 DEV-flag rows 语义与 Rust ALL 模式吻合,
+                                   可能不需新 API)
+
+验证:
+  cargo test --test migrated_crl_rfc5280_verify        17/0 (T175 7 + T176 4 + T177 6)
+  cargo test --test migrated_crl_rfc5280_gap            9/0 (T174 无回归)
+  cargo test -p hitls-pki --all-features             1558/0 (1552 → 1558)
+  cargo test --workspace --all-features              全 pass
+  cargo fmt --all --check                            clean
+  cargo clippy --workspace -- -D warnings            clean
+
+Issue #45 进度: T176 ~20/53 → T177 ~26/53.
+
+沿用方法学:
+  R23 §12.8 + T175/T176 模式
+  Builder-style fluent API (与 set_check_revocation / set_required_eku 一致)
+  跨工具 fixture validation (openssl 双工具确认 revocation 关系)
+  「产品扩展 + 默认零 breaking」 (opt-in 不影响现有调用者)
+
+Recorded as DEV_LOG Phase T177.
