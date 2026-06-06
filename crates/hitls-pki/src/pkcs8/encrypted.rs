@@ -274,8 +274,17 @@ mod tests {
         let pki_der = encode_ed25519_pkcs8_der(&seed);
 
         let encrypted = encrypt_pkcs8_der(&pki_der, "correct").unwrap();
-        // Wrong password should fail during decryption (bad padding)
-        assert!(decrypt_pkcs8_der(&encrypted, "wrong").is_err());
+        // Wrong password → PBKDF2 derives a different AES key →
+        // CBC-decrypt either yields random bytes that fail the
+        // post-decrypt SEQUENCE-validation check (mapped to
+        // `CryptoError::InvalidPadding` in `decrypt_pkcs8_der`'s
+        // map_err arm) or the AES-CBC unpadding itself rejects the
+        // garbage trailing byte. Either path surfaces
+        // `CryptoError::InvalidPadding`.
+        assert!(matches!(
+            decrypt_pkcs8_der(&encrypted, "wrong").unwrap_err(),
+            CryptoError::InvalidPadding
+        ));
     }
 
     #[test]
@@ -306,10 +315,25 @@ mod tests {
     fn test_encrypted_pkcs8_invalid_key_len() {
         let seed = [0x42u8; 32];
         let pki_der = encode_ed25519_pkcs8_der(&seed);
-        // key_len = 24 (AES-192) is not supported for encryption
-        assert!(encrypt_pkcs8_der_with(&pki_der, "pass", 24, 2048).is_err());
-        // key_len = 8 is invalid
-        assert!(encrypt_pkcs8_der_with(&pki_der, "pass", 8, 2048).is_err());
+        // key_len = 24 (AES-192) is not supported for PKCS#8 encryption
+        // — PBKDF2 derives a 24-byte key OK; AES-192 CBC then accepts
+        // it; only the `match key_len` cipher-OID lookup at the bottom
+        // of `encrypt_pkcs8_der_with` rejects it with
+        // `CryptoError::InvalidArg("")`.
+        assert!(matches!(
+            encrypt_pkcs8_der_with(&pki_der, "pass", 24, 2048).unwrap_err(),
+            CryptoError::InvalidArg(_)
+        ));
+        // key_len = 8 fails earlier — PBKDF2 derives 8 bytes, but the
+        // AES key constructor inside `cbc_encrypt` rejects a
+        // non-{16,24,32} key with `CryptoError::InvalidKey` (the
+        // unit-discriminant variant, not the `InvalidKeyLength`
+        // struct-variant — AES rejects the size class outright rather
+        // than reporting expected/got).
+        assert!(matches!(
+            encrypt_pkcs8_der_with(&pki_der, "pass", 8, 2048).unwrap_err(),
+            CryptoError::InvalidKey
+        ));
     }
 
     #[test]

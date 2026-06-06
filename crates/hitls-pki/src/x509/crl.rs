@@ -632,7 +632,15 @@ mod tests {
     /// that leniency — the parse now correctly fails. The C SDV row for
     /// this file is `CRL_PARSE_FILE_FUNC_TC007 → BSL_ASN1_ERR_DECODE_UTC_TIME`.
     fn test_parse_crl_no_next_update_is_rejected() {
-        assert!(CertificateRevocationList::from_pem(NO_NEXT_UPDATE_PEM).is_err());
+        // PEM parses cleanly (valid base64 inside `X509 CRL` markers); the
+        // failure surfaces inside `from_der` when the UTCTime decoder
+        // (post-I155 strict) refuses the zero-length tag. That parse
+        // failure routes through `from_der`'s map_err arms which uniformly
+        // wrap into `PkiError::InvalidCrl`.
+        assert!(matches!(
+            CertificateRevocationList::from_pem(NO_NEXT_UPDATE_PEM).unwrap_err(),
+            PkiError::InvalidCrl(_)
+        ));
     }
 
     #[test]
@@ -680,7 +688,12 @@ mod tests {
         // Use a different CA cert — should fail
         let wrong_ca = Certificate::from_pem(CA_CERT_PEM).unwrap();
         let result = crl.verify_signature(&wrong_ca);
-        // Either returns Ok(false) or Err — both indicate verification failure
+        // Sig-verify against the wrong CA can fail two ways and both are
+        // valid: (a) the inner crypto verify returns `Ok(false)` because
+        // the signature didn't match this key; (b) the issuer's SPKI
+        // can't be parsed for the CRL's `signatureAlgorithm` family, so
+        // `verify_signature` returns `Err(_)`. There's no single variant
+        // to lock, so the OR pattern stays.
         assert!(result.is_err() || !result.unwrap());
     }
 

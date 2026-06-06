@@ -11305,3 +11305,102 @@ wrong_issuer (L1117)：
   All algos (35 rows): 3199 / 3772 / 240 / 7 / 6494（不变）
 
 Recorded as DEV_LOG Phase T165.
+
+## T166 — #55 章节 4：PKI 小文件杂项一次扫 (2026-06-06)
+
+> 1
+
+继 T163 (verify.rs) / T164 (hostname.rs) / T165 (certificate.rs)
+之后，把所有 ≤3 site 的 PKI 小文件一并扫掉 —— 跨 6 个文件，
+10 处真实收紧 + 5 处 OR 模式加注释说明保留意义。
+
+文件清单：
+
+  x509/crl.rs        2 处   1 收紧 + 1 OR 注释
+  x509/signing.rs    1 处   1 收紧
+  x509/ocsp.rs       3 处   1 收紧 + 2 OR 注释
+  pkcs8/mod.rs       1 处   1 收紧（.err() 因无 Debug）
+  pkcs8/encrypted.rs 3 处   3 收紧（含 2 个不同 variant）
+  x509/mod.rs        5 处   3 收紧 + 2 OR 注释
+  合计              15 处  10 收紧 + 5 OR 注释
+
+10 处变体映射：
+
+  test_parse_crl_no_next_update_is_rejected   PkiError::InvalidCrl(_)
+  test_curve_id_to_oid_unsupported            PkiError::InvalidCert(_)
+                                              ("unsupported curve")
+  test_ocsp_response_malformed                PkiError::Asn1Error(_)
+  test_pkcs8_invalid_version                  CryptoError::DecodeAsn1Fail
+  test_encrypted_pkcs8_wrong_password         CryptoError::InvalidPadding
+  test_encrypted_pkcs8_invalid_key_len (24)   CryptoError::InvalidArg(_)
+  test_encrypted_pkcs8_invalid_key_len (8)    CryptoError::InvalidKey
+  test_parse_missing_issuer                   PkiError::Asn1Error(_)
+  test_parse_missing_pubkey                   PkiError::Asn1Error(_)
+  test_parse_missing_sig_alg                  PkiError::Asn1Error(_)
+
+5 处 OR 模式保留 + 注释说明：
+
+  test_verify_crl_signature_wrong_issuer      (Ok(false) 或 Err)
+  test_ocsp_verify_signature_wrong_key        (Ok(false) 或 Err)
+  test_ocsp_verify_signature_tampered         (Ok(false) 或 Err
+                                               from tamper 撞 length-prefix)
+  test_*_verify_signature_wrong_key (mod.rs)  (RSA vs ECDSA SPKI 两路)
+  test_verify_ed448_bad_signature             (Ok(false) 或 Err
+                                               from sig header 撞)
+
+踩坑教训（meta-lesson 再加固）：
+
+  pkcs8/encrypted.rs::test_encrypted_pkcs8_invalid_key_len 中
+  key_len=8 的 variant 第一次假设是 InvalidArg(_)（与 key_len=24
+  同路径），跑测失败。actual variant 是 CryptoError::InvalidKey
+  —— AES 在 CBC 内部 key 构造时 fail，先于 cipher-OID match
+  catch-all。
+
+  定位过程：
+    1. 第一次 matches!(InvalidArg(_)) panic
+    2. 改成 matches!(InvalidKeyLength { .. }) 仍 panic
+    3. 加 eprintln!("actual variant: {err:?}") debug print
+    4. 用 rtk proxy cargo test ... -- --nocapture 绕开 rtk
+       摘要才看到真实变体 → InvalidKey
+
+  Meta-lesson：收紧断言时不要假设最显然的 variant；多步骤错误
+  路径（PBKDF2 → CBC → cipher OID match）的失败点比表面看起来
+  更早。"用 eprintln! + rtk proxy --nocapture" 是定位错根因
+  变体的标准工具组合，可写入后续 #55 章节方法学。
+
+验证：
+
+  cargo test -p hitls-pki --all-features --lib: 458/0
+  cargo test --workspace --all-features: 8529/0（无回归）
+  cargo fmt --all --check + RUSTFLAGS="-D warnings"
+    cargo clippy -p hitls-pki --all-features --all-targets: clean
+
+作用域：
+
+  仅测试断言精度化 + 1 个 test-module import
+    (use hitls_types::PkiError; 在 x509/mod.rs::tests)
+  零产品代码改、零 API surface 变化、零测试数量变化
+  外部下游零影响
+
+#55 累计进度：
+
+  T163 verify.rs                     6 处   6/83
+  T164 hostname.rs                  12 处  18/83
+  T165 certificate.rs               11 处  29/83
+  T166 6 小文件杂项                10 处  39/83
+  剩余 cms/ (19) + pkcs12/ (6) +
+       verify.rs 老 paired 冗余 (~16) +
+       其他 (~3) ≈ 44 处
+
+后续 T167+ 推荐目标：
+
+  1. CMS 全套：mod (7) + enveloped (8) + encrypted (4) = 19 处
+  2. CMS 子集：cms/mod.rs (7 处)
+  3. pkcs12/mod.rs (6 处)
+  4. verify.rs 老 paired 冗余清理 (~16 处)
+
+迁移 tally (post-T166)：
+
+  All algos (35 rows): 3199 / 3772 / 240 / 7 / 6494（不变）
+
+Recorded as DEV_LOG Phase T166.

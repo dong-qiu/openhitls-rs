@@ -1179,6 +1179,10 @@ mod tests {
         let resp = OcspResponse::from_der(&der).unwrap();
         let basic = resp.basic_response.unwrap();
         let result = basic.verify_signature(&wrong_cert);
+        // Wrong-key sig verify can fail two ways and both are valid:
+        // (a) the inner crypto verify returns `Ok(false)`; (b) the
+        // signer's SPKI fails to parse for the sig-alg family →
+        // `Err(_)`. There's no single variant to lock; OR stays.
         assert!(result.is_err() || !result.unwrap());
     }
 
@@ -1225,6 +1229,10 @@ mod tests {
             basic.tbs_raw[len - 1] ^= 0xFF;
         }
         let result = basic.verify_signature(&cert);
+        // Tampered tbs can fail two ways and both are valid:
+        // (a) `Ok(false)` (signature no longer matches the modified
+        // tbs); (b) `Err(_)` if the tamper accidentally corrupts an
+        // ASN.1 length-prefix in tbs_raw. OR stays.
         assert!(result.is_err() || !result.unwrap());
     }
 
@@ -1262,9 +1270,11 @@ mod tests {
 
     #[test]
     fn test_ocsp_response_malformed() {
-        // Completely invalid DER
+        // Completely invalid DER: 0xFF isn't a valid ASN.1 tag, so the
+        // outer SEQUENCE read in `from_der` fails immediately → routed
+        // through the uniform `PkiError::Asn1Error` map_err arms.
         let result = OcspResponse::from_der(&[0xFF, 0xFF]);
-        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), PkiError::Asn1Error(_)));
     }
 
     #[test]

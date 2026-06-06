@@ -1004,7 +1004,16 @@ zwS7ekmeex/ZRkHXaFTKnywwOraGSJAlcwAwlMNLCrkZn9wm79fcuaRoBCCYpCZL
         outer_enc.write_sequence(&body);
         let der = outer_enc.finish();
 
-        assert!(parse_pkcs8_der(&der).is_err());
+        // version=5 hits the explicit `if version > 1` reject inside
+        // `parse_pkcs8_der`, which returns the catch-all
+        // `CryptoError::DecodeAsn1Fail` (rather than a typed
+        // `InvalidVersion` — the ASN.1 layer doesn't distinguish here).
+        // Use `.err()` instead of `.unwrap_err()` because
+        // `Pkcs8PrivateKey` doesn't derive `Debug`.
+        assert!(matches!(
+            parse_pkcs8_der(&der).err(),
+            Some(CryptoError::DecodeAsn1Fail)
+        ));
     }
 
     #[test]
