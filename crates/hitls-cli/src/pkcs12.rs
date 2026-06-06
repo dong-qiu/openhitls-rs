@@ -340,7 +340,7 @@ mod tests {
             ..default_opts()
         };
         // from_der returns PkiError::Pkcs12Error(_) (HMAC mismatch). The CLI propagates it via `?`,
-        // and Display for PkiError::Pkcs12Error renders as "PKCS#12 error: ...".
+        // and Display for PkiError::Pkcs12Error renders as "pkcs12 error: ...".
         let err = run(&opts).unwrap_err();
         let s = err.to_string();
         assert!(
