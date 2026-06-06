@@ -940,9 +940,15 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
         verifier.add_trusted_cert(unrelated_ca);
         let ee = end_entity();
         let intermediates = [intermediate_ca()];
-        // Chain should build but root won't be in trust store
+        // Chain partially builds (ee → intermediate), then stalls: the
+        // intermediate's issuer DN ("Root CA") is not found in either
+        // the intermediates slice (only intermediate is there) or the
+        // trust store (only `unrelated_ca`, with a different DN). So
+        // `find_issuer` returns `None` → `IssuerNotFound`. Pinning the
+        // specific variant catches any regression that would silently
+        // route this through `ChainVerifyFailed` or `MaxDepthExceeded`.
         let result = verifier.verify_cert(&ee, &intermediates);
-        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), PkiError::IssuerNotFound));
     }
 
     #[test]
@@ -1044,7 +1050,16 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
         let mut verifier = CertificateVerifier::new();
         verifier.add_trusted_cert(root);
         let result = verifier.verify_cert(&leaf_tampered, &[inter]);
-        assert!(result.is_err());
+        // Tampered leaf signature → issuer is found by DN, but the
+        // RSA / ECDSA verify on the leaf-vs-inter signature returns
+        // `Ok(false)`, which `verify_cert` wraps as
+        // `ChainVerifyFailed("signature verification failed")`. Closes
+        // the #57 acceptance criterion for `certVer_leaf_tampered.pem`
+        // by pinning the specific failure path, not just any error.
+        assert!(matches!(
+            result.unwrap_err(),
+            PkiError::ChainVerifyFailed(_)
+        ));
     }
 
     #[test]
@@ -1056,7 +1071,15 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
         let mut verifier = CertificateVerifier::new();
         verifier.add_trusted_cert(root);
         let result = verifier.verify_cert(&target_tampered, &[inter]);
-        assert!(result.is_err());
+        // Tampered CA signature → same `ChainVerifyFailed` path as the
+        // leaf-tampered case above (#57's `certVer_target_ca_tampered.pem`
+        // fixture). Tightening to the specific variant catches any
+        // regression that might silently route a sig failure through
+        // a different error path (e.g. `IssuerNotFound`).
+        assert!(matches!(
+            result.unwrap_err(),
+            PkiError::ChainVerifyFailed(_)
+        ));
     }
 
     #[test]
@@ -1081,12 +1104,17 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
         let leaf = Certificate::from_pem(CV_WA_LEAF).unwrap();
         let fake_root = Certificate::from_pem(CV_WA_FAKE_ROOT).unwrap();
 
-        // With fake root: chain builds to actual_root but it's not trusted
+        // With fake root: chain builds to actual_root but it's not trusted.
+        // Same dynamic as `test_verify_wrong_trust_anchor`: actual_root is
+        // self-signed and stays in `intermediates`, so `find_issuer` keeps
+        // matching it against its own DN → MaxDepthExceeded(10).
         let mut verifier = CertificateVerifier::new();
         verifier.add_trusted_cert(fake_root);
         let result = verifier.verify_cert(&leaf, &[inter.clone(), actual_root.clone()]);
-        // actual_root is self-signed but not in trust store → fails
-        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            PkiError::MaxDepthExceeded(10)
+        ));
 
         // With actual root: should succeed
         let mut verifier2 = CertificateVerifier::new();
@@ -1102,9 +1130,14 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
         let cycle_b = Certificate::from_pem(CV_CYCLE_B).unwrap();
 
         let verifier = CertificateVerifier::new();
-        // Neither is in trust store, so chain building should fail
+        // Neither is in trust store. find_issuer(cycle_a, [cycle_b])
+        // returns cycle_b (DN match), but then find_issuer(cycle_b,
+        // [cycle_b]) looks for cycle_b.issuer = cycle_a — not in
+        // intermediates and not in the (empty) trust store, so
+        // → IssuerNotFound. The cycle never actually iterates because
+        // only one half of the pair sits in `intermediates`.
         let result = verifier.verify_cert(&cycle_a, &[cycle_b]);
-        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), PkiError::IssuerNotFound));
     }
 
     // -----------------------------------------------------------------------

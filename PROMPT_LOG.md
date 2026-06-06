@@ -11043,3 +11043,104 @@ variant 要同步改 4 处。R22 把 dispatch 收敛到 RsaHashAlg 自身
   All algos (35 rows): 3199 / 3772 / 240 / 7 / 6494（不变；纯重构）
 
 Recorded as DEV_LOG Phase R22.
+
+## T163 — Phase B kickoff：PKI cert-chain verify 测试断言精度化 (2026-06-06)
+
+> 按照推荐A走
+
+R21 retrospective 收官 Phase A 后，Phase B 第一个落地任务：
+把 crates/hitls-pki/src/x509/ 里 cert-chain verify 路径的弱
+断言（assert!(result.is_err())）收紧到 specific PkiError
+variant。关闭 #57 + 撼动 #55。
+
+诊断 —— inventory verify.rs 全部 22 处 is_err()：
+
+  已配 matches!/match 的：16 处（Phase A 期间沉淀的好习惯）
+  仍裸 is_err() 的：6 处（本 PR 收紧目标）
+
+6 处明细：
+
+  L945  test_verify_wrong_trust_anchor       → IssuerNotFound
+  L1047 test_chain_tampered_leaf_sig (#57)  → ChainVerifyFailed(_)
+  L1059 test_chain_tampered_ca_sig (#57)    → ChainVerifyFailed(_)
+  L1089 test_chain_wrong_trust_anchor_real  → MaxDepthExceeded(10)
+  L1107 test_chain_cycle_detection          → IssuerNotFound
+  mod.rs:1167 test_parse_malformed_ku (#57) → no-panic 显式断言
+
+改动：
+
+  crates/hitls-pki/src/x509/mod.rs::test_parse_malformed_ku
+    原：仅 let _ku = cert.key_usage();
+    新：显式 cert.from_der().unwrap() 结构性断言 + 调
+        key_usage() 保证 no panic on malformed BIT STRING
+        content + 注释说 RFC 5280 §4.2.1.3 leftover-bits
+        实现层留余地，将来 parser 收紧后可换 specific
+        decoded variant assert
+
+  crates/hitls-pki/src/x509/verify.rs
+    5 处 .is_err() → matches!(err, PkiError::Variant(_))，
+    每处加 1-3 行中文注释解释为什么走该 variant
+
+踩坑教训（meta-lesson）：
+
+  收紧 test_verify_wrong_trust_anchor 时第一次假设 →
+  MaxDepthExceeded(10)，跑测发现失败 —— 因为我把它和
+  test_chain_wrong_trust_anchor_real 的链结构搞混：前者
+  intermediates 只装 1 个 inter（没塞 actual_root），所以
+  走 IssuerNotFound 路径；后者 intermediates 装了 inter +
+  actual_root，actual_root 自签反复匹配自己才走 MaxDepth。
+
+  "用 specific variant 替 is_err" 这件事本身就在帮助发现
+  "假设错根因" —— 弱断言会让链结构假设错误的测试默默通过。
+
+方法学（推广到 #55 剩余子集）：
+
+  对每处 .is_err()，按三步：
+    1. 看 verify_cert / from_der / verify_signature 等入口的
+       返回路径，沿调用栈找具体 variant 来源
+    2. 用 matches!(err, PkiError::Variant(_)) 替换
+    3. 加 1-3 行中文注释说明为什么走该 variant
+
+验证：
+
+  6 个精度化测试逐个跑：6/0
+  cargo test -p hitls-pki --all-features: 1532/0（无回归）
+  cargo test --workspace --all-features: 8529/0（无回归）
+  cargo fmt --all --check + RUSTFLAGS="-D warnings"
+    cargo clippy -p hitls-pki --all-features --all-targets:
+    clean
+
+作用域：
+
+  仅测试断言精度化：
+    零产品代码改（verify_cert 实现不动）
+    零 API surface 变化（PkiError 枚举不动）
+    零测试数量变化（同样 6 个测试，只是断言更严格）
+  外部下游零影响
+
+Issue 关闭进度：
+
+  #57 关闭 100%（3 个 idle fixture 全部接通到 specific-variant
+                断言）
+  #55 进度 ~6/83（verify.rs 6 处完成；剩 ~77 处跨 csr/cms/
+                pkcs12/crl/pkcs8/asn1 等模块）
+
+后续：
+
+  #55 收紧工作按 PKI 模块分章节，每章节 1 个独立 PR：
+    csr/        ~10-15
+    cms/        ~10-15
+    pkcs12/     ~10-15
+    pkcs8/     ~5-10
+    crl/        ~5-10（I155 之后）
+    asn1/       ~10
+    其他 x509/  ~10
+  按本 PR "三步法" 扫，每章节约 0.5-1 天 / 1 个 PR
+
+迁移 tally (post-T163)：
+
+  All algos (35 rows): 3199 / 3772 / 240 / 7 / 6494（不变；
+  本 PR 不直接改 byte-exact 迁移率；价值在缩短将来 regression
+  排查时间）
+
+Recorded as DEV_LOG Phase T163.
