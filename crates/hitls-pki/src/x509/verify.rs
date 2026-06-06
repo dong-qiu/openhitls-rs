@@ -1104,10 +1104,16 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
         let leaf = Certificate::from_pem(CV_WA_LEAF).unwrap();
         let fake_root = Certificate::from_pem(CV_WA_FAKE_ROOT).unwrap();
 
-        // With fake root: chain builds to actual_root but it's not trusted.
-        // Same dynamic as `test_verify_wrong_trust_anchor`: actual_root is
-        // self-signed and stays in `intermediates`, so `find_issuer` keeps
-        // matching it against its own DN → MaxDepthExceeded(10).
+        // With fake root: chain builds leaf → inter → actual_root, but
+        // actual_root is self-signed and is_trusted() rejects it (only
+        // fake_root is trusted). The next find_issuer iteration looks
+        // for actual_root.issuer = actual_root and matches it against
+        // itself inside `intermediates` — chain.push(actual_root) then
+        // repeats forever until `chain.len() > max_depth (10)`
+        // → MaxDepthExceeded(10). (Distinct from
+        // test_verify_wrong_trust_anchor above, which has only `inter`
+        // in intermediates and so hits IssuerNotFound when looking up
+        // inter's issuer DN.)
         let mut verifier = CertificateVerifier::new();
         verifier.add_trusted_cert(fake_root);
         let result = verifier.verify_cert(&leaf, &[inter.clone(), actual_root.clone()]);
