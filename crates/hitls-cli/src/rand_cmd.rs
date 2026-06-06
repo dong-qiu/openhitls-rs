@@ -132,10 +132,18 @@ mod tests {
         let _ = fs::remove_file(&path);
     }
 
-    // -out to an unwritable path → I/O error (C TC007 spirit: UIO_FAIL)
+    // -out to an unwritable path → I/O error (C TC007 spirit: UIO_FAIL).
+    // Use a path that does not exist as a parent directory; assertion accepts
+    // both POSIX "No such file or directory" (errno 2) and Windows
+    // "The system cannot find the path specified. (os error 3)".
     #[test]
     fn test_cli_rand_out_unwritable_dir() {
-        let err = run(16, "hex", Some("/nonexistent_rand_dir/out.txt")).unwrap_err();
-        assert!(err.to_string().contains("No such file"), "got: {}", err);
+        let path = tmp("nonexistent_subdir").join("out.txt");
+        let err = run(16, "hex", path.to_str()).unwrap_err();
+        let s = err.to_string();
+        assert!(
+            s.contains("No such file") || s.contains("cannot find"),
+            "expected POSIX/Windows 'path not found' I/O error, got: {s}"
+        );
     }
 }
