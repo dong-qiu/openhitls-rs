@@ -220,8 +220,8 @@ mod tests {
     fn test_run_cafile_signature_mismatch() {
         // server1.crt is signed BY ca.crt but it isn't itself an issuer of ca.crl, so
         // verifying ca.crl against server1.crt's public key must fail.
-        let crl_p = write_tmp("vfy_mis.crl", CRL_V1_PEM.as_bytes());
-        let bad_p = write_tmp("vfy_mis.crt", SERVER1_CRT_PEM.as_bytes());
+        let crl_p = write_tmp("vfy_mismatch.crl", CRL_V1_PEM.as_bytes());
+        let bad_p = write_tmp("vfy_mismatch.crt", SERVER1_CRT_PEM.as_bytes());
         let mut a = args_for(crl_p.to_str().unwrap());
         a.cafile = bad_p.to_str();
         let err = run(&a).unwrap_err();
