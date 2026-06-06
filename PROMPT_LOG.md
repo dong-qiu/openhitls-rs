@@ -12147,3 +12147,67 @@ Issue #45 进度: 0/53 → ~9/53. 剩 VERIFY_TC001/TC002 ALL-flag + TC003 + TC00
   「测试现在 + 暴露未来工作」双重价值 今 9 测试 / 明产品 fix 测试先红再绿驱动 issue 关闭
 
 Recorded as DEV_LOG Phase T174.
+
+### T175 — #45 RFC 5280 §6.3.3(f) cRLSign KeyUsage 强制 + verify-side 迁移第一弹
+
+> 针对T175，你的建议是？
+
+承接 T174 PARSE-side gap-closure, 转向 VERIFY-side. T174 文件顶部 doc 列的 4 个 API 缺口里, 选定影响最显然的 cRLSign KU enforcement (RFC 5280 §6.3.3(f)) 作为单点突破 —— 真 security bug, 最简单, 最影响显然.
+
+改动:
+  产品 (verify.rs::check_revocation_status, ~10 行):
+    在找到 CRL 后, 验证 CRL 签名前, 检查 issuer.key_usage() 是否含 CRL_SIGN bit
+    KU 缺席 → 放行 (RFC 5280 §4.2.1.3 隐式许可)
+    KU 存在但 cRLSign 未置 → PkiError::KeyUsageViolation("CRL issuer certificate
+                              lacks cRLSign key usage (RFC 5280 §6.3.3(f))")
+
+  新文件 (crates/hitls-pki/tests/migrated_crl_rfc5280_verify.rs):
+    5 个 fixture 迁移:
+      tc_line170 (TC002 r170) - 两级链 + 双 CRL + ALL → Ok(3)
+      tc_line191 (TC004 r191) - SM2 not revoked
+      tc_line194 (TC004 r194) - SM2 revoked → CertRevoked
+      tc_line200 (TC004 r200) - flag=0 → 即使 revoked 也 Ok
+      tc_line203 (TC004 r203) - SM2 extension CRL revocation
+    2 个 synthetic chain (trophy tests):
+      verify_revocation_accepts_issuer_with_crl_sign_keyusage  (positive)
+      verify_revocation_rejects_issuer_without_crl_sign_keyusage (negative)
+    1 个 helper synth_chain(ca_key_usage: u16):
+      Ed25519 self-signed CA + leaf + empty CRL, caller 控 KU bits
+
+  TC002 r176 不迁直接而改 synthetic 的原因:
+    C 端 intermediate_no_crlsign.crt 是 hand-edited malformed (KU bit 翻转未重签)
+    Rust chain validation 在 revocation 之前就 ChainVerifyFailed 拒绝
+    OpenSSL 实测同样报 "certificate signature failure"
+    synthetic chain 绕开 fixture self-inconsistency, 干净测试 KU 规则
+
+C TC 迁移规划:
+  TC002 r170, TC004 r191/r194/r200/r203 - 直接迁
+  TC002 r176 - 转 synthetic chain (cleaner test)
+
+延期到 T176/T177:
+  3 个 API 缺口 sentinel - critical-ext 处理 / CRL_NOT_FOUND 暴露 / ALL-DEV split
+  TC003 (4 行 DEV-only)
+  TC004 剩 14 行
+  TC005 22 行
+
+4 个 API 缺口状态 (T174 文件 doc 列):
+  (a) cRLSign KU enforcement     ✅ CLOSED in T175
+  (b) critical-ext rejection      still deferred
+  (c) CRL_NOT_FOUND surfacing     still deferred
+  (d) ALL/DEV flag split          still deferred
+
+验证:
+  cargo test -p hitls-pki --all-features --test migrated_crl_rfc5280_verify  7/0
+  cargo test -p hitls-pki --all-features                                     458/0
+  cargo test --workspace --all-features                                      1090/0
+  cargo fmt --all --check                                                    clean
+  cargo clippy --workspace -- -D warnings                                    clean
+
+Issue #45 进度: T174 ~9/53 → T175 ~16/53.
+
+沿用方法学:
+  R23 §12.8 + T168 zero-iteration  先验产品 API 再写 assert
+  T146 「gap + sentinel」配对模式   3 个缺口留 T176/T177
+  「测试 + 产品 + 后续启动」三重价值 测试今天 + 产品 fix 今天 + 留钩子明天
+
+Recorded as DEV_LOG Phase T175.
