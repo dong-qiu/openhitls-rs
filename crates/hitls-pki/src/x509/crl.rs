@@ -694,7 +694,7 @@ mod tests {
         // can't be parsed for the CRL's `signatureAlgorithm` family, so
         // `verify_signature` returns `Err(_)`. There's no single variant
         // to lock, so the OR pattern stays.
-        assert!(result.is_err() || !result.unwrap());
+        assert!(matches!(result, Ok(false) | Err(_)));
     }
 
     #[test]
