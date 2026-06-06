@@ -480,7 +480,7 @@ Phase A 末段连续三次 na-list 对未解决条目的根因假设错误，提
 
 | 阶段 | 状态 | 备注 |
 |---|---|---|
-| **B** 完全缺失 6 大类 | reserved（T112）| 部分由 Phase A 期间间接覆盖（CSR/CRL 通过 I155 + T-X509，custom-extension 通过 TLS 测试扩展）；待统一回顾确认 |
+| **B** 完全缺失 6 大类 | **Phase B 准备阶段：弱断言精度化 (#55) 100% 关闭** (T163–T169，2026-06-06)；剩余 issue (#43/#44/#47/#48/#51/#58/#59/#60/#61) 仍 open。部分由 Phase A 期间间接覆盖（CSR/CRL 通过 I155 + T-X509，custom-extension 通过 TLS 测试扩展）；待统一回顾确认 |
 | **C** PKI malformed fixtures | T113 进行中 | 6 480 → 6 494 的 +14 来自 T161 McEliece，但实际工作集中于 PKI fixture 镜像 + 加载器，相关 issue 仍 open |
 | **D** TLS transcript-mutation | T114 reserved | tlsfuzzer 路径已部分替代（T88–T119 + T141 全量 sweep）；剩 MODIFIED_*_TC 二进制 mutation 待 transcript-hook 设计 |
 | **E** `interface_tlcp` trait 化 | T115 reserved | 未启动 |
@@ -490,4 +490,110 @@ Phase A 收官给 Phase B–F 留下两条新基础设施：
 - `xtask` 24 个 emitter 模块作为 SDV→Rust 自动化模板库
 - na-list 作为 long-tail 残余的归档/分类工具
 
+### 12.8 Phase B 准备阶段：PKI 弱断言精度化方法学（T163–T169 实战总结）
+
+Phase A 收官后开 Phase B 实质性工作之前，先有一轮"测试精度化"子项目 —— 关闭 GitHub issue #55（"PKI assertion precision: tighten `is_err()` to `matches!(err, ...)`"）。横跨 **T163–T169 共 7 个 PR**，处理 **87 sites**：
+
+| 阶段 | 模块 | sites | 累计 |
+|---|---|---|---|
+| T163 | x509/verify.rs (P1) | 6 | 6/87 |
+| T164 | x509/hostname.rs | 12 | 18/87 |
+| T165 | x509/certificate.rs | 11 | 29/87 |
+| T166 | 6 个 ≤3-site 小文件杂项 | 10 | 39/87 |
+| T167 | cms/ 全子树 (mod + enveloped + encrypted) | 19 | 58/87 |
+| T168 | pkcs12/mod.rs（首次零迭代命中）| 6 | 64/87 |
+| T169 | 16 verify.rs 冗余清理 + 7 OR-pattern 改写 | 23 | 87/87 |
+
+终态：`hitls-pki/src` 全树 `.is_err()` 计数 = **0**。
+
+#### 12.8.1 沉淀的 3 条 meta-lesson
+
+T163–T168 每个 PR 都踩过同款坑：写 `matches!(err, ObviousVariant(_))`，跑测 fail，回头追根因。三条规律性 meta-lesson：
+
+##### Lesson 1 (T166) — 多步骤错误路径的失败点比表面看起来更早
+
+`pkcs8/encrypted.rs::test_encrypted_pkcs8_invalid_key_len` 中 `key_len=8` 第一次假设 `CryptoError::InvalidArg(_)`（与 `key_len=24` 同路径），跑测失败 —— 实际 variant 是 `CryptoError::InvalidKey`：AES key 构造在 PBKDF2 之后但**在 cipher-OID match catch-all 之前** fails。
+
+**规律**：多步骤错误路径（如 PBKDF2 → CBC → cipher OID match）的失败点比表面看起来更早；不能只看测试名 / 入口参数想当然，必须沿调用栈追到真实失败点。
+
+##### Lesson 2 (T167) — 同一抽象层级的不同入口可对同样错误用不同 variant
+
+CMS 子树内：
+
+- `enveloped.rs::test_decrypt_kek_wrong_key_length`（15-byte KEK）→ `PkiError::CryptoError(_)`
+- `encrypted.rs::test_cms_encrypted_data_wrong_key_length`（15-byte key）→ `PkiError::CmsError(_)`
+
+两个测试的"业务错"完全一样（15 字节 AES 密钥非法），但 variant 不同。原因：`encrypt_symmetric` 在调 AES 前做了 **CMS 层 pre-validation** 直接发 `cerr(...)`；`decrypt_kek` 不做 pre-validation 直接 delegate 到 AES。
+
+**规律**：同一抽象层级的不同入口可对同样错误用不同 variant —— 取决于该入口是否做 domain-layer pre-validation 还是直接 delegate 到底层。
+
+##### Lesson 3 (T168) — `from_der` 类入口的变体由 wrapper helper 决定
+
+三种 ASN.1-顶层入口三种 variant：
+
+| 模块 | from_der wrapper | 变体 |
+|---|---|---|
+| `certificate.rs` | 无 wrapper | `PkiError::Asn1Error(_)` |
+| `cms/mod.rs` | `cerr → CmsError` | `PkiError::CmsError(_)` |
+| `pkcs12/mod.rs` | `perr → Pkcs12Error` | `PkiError::Pkcs12Error(_)` |
+
+各模块各自决定是否在解析层做 domain-specific 包装。**规律**：写 `matches!` 前先 grep 模块顶层入口是否有 `cerr` / `perr` 类 wrapper helper —— 有则全部走 domain variant；没有则走底层 raw variant（如 `Asn1Error`）。
+
+#### 12.8.2 T168 三步法（T163-T168 实战验证，T168 首次零迭代命中）
+
+基于三条 meta-lesson，T168 沉淀出对 issue #55 类"弱断言精度化"任务通用的三步法：
+
+```
+Step 1. Inventory
+  $ grep -nE "\.is_err\(\)" target.rs
+
+Step 2. Grep variant 来源
+  $ grep -nE "fn cerr|fn perr|PkiError::SpecificVariant|map_err.*PkiError" target.rs
+
+Step 3. 写 matches! + 注释
+  - 每处 1-3 行内联注释引用 wrapper helper / 源码行号
+  - 当同函数族返回不同 variant 时，显式 contrast 注释
+```
+
+T163–T167 都是"假设错 → 跑测 fail → eprintln 调试 → 改 variant"循环；T168 提前执行 Step 2 后 6 处全部首次运行通过，**首次实现零迭代**。
+
+#### 12.8.3 工具组合 — `eprintln! + rtk proxy --nocapture`
+
+当 Step 2 grep 不出明确 wrapper、必须实际跑测才能看真实 variant 时：
+
+```rust
+let err = func_under_test().unwrap_err();
+eprintln!("actual variant: {err:?}");
+let _ = err;
+```
+
+然后用 `rtk proxy` 绕开 rtk 摘要：
+
+```bash
+rtk proxy cargo test -p hitls-pki --lib test_name -- --nocapture
+```
+
+`rtk proxy` 让 stderr 流过，看到 eprintln 输出。这是定位真实 variant 的标准做法。
+
+#### 12.8.4 适用范围 — 三类弱断言形态
+
+T163-T169 处理三类形态：
+
+| 形态 | 处理 | 占比 |
+|---|---|---|
+| `assert!(result.is_err());` 单独存在 | 替换为 `assert!(matches!(err, Variant(_)))` | 主体（66 sites） |
+| `assert!(result.is_err());` 后紧跟 `matches!()` 或 `match` | 删除冗余 is_err() 行 | 16 sites（T169 verify.rs 冗余） |
+| `assert!(result.is_err() \|\| !result.unwrap());`（intentional dual-path） | 替换为 `assert!(matches!(result, Ok(false) \| Err(_)));` | 7 sites（T169 改写） |
+
+#### 12.8.5 TLS-trust 决策路径全清
+
+`verify_cert` / `verify_signature` / `hostname` / OCSP / CRL / CMS / PKCS#12 / PKCS#8 —— **所有 PKI 测试**现在用 specific `PkiError` variant 或 specific `(Ok(false) | Err)` 模式锁定语义。
+
+未来 regression 时，错误路径被路由到错的 variant 立即报 test 失败 —— 不会再有"弱断言放行"。
+
+#### 12.8.6 给 Phase B/C 后续任务的指引
+
+- **类似的"弱断言精度化"任务**（如 #44 CSR 168 负面解析测试、#45 CRL 严格合规）—— 直接复用三步法，期待零迭代命中
+- **新写 negative test 时** —— 默认走 `matches!(err, SpecificVariant(_))` 模式，**不用 `.is_err()`**
+- **当多个入口可能返回不同 variant 时** —— 把 contrast 注释直接写进代码，避免读者困惑（Lesson 2）
 
