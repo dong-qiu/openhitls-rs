@@ -12623,3 +12623,77 @@ T182 路线:
     跨平台 tests 应避免依赖区分大小写的路径或显式隔离 temp dir 名
 
 Recorded as DEV_LOG Phase T181.
+
+### T182 — #43 enc 收官弹：OpenSSL `pass:` / `file:` 协议 + SDV KAT 迁移 + #43 关闭
+
+> 等 #257 合并后继续 T182
+
+承接 T179-T181 后, T182 加 OpenSSL `-pass` 三协议 + C SDV byte-mapped 测试 + 关闭 #43.
+
+改动:
+  产品 (~40 行 + 1 常量):
+    新 helper resolve_password(arg) → Result<String>:
+      pass:<password>  literal after pass:
+      file:<path>      读 max 1024 byte, 取第一行 (strip \r\n)
+      无前缀           整个 arg 作 password (向后兼容 T179-T181)
+      空密码 → Err "password is empty"
+      超长 file → Err "maximum is 1024"
+    新常量 PASSWORD_FILE_MAX_LEN = 1024 匹配 openhitls-C
+    run() 在 non-AEAD 调 resolve_password(pass_arg)?
+    main.rs --pass doc 更新 pass: / file: 语法 + 1024 上限
+
+12 新测试:
+  10 SDV byte-mapped (C .data argv 行直对应):
+    sdv_tc001_r0_aes128_cbc_pass_literal    TC001 r0
+    sdv_tc001_r1_aes128_cbc_pass_file       TC001 r1 (multi-line file 只取第一行)
+    sdv_tc001_r2_aes128_cbc_md_sha1         TC001 r2 (完整 SDV argv)
+    sdv_tc002_r2_r3_aes128_ctr_pass_literal TC002 r2-r3
+    sdv_tc002_r4_r5_aes128_ecb_pass_literal TC002 r4-r5
+    sdv_tc002_r12_r13_sm4_cfb_pass_literal  TC002 r12-r13
+    sdv_tc003_r0_unknown_cipher             TC003 r0 (aes-128-abc → Err)
+    sdv_tc003_r2_unknown_md                 TC003 r2 (md_abc → Err)
+    sdv_tc003_r3_empty_pass                 TC003 r3 (pass: → "password is empty")
+    sdv_tc003_r4_oversize_pass_file         TC003 r4 (1025 byte → "maximum is")
+  1 SDV-extra:
+    sdv_extra_missing_pass_file             file:<missing> 与 PKCS#12 同模式
+  1 unit:
+    test_resolve_password_protocols         4 dispatch case
+
+C SDV 22 行 argv → 12 行迁 + 不迁名单文档化:
+  TC001 r3 (file:enter_pass_file 交互式 tty)
+  TC002 r6-r7 (aes128_xts CLI 未暴露)
+  TC002 r8-r11 (aes128_gcm/chacha20 with pass: - AEAD 走 env-var key 路径,
+              统一到 PBKDF2 是 #43 scope 外后续)
+  TC003 r1 (file:empty_pass 与 r3 pass: 空等价类)
+
+ASCII fix 复发:
+  T181 + T182 byte string literal EM DASH 二次踩坑
+  codified known issue: 后续考虑加 lint 或团队约定 byte string 不用非 ASCII
+
+#43 收官总览:
+  T179  AES-CBC + PBKDF2 + Salted__       7 测试 + ~150 行
+  T180  CTR + ECB + SM4-CFB + 通用 dispatch + PKCS#7  10 + ~70
+  T181  --md 7 hash                       8 + factory match +6 arm
+  T182  pass: / file: + SDV 迁移          12 + ~40 行 + 1 const
+  合计  #43 端到端                        +37 tests + ~260 行 + 12 cipher/hash 条目
+  整体含 testmode 改动                     +57 tests
+
+#43 issue 可关闭.
+
+验证:
+  cargo test -p hitls-cli --all-features enc::   54/0 (42 → 54)
+  cargo test -p hitls-cli --all-features         247/0 + 5 ignored
+  cargo fmt --all --check                        clean
+  cargo clippy --workspace -- -D warnings        clean
+
+作用域:
+  1 处产品 helper + 1 常量 + run() dispatch + main.rs doc
+  12 新测试
+  零 breaking change (无前缀 fallback 让 T179-T181 still pass)
+
+沿用 + 新方法学:
+  R23 §12.8 + T179-T181 「OpenSSL 兼容优先」
+  「byte-mapped SDV 测试 + 不迁名单文档化」 (每行不迁带原因便于 issue 关闭审核)
+  「重复踩坑 → codified known issue」 (EM DASH 二次复发后正式记录)
+
+Recorded as DEV_LOG Phase T182.
