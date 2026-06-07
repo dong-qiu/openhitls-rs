@@ -666,3 +666,222 @@ fn verify_revocation_strict_mode_rejects_missing_crl() {
         other => panic!("expected PkiError::InvalidCrl, got: {other:?}"),
     }
 }
+
+// ---------------------------------------------------------------------------
+// FILE_VERIFY_FUNC_TC005 — DEV-flag rows. These exercise the leaf-only
+// revocation mode introduced by `set_revocation_leaf_only(true)`: the walk
+// stops after the leaf cert is checked, so intermediate-CA revocation is
+// intentionally ignored. Matches openhitls-C `VFY_FLAG_CRL_DEV` (and is
+// also OpenSSL's default `X509_V_FLAG_CRL_CHECK` behaviour).
+// ---------------------------------------------------------------------------
+
+/// SDV_X509_CRL_FILE_VERIFY_FUNC_TC005 (line 257): leaf-only mode with the
+/// root CRL absent (rootCRL = ""), intermediate.crl present, usr2 not on the
+/// intermediate's CRL. The leaf walk ignores the missing root CRL entirely
+/// → verify succeeds.
+#[test]
+fn tc_line257_x509_crl_verify_tc005_leaf_only_no_root_crl() {
+    let root_ca = load_cert("cert/test_for_crl/sm2/sm2_without_userid/crl_verify/certs/root.crt");
+    let intermediate = load_cert(
+        "cert/test_for_crl/sm2/sm2_without_userid/crl_verify/intermediate/certs/intermediate.crt",
+    );
+    let usr2 = load_cert(
+        "cert/test_for_crl/sm2/sm2_without_userid/crl_verify/intermediate/certs/usr2.crt",
+    );
+    let intermediate_crl = load_crl(
+        "cert/test_for_crl/sm2/sm2_without_userid/crl_verify/intermediate/crl/intermediate.crl",
+    );
+
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(root_ca);
+    verifier.add_crl(intermediate_crl);
+    verifier.set_check_revocation(true);
+    verifier.set_revocation_leaf_only(true);
+
+    let chain = verifier
+        .verify_cert(&usr2, std::slice::from_ref(&intermediate))
+        .expect("leaf-only mode + clean leaf → verify succeeds");
+    assert_eq!(chain.len(), 3, "chain should be [usr2, intermediate, root]");
+}
+
+/// SDV_X509_CRL_FILE_VERIFY_FUNC_TC005 (line 266): leaf-only mode with
+/// `root.crl` that revokes the intermediate CA's serial. Even though the
+/// intermediate IS on the root CRL, leaf-only mode ignores the
+/// intermediate→root revocation step and only checks the leaf (usr2). usr2
+/// is not on intermediate.crl → verify succeeds.
+///
+/// This is the trophy test for the new `set_revocation_leaf_only(true)` API
+/// — under the previous ALL-only behaviour (and per `tc_line263_*`) the
+/// same fixture set yields `CertRevoked`.
+#[test]
+fn tc_line266_x509_crl_verify_tc005_leaf_only_intermediate_revocation_ignored() {
+    let root_ca = load_cert("cert/test_for_crl/sm2/sm2_without_userid/crl_verify/certs/root.crt");
+    let intermediate = load_cert(
+        "cert/test_for_crl/sm2/sm2_without_userid/crl_verify/intermediate/certs/intermediate.crt",
+    );
+    let usr2 = load_cert(
+        "cert/test_for_crl/sm2/sm2_without_userid/crl_verify/intermediate/certs/usr2.crt",
+    );
+    let root_crl = load_crl("cert/test_for_crl/sm2/sm2_without_userid/crl_verify/crl/root.crl");
+    let intermediate_crl = load_crl(
+        "cert/test_for_crl/sm2/sm2_without_userid/crl_verify/intermediate/crl/intermediate.crl",
+    );
+
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(root_ca);
+    verifier.add_crl(root_crl);
+    verifier.add_crl(intermediate_crl);
+    verifier.set_check_revocation(true);
+    verifier.set_revocation_leaf_only(true);
+
+    let chain = verifier
+        .verify_cert(&usr2, std::slice::from_ref(&intermediate))
+        .expect(
+            "leaf-only mode should ignore root.crl revocation of intermediate and accept clean usr2",
+        );
+    assert_eq!(chain.len(), 3);
+}
+
+/// SDV_X509_CRL_FILE_VERIFY_FUNC_TC005 (line 275): leaf-only mode, three-tier
+/// chain with `root_updated.crl` + `intermediate.crl` (both clean), target
+/// usr3. Verify succeeds.
+#[test]
+fn tc_line275_x509_crl_verify_tc005_leaf_only_usr3_no_revocation() {
+    let root_ca = load_cert("cert/test_for_crl/sm2/sm2_without_userid/crl_verify/certs/root.crt");
+    let intermediate = load_cert(
+        "cert/test_for_crl/sm2/sm2_without_userid/crl_verify/intermediate/certs/intermediate.crt",
+    );
+    let usr3 = load_cert(
+        "cert/test_for_crl/sm2/sm2_without_userid/crl_verify/intermediate/certs/usr3.crt",
+    );
+    let root_updated_crl =
+        load_crl("cert/test_for_crl/sm2/sm2_without_userid/crl_verify/crl/root_updated.crl");
+    let intermediate_crl = load_crl(
+        "cert/test_for_crl/sm2/sm2_without_userid/crl_verify/intermediate/crl/intermediate.crl",
+    );
+
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(root_ca);
+    verifier.add_crl(root_updated_crl);
+    verifier.add_crl(intermediate_crl);
+    verifier.set_check_revocation(true);
+    verifier.set_revocation_leaf_only(true);
+
+    verifier
+        .verify_cert(&usr3, std::slice::from_ref(&intermediate))
+        .expect("leaf-only + clean leaf → verify succeeds");
+}
+
+/// SDV_X509_CRL_FILE_VERIFY_FUNC_TC005 (line 278): leaf-only mode with
+/// `intermediate_usr3.crl` which revokes usr3. Even though only the leaf is
+/// checked, that leaf IS on the CRL → CertRevoked.
+#[test]
+fn tc_line278_x509_crl_verify_tc005_leaf_only_usr3_revoked() {
+    let root_ca = load_cert("cert/test_for_crl/sm2/sm2_without_userid/crl_verify/certs/root.crt");
+    let intermediate = load_cert(
+        "cert/test_for_crl/sm2/sm2_without_userid/crl_verify/intermediate/certs/intermediate.crt",
+    );
+    let usr3 = load_cert(
+        "cert/test_for_crl/sm2/sm2_without_userid/crl_verify/intermediate/certs/usr3.crt",
+    );
+    let root_updated_crl =
+        load_crl("cert/test_for_crl/sm2/sm2_without_userid/crl_verify/crl/root_updated.crl");
+    let intermediate_usr3_crl = load_crl(
+        "cert/test_for_crl/sm2/sm2_without_userid/crl_verify/intermediate/crl/intermediate_usr3.crl",
+    );
+
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(root_ca);
+    verifier.add_crl(root_updated_crl);
+    verifier.add_crl(intermediate_usr3_crl);
+    verifier.set_check_revocation(true);
+    verifier.set_revocation_leaf_only(true);
+
+    let err = verifier
+        .verify_cert(&usr3, std::slice::from_ref(&intermediate))
+        .expect_err("leaf usr3 is on intermediate_usr3.crl → CertRevoked");
+    assert!(
+        matches!(err, PkiError::CertRevoked),
+        "expected PkiError::CertRevoked, got: {err:?}"
+    );
+}
+
+/// Synthetic positive: leaf-only mode where the issuer cert (the synthetic
+/// CA) is irrelevant because the chain has only one revocation step. Sanity
+/// check that the new API does not break the simplest case.
+#[test]
+fn verify_revocation_leaf_only_accepts_clean_leaf() {
+    let (ca, ca_chain, crl, target) = synth_chain(KeyUsage::KEY_CERT_SIGN | KeyUsage::CRL_SIGN);
+
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(ca);
+    verifier.add_crl(crl);
+    verifier.set_check_revocation(true);
+    verifier.set_revocation_leaf_only(true);
+
+    verifier
+        .verify_cert(&target, &ca_chain)
+        .expect("leaf-only + clean leaf → Ok");
+}
+
+/// Synthetic negative: leaf-only mode where the leaf IS on the CRL — the
+/// new mode MUST still catch leaf revocations.
+#[test]
+fn verify_revocation_leaf_only_catches_leaf_revocation() {
+    use hitls_pki::x509::RevokedCertBuilder;
+    use hitls_pki::x509::{CertificateBuilder, CrlBuilder, DistinguishedName, SigningKey};
+
+    // Build a CA + leaf, then a CRL that revokes the leaf's serial.
+    let ca_kp = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+    let ca_sk = SigningKey::Ed25519(ca_kp);
+    let ca_dn = DistinguishedName {
+        entries: vec![("CN".to_string(), "Test CA leaf-revoked".to_string())],
+    };
+    let ca_spki = ca_sk.public_key_info().unwrap();
+    let ca = CertificateBuilder::new()
+        .serial_number(&[0x01])
+        .issuer(ca_dn.clone())
+        .subject(ca_dn.clone())
+        .validity(1_700_000_000, 1_800_000_000)
+        .subject_public_key(ca_spki)
+        .add_basic_constraints(true, None)
+        .add_key_usage(KeyUsage::KEY_CERT_SIGN | KeyUsage::CRL_SIGN)
+        .build(&ca_sk)
+        .unwrap();
+
+    let leaf_kp = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+    let leaf_sk = SigningKey::Ed25519(leaf_kp);
+    let leaf_spki = leaf_sk.public_key_info().unwrap();
+    let leaf_dn = DistinguishedName {
+        entries: vec![("CN".to_string(), "Test Leaf-revoked".to_string())],
+    };
+    let leaf = CertificateBuilder::new()
+        .serial_number(&[0x02])
+        .issuer(ca_dn.clone())
+        .subject(leaf_dn)
+        .validity(1_700_000_000, 1_800_000_000)
+        .subject_public_key(leaf_spki)
+        .add_key_usage(KeyUsage::DIGITAL_SIGNATURE)
+        .build(&ca_sk)
+        .unwrap();
+
+    let crl = CrlBuilder::new(ca_dn, 1_700_000_000)
+        .next_update(1_800_000_000)
+        .add_revoked(RevokedCertBuilder::new(&[0x02], 1_700_000_000))
+        .build(&ca_sk)
+        .unwrap();
+
+    let mut verifier = CertificateVerifier::new();
+    verifier.add_trusted_cert(ca);
+    verifier.add_crl(crl);
+    verifier.set_check_revocation(true);
+    verifier.set_revocation_leaf_only(true);
+
+    let err = verifier
+        .verify_cert(&leaf, &[])
+        .expect_err("leaf is on the CRL — leaf-only mode MUST still flag it as revoked");
+    assert!(
+        matches!(err, PkiError::CertRevoked),
+        "expected PkiError::CertRevoked, got: {err:?}"
+    );
+}
