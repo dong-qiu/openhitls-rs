@@ -207,13 +207,24 @@ fn pbkdf2_derive_key_iv(
     key_len: usize,
     iv_len: usize,
 ) -> Result<(Vec<u8>, Vec<u8>), Box<dyn std::error::Error>> {
+    // Supported PBKDF2 hashes. Names follow openssl `enc -md` conventions
+    // (lowercase, no separators), so a CLI script targeting either tool
+    // accepts the same `-md sha1` / `-md sha256` / `-md sm3` etc.
     let factory: fn() -> Box<dyn hitls_crypto::provider::Digest> = match md.to_lowercase().as_str()
     {
+        "md5" => || Box::new(hitls_crypto::md5::Md5::new()),
+        "sha1" => || Box::new(hitls_crypto::sha1::Sha1::new()),
+        "sha224" => || Box::new(hitls_crypto::sha2::Sha224::new()),
         "sha256" => || Box::new(hitls_crypto::sha2::Sha256::new()),
+        "sha384" => || Box::new(hitls_crypto::sha2::Sha384::new()),
+        "sha512" => || Box::new(hitls_crypto::sha2::Sha512::new()),
+        "sm3" => || Box::new(hitls_crypto::sm3::Sm3::new()),
         other => {
-            return Err(
-                format!("PBKDF2 hash '{other}' not supported. Currently supported: sha256").into(),
+            return Err(format!(
+                "PBKDF2 hash '{other}' not supported. Supported: \
+                 md5, sha1, sha224, sha256, sha384, sha512, sm3"
             )
+            .into())
         }
     };
     let dk = hitls_crypto::pbkdf2::pbkdf2_with_hmac(
@@ -781,6 +792,10 @@ mod tests {
 
     #[test]
     fn test_cbc_unsupported_md() {
+        // `ripemd160` is a real PBKDF2-eligible hash but not in our supported
+        // set; pick it as a stable "definitely unsupported" sentinel even
+        // after T181 broadens the set to md5/sha1/sha224/sha256/sha384/
+        // sha512/sm3.
         let dir = std::env::temp_dir().join("hitls_enc_cbc_badmd");
         let _ = fs::create_dir_all(&dir);
         let input_path = dir.join("input.bin");
@@ -792,11 +807,11 @@ mod tests {
             input_path.to_str().unwrap(),
             output_path.to_str().unwrap(),
             Some("p"),
-            "md5",
+            "ripemd160",
         )
         .unwrap_err();
         assert!(
-            err.to_string().contains("PBKDF2 hash 'md5'"),
+            err.to_string().contains("PBKDF2 hash 'ripemd160'"),
             "expected PBKDF2 hash diagnostic, got: {err}"
         );
         let _ = fs::remove_dir_all(&dir);
@@ -994,6 +1009,150 @@ mod tests {
             let unpadded = pkcs7_unpad(&padded, 16).unwrap();
             assert_eq!(unpadded, v);
         }
+    }
+
+    // ---- T181: `--md` extension (sha1/sha224/sha384/sha512/md5/sm3) ----
+
+    /// Encrypt + decrypt with the given `md` to confirm PBKDF2 dispatch works
+    /// for that hash. We use AES-128-CBC for all rounds since the dispatch
+    /// itself is what varies; the cipher mode is incidental.
+    fn pbkdf2_md_roundtrip(md: &str) {
+        let dir = std::env::temp_dir().join(format!("hitls_enc_md_{md}"));
+        let _ = fs::create_dir_all(&dir);
+        let input_path = dir.join("input.bin");
+        let enc_path = dir.join("encrypted.bin");
+        let dec_path = dir.join("decrypted.bin");
+
+        let plaintext = b"PBKDF2 md-extension round-trip data";
+        fs::write(&input_path, plaintext).unwrap();
+
+        run(
+            "aes-128-cbc",
+            false,
+            input_path.to_str().unwrap(),
+            enc_path.to_str().unwrap(),
+            Some("hunter2"),
+            md,
+        )
+        .unwrap();
+        run(
+            "aes-128-cbc",
+            true,
+            enc_path.to_str().unwrap(),
+            dec_path.to_str().unwrap(),
+            Some("hunter2"),
+            md,
+        )
+        .unwrap();
+        assert_eq!(fs::read(&dec_path).unwrap(), plaintext);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_pbkdf2_md_md5() {
+        pbkdf2_md_roundtrip("md5");
+    }
+
+    /// C TC003 explicitly exercises `-md sha1` — pinning this matches the
+    /// openhitls-C reference behaviour we are restoring under #43.
+    #[test]
+    fn test_pbkdf2_md_sha1() {
+        pbkdf2_md_roundtrip("sha1");
+    }
+
+    #[test]
+    fn test_pbkdf2_md_sha224() {
+        pbkdf2_md_roundtrip("sha224");
+    }
+
+    #[test]
+    fn test_pbkdf2_md_sha384() {
+        pbkdf2_md_roundtrip("sha384");
+    }
+
+    #[test]
+    fn test_pbkdf2_md_sha512() {
+        pbkdf2_md_roundtrip("sha512");
+    }
+
+    #[test]
+    fn test_pbkdf2_md_sm3() {
+        pbkdf2_md_roundtrip("sm3");
+    }
+
+    /// PBKDF2 hash names are matched case-insensitively (`to_lowercase()`),
+    /// so `--md SHA256` and `--md sha256` MUST be interchangeable end-to-end.
+    /// Encrypt with one casing and decrypt with the other to prove that the
+    /// dispatch normalises the input correctly.
+    #[test]
+    fn test_pbkdf2_md_case_insensitive() {
+        let dir = std::env::temp_dir().join("hitls_enc_md_case_test");
+        let _ = fs::create_dir_all(&dir);
+        let input_path = dir.join("input.bin");
+        let enc_path = dir.join("encrypted.bin");
+        let dec_path = dir.join("decrypted.bin");
+        let plaintext = b"case-insensitive PBKDF2 md handling test data";
+        fs::write(&input_path, plaintext).unwrap();
+        // Encrypt with "SHA256" (uppercase)...
+        run(
+            "aes-128-cbc",
+            false,
+            input_path.to_str().unwrap(),
+            enc_path.to_str().unwrap(),
+            Some("hunter2"),
+            "SHA256",
+        )
+        .unwrap();
+        // ...decrypt with "sha256" (lowercase) — same hash, both must accept.
+        run(
+            "aes-128-cbc",
+            true,
+            enc_path.to_str().unwrap(),
+            dec_path.to_str().unwrap(),
+            Some("hunter2"),
+            "sha256",
+        )
+        .unwrap();
+        assert_eq!(fs::read(&dec_path).unwrap(), plaintext);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Different `--md` values MUST produce different ciphertexts on the same
+    /// password+plaintext (a wrong-md decrypt MUST fail). Pins that the hash
+    /// choice actually flows into the key+iv derivation.
+    #[test]
+    fn test_pbkdf2_md_mismatch_fails_decrypt() {
+        let dir = std::env::temp_dir().join("hitls_enc_md_mismatch");
+        let _ = fs::create_dir_all(&dir);
+        let input_path = dir.join("input.bin");
+        let enc_path = dir.join("encrypted.bin");
+        let dec_path = dir.join("decrypted.bin");
+
+        let plaintext = b"PBKDF2 md mismatch -- encryption vs decryption hash differ";
+        fs::write(&input_path, plaintext).unwrap();
+
+        run(
+            "aes-128-cbc",
+            false,
+            input_path.to_str().unwrap(),
+            enc_path.to_str().unwrap(),
+            Some("hunter2"),
+            "sha256",
+        )
+        .unwrap();
+        // Encrypt with sha256, decrypt with sha1 → PBKDF2 derives a different
+        // key/iv → CBC decrypt surfaces invalid PKCS#7 padding.
+        let err = run(
+            "aes-128-cbc",
+            true,
+            enc_path.to_str().unwrap(),
+            dec_path.to_str().unwrap(),
+            Some("hunter2"),
+            "sha1",
+        )
+        .unwrap_err();
+        assert!(!err.to_string().is_empty());
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

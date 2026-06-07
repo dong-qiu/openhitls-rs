@@ -58,7 +58,8 @@ enum Commands {
         /// Output file format: "Salted__" || salt(8) || ciphertext.
         #[arg(short = 'P', long)]
         pass: Option<String>,
-        /// Hash for PBKDF2 (default: sha256). Currently accepts: sha256.
+        /// Hash for PBKDF2 (default: sha256). Supported: md5, sha1, sha224,
+        /// sha256, sha384, sha512, sm3.
         #[arg(long, default_value = "sha256")]
         md: String,
     },
