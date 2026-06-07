@@ -12771,3 +12771,100 @@ helper 三件套:
     Rust 测试 helper 必须三者一致才不会被 server-side cert-aware sig scheme 匹配卡住
 
 Recorded as DEV_LOG Phase T183.
+
+### T184 — #61 TLS SNI (server_name) 边界测试迁移 + 3 个 codec/design gap TODO 文档化
+
+> #260 merged，开始 #61
+
+C SDV `test_suite_sdv_frame_servername_{function,interface}.{c,data}` 实际仅 4 个基础 TC,
+issue #61 描述「40+ TC」是 acceptance-criteria 边界矩阵扩展. 迁移到
+tests/interop/tests/sni_boundary.rs 30 个测试, 三组覆盖.
+
+Group 1: SNI extension codec 边界 (13 tests, 直接 call parse_server_name / build_server_name):
+  parse_too_short_data                  data.len() < 2
+  parse_truncated_list                  list_len > available
+  parse_unsupported_name_type           name_type != 0
+  parse_truncated_hostname              name_len > available
+  parse_oversized_list_length           list_len = 0xFFFF in short buf
+  parse_oversized_name_length_truncated name_len = 0xFFFF in short buf
+  parse_invalid_utf8_rejected           non-UTF8 bytes
+  parse_empty_hostname                  Rust 接受 "" + TODO(#61-codec-gap) RFC 6066 §3 应拒
+  parse_max_length_dns_hostname         253-byte RFC 1035 §2.3.4
+  parse_short_hostname_one_char         1 字节
+  build_then_parse_roundtrip            4 常规主机名 roundtrip
+  parse_idn_punycode_accepted           xn--bcher-kva.example
+  parse_multi_entry_first_wins          多 HostName 仅返回第一个 + TODO(#61-codec-gap)
+
+Group 2: Config-level SNI 输入验证 (7 tests, TlsConfig builder):
+  config_default_sni_is_none
+  config_with_short_sni
+  config_with_max_length_dns_sni        253-byte
+  config_with_unicode_sni_passes_through  bücher.example non-ASCII
+  config_with_idn_punycode_sni          xn--bcher-kva.example
+  config_with_ip_literal_passes_through 127.0.0.1 + TODO(#61-design) RFC 6066 §3 应拒
+  config_with_empty_sni_string          "" 存 Some("")
+
+Group 3: End-to-end TLS 1.3 handshake interop (10 tests, 沿用 #60 线程对 + 新 handshake_tls13_with_sni helper):
+  handshake_tls13_no_sni_offered
+  handshake_tls13_basic_sni
+  handshake_tls13_sni_visible_after_handshake     C TC003 等价
+  handshake_tls13_max_length_sni                  253-byte 端到端
+  handshake_tls13_idn_punycode_sni                punycode 端到端
+  handshake_tls13_ip_literal_sni_no_reject        IP literal 端到端 pin 不拒
+  handshake_tls13_short_sni_one_char              1 字节
+  handshake_tls13_sni_callback_accept_matched     按 hostname 路由 Accept
+  handshake_tls13_sni_callback_rejects_mismatch_with_alert  C TC002 等价: SniAction::Reject -> fatal alert (mismatched-cert boundary equivalence class)
+  handshake_tls13_sni_callback_ignore_clears_sni  SniAction::Ignore 后 server 端 SNI 清空
+
+C TC 映射 (写入 module doc):
+  API_TC001    -> config_* group (7 tests)
+                  Rust 无 HITLS_CFG_MAX_SIZE, builder 不限长;
+                  codec 层 framing 校验取代
+  FUNC_TC001   -> 不迁
+                  TLS 1.2 session-resume + 改 SNI;
+                  需完整 ticket-resume + server fixture, 留待 session-resume 专题 PR
+  FUNC_TC002   -> handshake_tls13_sni_callback_rejects_mismatch_with_alert
+                  server Reject -> 致命 alert; 完整 resume 流程留待后续
+  FUNC_TC003   -> handshake_tls13_sni_visible_after_handshake
+                  server 握手后查询 SNI
+
+3 个 TODO (写入测试 + module doc):
+  TODO(#61-codec-gap)  空 hostname 应按 RFC 6066 §3 拒绝
+  TODO(#61-codec-gap)  多 HostName entry 应按 RFC 6066 §3 拒绝
+  TODO(#61-design)     IP literal SNI 应按 RFC 6066 §3 拒绝
+
+每个 TODO 都有 pin 当前行为 测试断言, 后续修复时 is_ok -> is_err 一行 flip + 加错误类型即可,
+无侵入 follow-up 路径清晰.
+
+MSRV 兼容小坑:
+  初版 std::iter::repeat('a').take(253) 触发 Rust 1.95 clippy manual_repeat_n lint
+  推荐 std::iter::repeat_n (1.82+ stable), 但项目 MSRV 1.75 (T180 反向踩过).
+  改 "a".repeat(253) 同时满足两者, 不需 #[allow] 抑制.
+
+验证:
+  cargo test -p hitls-integration-tests --test sni_boundary    30/0 (首次全 pass)
+  cargo test -p hitls-integration-tests                        14 binary 全绿, 零回归
+  cargo fmt --check + cargo clippy -D warnings                 clean
+
+作用域:
+  1 个新测试文件 (~445 行 / 30 tests)
+  零产品代码改动
+  3 个 TODO 占位 (无侵入, 后续修复单点 flip)
+
+沿用 + 新方法学:
+  沿用 #60 (T183) 线程对 handshake helper + make_*_server_identity()
+  沿用 T179-T182 「不迁名单 + 注释化文档」
+  新「TODO + pin 测试」二人组:
+    每个未实现的 RFC MUST/SHOULD 用一个 is_ok 断言 pin 当前行为,
+    加 TODO(#issue-tag) 标签, 后续修复时一行 flip + 加错误类型.
+    三件事一起到位:
+      (a) 当前行为有回归保护
+      (b) gap 显式入档
+      (c) 修复路径预先就绪
+    "pin behaviour + tag the gap + leave the fix-flip wire intact"
+  新「issue 描述 vs C 源 vs RFC 三轴对齐」:
+    #61 描述「40+ TC」实际 C 源仅 4 TC + acceptance-criteria 边界矩阵;
+    module doc 显式说明三者差异 (C TC 映射表 + RFC 6066 §3 引用 + Rust 当前行为),
+    不掩盖 issue 描述的乐观估计.
+
+Recorded as DEV_LOG Phase T184.
