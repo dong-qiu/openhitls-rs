@@ -12959,3 +12959,98 @@ Rust API -> C 概念映射:
     比为每 server 加 abort 信号简单且无 unsafe channel
 
 Recorded as DEV_LOG Phase T185.
+
+### T186 — #48 TLS 1.3 transcript bit-flip / MODIFIED_*_TC Phase 1: rogue-server framework + 7 tests + 3 个 RFC 8446 gap TODO
+
+> 等 #265 合入后开始 #48
+
+承接 C SDV test_suite_sdv_frame_tls13_consistency_rfc8446_1.{c,data}
+UT_TLS_TLS13_RFC8446_CONSISTENCY_MODIFIED_{SESSID_FROM_SH, CIPHERSUITE_FROM_SH, ...}_FUNC_TC*.
+C 端用 FRAME_* MITM 框架 (截真握手、改字段、回放); Rust 无此框架,
+本期建立轻量 rogue-server 框架替代, 覆盖 ServerHello 明文字段突变.
+加密 post-SH 突变 (cert_verify / finished) 需 key schedule 模拟, 留 Phase 2 PR.
+
+Rogue-server 框架核心 (~130 行):
+  make_handshake_record(bytes)           手动包 TLS record header
+                                         0x16 || 0x0303 || len(2) || body
+  read_record(stream)                    5 字节 header + body_len 读 body
+  ClientHelloInfo                        snapshot of CH offered material
+    session_id, offered_ciphers, offered_key_shares
+  capture_client_hello(stream)           跳 record header (5) + handshake header (4) + decode_client_hello
+  ShBuilder                              流畅构造器
+    .cipher(c)
+    .session_id(sid)
+    .drop_extension(ty)
+    .replace_supported_versions(v)
+    .replace_key_share_with(group)
+    .encode()                            调 encode_server_hello byte-exact
+  drive_client_against_rogue_server(mutate)  rejection driver
+    accept TCP -> capture CH -> mutate(&info) -> 包 record -> 写
+    断言 handshake().expect_err
+  drive_client_accepting_rogue_sh(mutate)    gap-pin driver
+    client 过 SH 后下游 timeout/EOF
+    断言 err 字符串不含 SH-level 关键词 (session_id / compression / legacy / illegal_parameter)
+
+Group 1: Rust 已校验路径 5 tests (rejection asserted):
+  sh_with_unoffered_cipher_suite_rejected
+    C MODIFIED_CIPHERSUITE_FROM_SH_TC001
+    rogue 选 client 未 offer 的 cipher
+    -> cipher_suites.contains() -> NoSharedCipherSuite
+  sh_with_unoffered_keyshare_group_rejected
+    rogue key_share 用 client 未 share 的 group
+    -> server_group != kx.group() -> "server key_share group mismatch"
+  sh_without_supported_versions_rejected
+    drop SUPPORTED_VERSIONS ext -> "missing supported_versions extension"
+  sh_with_wrong_supported_version_rejected
+    SUPPORTED_VERSIONS=0x0303 -> "unsupported TLS version: 0x0303"
+  sh_without_key_share_rejected
+    drop KEY_SHARE ext -> "missing key_share"
+
+Group 2: RFC 8446 §4.1.3 MUST 但 Rust 不查的 gap 2 tests:
+  sh_with_mismatched_session_id_not_rejected_gap
+    C MODIFIED_SESSID_FROM_SH_TC001
+    RFC: client MUST 因 echo 不符 abort with illegal_parameter
+    Rust decode_server_hello 解析 sid 即丢弃
+    -> TODO(#48-rfc-gap-sessid)
+  sh_with_nonzero_legacy_compression_not_rejected_gap
+    RFC: legacy_compression_method MUST be 0
+    Rust 读后丢弃
+    encode_server_hello 强制写 0, 所以手补 byte:
+      hs[body_start + 2 + 32 + 1 + sid_len + 2] = 0x01
+    -> TODO(#48-rfc-gap-compression)
+
+3 个 TODO 写入 module doc:
+  TODO(#48-rfc-gap-sessid)       RFC 8446 §4.1.3 sessid echo MUST 不查
+  TODO(#48-rfc-gap-compression)  RFC 8446 §4.1.3 compression=0 MUST 不查
+  TODO(#48-encrypted-mutation)   加密 post-SH 突变 (cert_verify/finished) 留 Phase 2
+
+验证:
+  cargo test -p hitls-integration-tests --test transcript_mutation   7/0 (首次全 pass)
+  cargo test -p hitls-integration-tests                              15 binary 全绿, 零回归
+  cargo fmt --check + cargo clippy -D warnings                       clean
+
+作用域:
+  1 个新测试文件 (~360 行 / 7 tests + rogue-server framework)
+  零产品代码改动
+  3 个 TODO (sessid + compression + encrypted-mutation Phase 2)
+
+沿用 + 新方法学:
+  沿用 #60/#61/#58 线程对模式 (client 真握手 + 异线程 server)
+  沿用 #61 (T184) + #58 (T185) 「TODO + pin 测试」二人组
+  新「rogue-server 框架」 (重大方法学):
+    用 hitls-tls public 编解码 API + 手动 record header
+    构造 mutated handshake message
+    绕过 C 端 MITM FRAME_* 框架全部复杂度
+    流畅 ShBuilder API 让单字段突变 .cipher(bad) 一行
+    from_client_hello(info) 自动 generate ECDH server pubkey + echo session_id
+    SH 除被突变字段外其余完全合法, client 必走到目标校验点
+  新「two-driver pattern for assert/accept」:
+    rejection: drive_client_against_rogue_server (handshake().expect_err)
+    gap-pin:   drive_client_accepting_rogue_sh (err 字符串不含 SH-level 关键词)
+    同一 socket 拓扑两套断言路径, 方法分明
+  新「raw byte patch 突破 encoder 约束」:
+    encode_server_hello 强制写 legacy_compression_method == 0
+    compression 突变测试用偏移算式 hs[off] = 0x01 直接 patch
+    演示当 encoder 强制安全字段时仍能测试 client 鲁棒性
+
+Recorded as DEV_LOG Phase T186.
