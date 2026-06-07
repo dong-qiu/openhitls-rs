@@ -1,34 +1,67 @@
 //! Symmetric encryption/decryption command.
 //!
-//! Supported ciphers: aes-256-gcm, aes-128-gcm, chacha20-poly1305, sm4-gcm
+//! Supported ciphers:
+//! * AEAD (key from `HITLS_KEY` env var or random on encrypt):
+//!   `aes-128-gcm`, `aes-256-gcm`, `chacha20-poly1305`, `sm4-gcm`.
+//! * Non-AEAD CBC (PBKDF2-derived key+IV from `--pass`):
+//!   `aes-128-cbc`, `aes-256-cbc`.
+//!
+//! For CBC modes the file format mirrors OpenSSL `enc`:
+//!   `"Salted__"` (8 bytes) || salt (8 bytes) || ciphertext (PKCS#7-padded).
 
 use std::fs;
+
+const SALTED_MAGIC: &[u8; 8] = b"Salted__";
+const SALT_LEN: usize = 8;
+const PBKDF2_ITERATIONS: u32 = 10_000;
 
 pub fn run(
     cipher: &str,
     decrypt: bool,
     input: &str,
     output: &str,
+    pass: Option<&str>,
+    md: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let op = if decrypt { "Decrypting" } else { "Encrypting" };
     eprintln!("{op} {input} -> {output} with {cipher}");
 
     let data = fs::read(input)?;
-
     let params = cipher_params(cipher)?;
 
-    if decrypt {
-        aead_decrypt(&data, output, &params)?;
-    } else {
-        aead_encrypt(&data, output, &params)?;
+    match params.kind {
+        CipherKind::Aead => {
+            if decrypt {
+                aead_decrypt(&data, output, &params)?;
+            } else {
+                aead_encrypt(&data, output, &params)?;
+            }
+        }
+        CipherKind::Cbc => {
+            let password =
+                pass.ok_or("CBC ciphers require --pass <password> for PBKDF2 key derivation")?;
+            if decrypt {
+                cbc_decrypt_with_pass(&data, output, &params, password, md)?;
+            } else {
+                cbc_encrypt_with_pass(&data, output, &params, password, md)?;
+            }
+        }
     }
 
     Ok(())
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum CipherKind {
+    Aead,
+    Cbc,
+}
+
 struct CipherParams {
     name: &'static str,
+    kind: CipherKind,
     key_len: usize,
+    /// AEAD nonce length, or CBC IV length.
     nonce_len: usize,
 }
 
@@ -36,30 +69,152 @@ fn cipher_params(name: &str) -> Result<CipherParams, Box<dyn std::error::Error>>
     match name.to_lowercase().as_str() {
         "aes-256-gcm" => Ok(CipherParams {
             name: "aes-256-gcm",
+            kind: CipherKind::Aead,
             key_len: 32,
             nonce_len: 12,
         }),
         "aes-128-gcm" => Ok(CipherParams {
             name: "aes-128-gcm",
+            kind: CipherKind::Aead,
             key_len: 16,
             nonce_len: 12,
         }),
         "chacha20-poly1305" => Ok(CipherParams {
             name: "chacha20-poly1305",
+            kind: CipherKind::Aead,
             key_len: 32,
             nonce_len: 12,
         }),
         "sm4-gcm" => Ok(CipherParams {
             name: "sm4-gcm",
+            kind: CipherKind::Aead,
             key_len: 16,
             nonce_len: 12,
         }),
+        "aes-128-cbc" => Ok(CipherParams {
+            name: "aes-128-cbc",
+            kind: CipherKind::Cbc,
+            key_len: 16,
+            nonce_len: 16,
+        }),
+        "aes-256-cbc" => Ok(CipherParams {
+            name: "aes-256-cbc",
+            kind: CipherKind::Cbc,
+            key_len: 32,
+            nonce_len: 16,
+        }),
         _ => Err(format!(
             "cipher '{name}' not supported. Supported: \
-             aes-256-gcm, aes-128-gcm, chacha20-poly1305, sm4-gcm"
+             aes-256-gcm, aes-128-gcm, chacha20-poly1305, sm4-gcm, \
+             aes-128-cbc, aes-256-cbc"
         )
         .into()),
     }
+}
+
+// ---------------------------------------------------------------------------
+// CBC mode — PBKDF2 + OpenSSL-compatible `Salted__` format.
+// ---------------------------------------------------------------------------
+
+fn pbkdf2_derive_key_iv(
+    password: &str,
+    salt: &[u8],
+    md: &str,
+    key_len: usize,
+    iv_len: usize,
+) -> Result<(Vec<u8>, Vec<u8>), Box<dyn std::error::Error>> {
+    let factory: fn() -> Box<dyn hitls_crypto::provider::Digest> = match md.to_lowercase().as_str()
+    {
+        "sha256" => || Box::new(hitls_crypto::sha2::Sha256::new()),
+        other => {
+            return Err(
+                format!("PBKDF2 hash '{other}' not supported. Currently supported: sha256").into(),
+            )
+        }
+    };
+    let dk = hitls_crypto::pbkdf2::pbkdf2_with_hmac(
+        factory,
+        password.as_bytes(),
+        salt,
+        PBKDF2_ITERATIONS,
+        key_len + iv_len,
+    )?;
+    let (key, iv) = dk.split_at(key_len);
+    Ok((key.to_vec(), iv.to_vec()))
+}
+
+fn cbc_encrypt_raw(
+    cipher_name: &str,
+    key: &[u8],
+    iv: &[u8],
+    plaintext: &[u8],
+) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    match cipher_name {
+        "aes-128-cbc" | "aes-256-cbc" => {
+            Ok(hitls_crypto::modes::cbc::cbc_encrypt(key, iv, plaintext)?)
+        }
+        _ => unreachable!("non-CBC cipher routed through CBC path"),
+    }
+}
+
+fn cbc_decrypt_raw(
+    cipher_name: &str,
+    key: &[u8],
+    iv: &[u8],
+    ciphertext: &[u8],
+) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    match cipher_name {
+        "aes-128-cbc" | "aes-256-cbc" => {
+            Ok(hitls_crypto::modes::cbc::cbc_decrypt(key, iv, ciphertext)?)
+        }
+        _ => unreachable!("non-CBC cipher routed through CBC path"),
+    }
+}
+
+fn cbc_encrypt_with_pass(
+    data: &[u8],
+    output: &str,
+    params: &CipherParams,
+    password: &str,
+    md: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut salt = [0u8; SALT_LEN];
+    getrandom::fill(&mut salt).map_err(|e| format!("random failed: {e}"))?;
+    let (key, iv) = pbkdf2_derive_key_iv(password, &salt, md, params.key_len, params.nonce_len)?;
+    let ct = cbc_encrypt_raw(params.name, &key, &iv, data)?;
+
+    // OpenSSL-compatible: "Salted__" || salt(8) || ciphertext
+    let mut out = Vec::with_capacity(SALTED_MAGIC.len() + SALT_LEN + ct.len());
+    out.extend_from_slice(SALTED_MAGIC);
+    out.extend_from_slice(&salt);
+    out.extend_from_slice(&ct);
+    fs::write(output, &out)?;
+    Ok(())
+}
+
+fn cbc_decrypt_with_pass(
+    data: &[u8],
+    output: &str,
+    params: &CipherParams,
+    password: &str,
+    md: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let header_len = SALTED_MAGIC.len() + SALT_LEN;
+    if data.len() < header_len {
+        return Err(format!(
+            "ciphertext too short (need at least Salted__ + salt = {header_len} bytes)"
+        )
+        .into());
+    }
+    if &data[..SALTED_MAGIC.len()] != SALTED_MAGIC {
+        return Err("ciphertext missing OpenSSL 'Salted__' magic header".into());
+    }
+    let salt = &data[SALTED_MAGIC.len()..header_len];
+    let ct = &data[header_len..];
+    let (key, iv) = pbkdf2_derive_key_iv(password, salt, md, params.key_len, params.nonce_len)?;
+    let pt = cbc_decrypt_raw(params.name, &key, &iv, ct)?;
+    fs::write(output, &pt)?;
+    Ok(())
 }
 
 fn aead_encrypt_raw(
@@ -365,5 +520,181 @@ mod tests {
         let ct = aead_encrypt_raw(&key, &nonce, pt, "chacha20-poly1305").unwrap();
         let recovered = aead_decrypt_raw(&key, &nonce, &ct, "chacha20-poly1305").unwrap();
         assert_eq!(recovered, pt);
+    }
+
+    // ---- CBC + PBKDF2 (#43 restore non-AEAD ciphers) ----
+
+    fn cbc_file_roundtrip(cipher_name: &str) {
+        let dir = std::env::temp_dir().join(format!("hitls_enc_cbc_{cipher_name}"));
+        let _ = fs::create_dir_all(&dir);
+        let input_path = dir.join("input.bin");
+        let encrypted_path = dir.join("encrypted.bin");
+        let decrypted_path = dir.join("decrypted.bin");
+
+        let plaintext = b"CBC + PBKDF2 file-level roundtrip data, more than 16 bytes!";
+        fs::write(&input_path, plaintext).unwrap();
+
+        run(
+            cipher_name,
+            false,
+            input_path.to_str().unwrap(),
+            encrypted_path.to_str().unwrap(),
+            Some("hunter2"),
+            "sha256",
+        )
+        .unwrap();
+
+        // Output must start with Salted__
+        let enc_bytes = fs::read(&encrypted_path).unwrap();
+        assert!(
+            enc_bytes.starts_with(SALTED_MAGIC),
+            "CBC output missing Salted__ header"
+        );
+        assert!(enc_bytes.len() > SALTED_MAGIC.len() + SALT_LEN);
+
+        run(
+            cipher_name,
+            true,
+            encrypted_path.to_str().unwrap(),
+            decrypted_path.to_str().unwrap(),
+            Some("hunter2"),
+            "sha256",
+        )
+        .unwrap();
+
+        assert_eq!(fs::read(&decrypted_path).unwrap(), plaintext);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_cbc_aes128_roundtrip() {
+        cbc_file_roundtrip("aes-128-cbc");
+    }
+
+    #[test]
+    fn test_cbc_aes256_roundtrip() {
+        cbc_file_roundtrip("aes-256-cbc");
+    }
+
+    #[test]
+    fn test_cbc_requires_pass() {
+        let dir = std::env::temp_dir().join("hitls_enc_cbc_nopass");
+        let _ = fs::create_dir_all(&dir);
+        let input_path = dir.join("input.bin");
+        let output_path = dir.join("out.bin");
+        fs::write(&input_path, b"x").unwrap();
+        let err = run(
+            "aes-128-cbc",
+            false,
+            input_path.to_str().unwrap(),
+            output_path.to_str().unwrap(),
+            None,
+            "sha256",
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("--pass"),
+            "expected --pass diagnostic, got: {err}"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_cbc_wrong_password_rejected() {
+        let dir = std::env::temp_dir().join("hitls_enc_cbc_wrongpass");
+        let _ = fs::create_dir_all(&dir);
+        let input_path = dir.join("input.bin");
+        let encrypted_path = dir.join("out.bin");
+        let decrypted_path = dir.join("dec.bin");
+        fs::write(
+            &input_path,
+            b"secret message that is long enough to span blocks",
+        )
+        .unwrap();
+
+        run(
+            "aes-128-cbc",
+            false,
+            input_path.to_str().unwrap(),
+            encrypted_path.to_str().unwrap(),
+            Some("correct"),
+            "sha256",
+        )
+        .unwrap();
+
+        let err = run(
+            "aes-128-cbc",
+            true,
+            encrypted_path.to_str().unwrap(),
+            decrypted_path.to_str().unwrap(),
+            Some("wrong"),
+            "sha256",
+        )
+        .unwrap_err();
+        // PBKDF2 with the wrong password produces a wrong key/IV → CBC decrypt
+        // either produces invalid PKCS#7 padding or garbage. Either way: Err.
+        assert!(!err.to_string().is_empty());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_cbc_decrypt_missing_salted_header() {
+        let dir = std::env::temp_dir().join("hitls_enc_cbc_noheader");
+        let _ = fs::create_dir_all(&dir);
+        let input_path = dir.join("input.bin");
+        let output_path = dir.join("out.bin");
+        // 32 bytes of garbage — no Salted__ header.
+        fs::write(&input_path, [0xFFu8; 32]).unwrap();
+        let err = run(
+            "aes-128-cbc",
+            true,
+            input_path.to_str().unwrap(),
+            output_path.to_str().unwrap(),
+            Some("any"),
+            "sha256",
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("Salted__"),
+            "expected Salted__ diagnostic, got: {err}"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_cbc_unsupported_md() {
+        let dir = std::env::temp_dir().join("hitls_enc_cbc_badmd");
+        let _ = fs::create_dir_all(&dir);
+        let input_path = dir.join("input.bin");
+        let output_path = dir.join("out.bin");
+        fs::write(&input_path, b"x").unwrap();
+        let err = run(
+            "aes-128-cbc",
+            false,
+            input_path.to_str().unwrap(),
+            output_path.to_str().unwrap(),
+            Some("p"),
+            "md5",
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("PBKDF2 hash 'md5'"),
+            "expected PBKDF2 hash diagnostic, got: {err}"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_cipher_params_cbc_entries() {
+        let p = cipher_params("aes-128-cbc").unwrap();
+        assert_eq!(p.kind, CipherKind::Cbc);
+        assert_eq!(p.key_len, 16);
+        assert_eq!(p.nonce_len, 16);
+
+        let p = cipher_params("aes-256-cbc").unwrap();
+        assert_eq!(p.kind, CipherKind::Cbc);
+        assert_eq!(p.key_len, 32);
+        assert_eq!(p.nonce_len, 16);
     }
 }

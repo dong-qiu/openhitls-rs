@@ -40,7 +40,8 @@ enum Commands {
     },
     /// Symmetric encryption/decryption.
     Enc {
-        /// Cipher algorithm (aes-256-gcm).
+        /// Cipher algorithm. AEAD: aes-128-gcm, aes-256-gcm, chacha20-poly1305,
+        /// sm4-gcm. Non-AEAD with PBKDF2: aes-128-cbc, aes-256-cbc.
         #[arg(short, long)]
         cipher: String,
         /// Decrypt mode.
@@ -52,6 +53,14 @@ enum Commands {
         /// Output file.
         #[arg(short, long)]
         output: String,
+        /// Password for non-AEAD CBC ciphers. The key + IV are derived via
+        /// PBKDF2 from this password and a random 8-byte salt, OpenSSL-style.
+        /// Output file format: "Salted__" || salt(8) || ciphertext.
+        #[arg(short = 'P', long)]
+        pass: Option<String>,
+        /// Hash for PBKDF2 (default: sha256). Currently accepts: sha256.
+        #[arg(long, default_value = "sha256")]
+        md: String,
     },
     /// Generate a private key.
     Genpkey {
@@ -407,7 +416,9 @@ fn main() {
             decrypt,
             input,
             output,
-        } => enc::run(cipher, *decrypt, input, output),
+            pass,
+            md,
+        } => enc::run(cipher, *decrypt, input, output, pass.as_deref(), md),
         Commands::Genpkey {
             algorithm,
             bits,
