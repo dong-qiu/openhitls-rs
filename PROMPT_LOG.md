@@ -12545,3 +12545,81 @@ T181+ 路线:
   CI-driven MSRV 检查 (clippy 立刻报 repeat_n 1.82+, 跨工具反馈循环短)
 
 Recorded as DEV_LOG Phase T180.
+
+### T181 — #43 enc 恢复非-AEAD 第三弹：--md 扩展到 md5/sha1/sha224/sha384/sha512/sm3
+
+> 等 #256 合并后继续 T181
+
+承接 T179 CBC+sha256 + T180 CTR/ECB/CFB, T181 把 PBKDF2 hash 单选 sha256 → 7 选 1
+(OpenSSL enc -md 兼容全集).
+
+7 个支持的 PBKDF2 hash:
+  md5    legacy (OpenSSL 旧默认)
+  sha1   C TC003 显式 -md sha1 路径
+  sha224 NIST
+  sha256 默认
+  sha384 NIST
+  sha512 modern strong
+  sm3    中国 GM/T
+
+每个 hash 都已在 hitls_crypto 实现 Digest trait → 零产品代码改动, 仅 CLI 层 factory
+match arm 1 → 7.
+
+改动:
+  enc.rs pbkdf2_derive_key_iv:
+    factory match 加 6 arms (md5/sha1/sha224/sha384/sha512/sm3)
+    错误消息列出全部 7 个
+
+  main.rs --md doc-comment:
+    更新列出 md5/sha1/sha224/sha256/sha384/sha512/sm3
+
+8 新测试 + 1 helper:
+  helper pbkdf2_md_roundtrip(md): AES-128-CBC + 该 md 的 file roundtrip
+  test_pbkdf2_md_md5/sha1/sha224/sha384/sha512/sm3   6 个 per-hash positive
+  test_pbkdf2_md_case_insensitive   encrypt "SHA256" / decrypt "sha256" 互换 (inline path)
+  test_pbkdf2_md_mismatch_fails_decrypt  sha256 加 + sha1 解 → PKCS#7 异常
+                                          (pin hash 影响 key/iv 派生)
+
+test_pbkdf2_md_sha1 特殊意义:
+  C TC003 显式 -md sha1 路径, pin 与 openhitls-C reference 一致
+
+T180 测试 sentinel 切换:
+  test_cbc_unsupported_md 原用 md5 (T181 后变 supported)
+  改用 ripemd160 (PBKDF2-eligible 但 Rust hitls-crypto 暂不支持) 作 stable sentinel
+
+测试隔离 fix (macOS APFS 陷阱):
+  初版 pbkdf2_md_roundtrip("ShA1") 在 macOS case-insensitive FS 下与
+       test_pbkdf2_md_sha1 用的 hitls_enc_md_sha1 解析到同物理目录
+  → race condition → NotFound
+  修复: 重写 test_pbkdf2_md_case_insensitive 用 inline path 不调 helper
+       并改 encrypt 大写 / decrypt 小写 语义证明 case-insensitivity
+
+1 个 ASCII fix:
+  byte string literal 中 EM DASH (U+2014, 非 ASCII) 引发 build error
+  改 -- 兼容 byte string
+
+验证:
+  cargo test -p hitls-cli --all-features enc::   42/0 (34 → 42)
+  cargo test -p hitls-cli --all-features         235/0 + 5 ignored
+  cargo fmt --all --check                        clean
+  cargo clippy --workspace -- -D warnings        clean
+
+作用域:
+  1 处产品 (factory match +6 arm)
+  1 CLI doc 更新
+  8 新测试 + 1 helper
+  1 T180 sentinel 切换 (md5 → ripemd160)
+  测试隔离 fix
+  ASCII fix
+  零 breaking change (默认 sha256 不变)
+
+T182 路线:
+  byte-exact C SDV KAT migration (test_suite_ut_app_enc.data 仅 ~7 行 4 TC) + 关闭 #43
+
+沿用 + 新方法学:
+  T179/T180 「OpenSSL 兼容优先」
+  「testname-as-temp-dir 模式的 case-insensitive 文件系统陷阱」 (新方法学)
+    macOS APFS 默认 CI / Linux ext4 默认 CS
+    跨平台 tests 应避免依赖区分大小写的路径或显式隔离 temp dir 名
+
+Recorded as DEV_LOG Phase T181.
