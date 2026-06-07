@@ -12868,3 +12868,94 @@ MSRV 兼容小坑:
     不掩盖 issue 描述的乐观估计.
 
 Recorded as DEV_LOG Phase T184.
+
+### T185 — #58 TLS custom-extension 协商测试迁移 + 2 个 RFC 8446 §4.2 gap TODO
+
+> 请按照推荐清单依次执行，每一个issue完成合入后，继续下一个issue
+
+C SDV test_suite_sdv_custom_extensions.{c,data} 实际 11 个基础 TC (7 API + 4 FUNCTION),
+issue 描述「33 TCs」是 .data macro 展开行数. 迁移到
+tests/interop/tests/custom_ext.rs 13 个测试 + 2 个 RFC 8446 §4.2 gap TODO.
+
+Group 1: API-level 9 tests (直接 call build_custom_extensions / parse_custom_extensions + TlsConfig::builder().custom_extension()):
+  api_pack_single_no_callback_returns_empty       SDV_TLS_PACK_API_TC001
+  api_parse_single_no_callback_returns_ok         SDV_TLS_PARSE_API_TC001
+  api_pack_multiple_no_callbacks_returns_empty    SDV_TLS_PACK_MULTIPLE_API_TC001
+  api_pack_no_extensions_returns_empty            SDV_TLS_PACK_EMPTY_API_TC001
+  api_pack_with_callback_emits_extension          SDV_TLS_PACK_CALLBACK_API_TC001 byte-exact
+  api_parse_with_callback_invokes_cb              SDV_TLS_PARSE_CALLBACK_API_TC001 AtomicU32 计数
+  api_add_custom_extension_via_builder            SDV_HITLS_ADD normal
+  api_add_custom_extension_duplicate_not_rejected SDV_HITLS_ADD duplicate
+                                                  C 返 HITLS_CONFIG_DUP_CUSTOM_EXT
+                                                  Rust 接受重复 -> TODO(#58-dup-check)
+  api_context_filter_skips_wrong_context          bitmask 上下文过滤
+
+Group 2: Function-level handshake interop 4 tests (沿用 #60/#61 线程对 + 新 CallbackTrace + echo_ext + run_tls13_handshake):
+  function_basic_handshake_round_trip       FUNCTION_TC001 简化版
+                                            Rust 仅 wire CH/SH/EE 上下文
+                                            C 还接 CERT/CERT_REQ/NST -> TODO(#58-context-gap)
+  function_alert_on_parse_failure           FUNCTION_TC002
+                                            client parse_cb 在 EE 返 Err(ALERT_ILLEGAL_PARAMETER)
+                                            -> 握手 client 端 is_err
+  function_empty_extension_capability       FUNCTION_TC003
+                                            Some(vec![]) 发空 ext
+                                            server parse_cb 看到空 data slice
+  function_pass_extension_capability        FUNCTION_TC004
+                                            None (PASS) 不发送
+                                            server parse_cb 不触发
+
+Server-side 超时处理 小坑 (alert 测试踩):
+  初版 server 线程 recv_timeout 卡死:
+    client 在 EE 解析后返错并中止
+    server 已发完 EE/Cert/CertVerify/Finished 后等 client Finished
+    client 永不发
+  helper 改:
+    recv_timeout(3s).unwrap_or(Err("server: timeout"))
+    drop(server_handle) 不 join 阻塞
+    让 client-side error 成为权威结果
+
+Rust API -> C 概念映射:
+  C HITLS_CFG_AddCustomExtension(extType, context, addCb, freeCb, addArg, parseCb, parseArg)
+    -> Rust TlsConfig::builder().custom_extension(CustomExtension { extension_type, context, add_cb, parse_cb })
+  C addArg / parseArg     -> Rust closure capture (Arc<Mutex<>> 共享状态)
+  C freeCb                -> Rust Vec<u8>::Drop 自动
+  C RET_PASS / RET_PACK   -> Option<Vec<u8>>
+                             None = PASS
+                             Some(data) = PACK
+                             Some(vec![]) = 空 ext
+  C *alert + return -1    -> Rust Err(alert_code: u8)
+
+2 个 TODO (写入 module doc):
+  TODO(#58-dup-check)     TlsConfig::custom_extension 重复 extension_type 不拒
+  TODO(#58-context-gap)   CERT / CERT_REQ / NST contexts 未 wire 进握手
+
+验证:
+  cargo test -p hitls-integration-tests --test custom_ext   13/0
+    中间踩了:
+      client/server SH-context-not-wired (TLS 1.3 server 不在 SH 发 custom ext, 在 EE)
+      server-timeout (client 中止后 server 卡等 Finished)
+  cargo test -p hitls-integration-tests                     14 binary 全绿, 零回归
+  cargo fmt --check + cargo clippy -D warnings              clean
+
+作用域:
+  1 个新测试文件 (~510 行 / 13 tests)
+  零产品代码改动
+  2 个 TODO 占位 (dup-check + context-gap)
+
+沿用 + 新方法学:
+  沿用 #60/#61 线程对 handshake helper + make_ed25519_server_identity()
+  沿用 #61 (T184) 「TODO + pin 测试」二人组
+  沿用 #61 (T184) 「issue 描述 vs C 源对齐」
+    #58「33 TCs」实际 11 TC, .data macro 展开行数误导
+  新「Mutex<Vec<u32>> 共享回调 trace」:
+    custom-extension 回调跨 client / server / 主断言三线程
+    Arc<Mutex<Vec<u32>>> 包 CallbackTrace 保留 context 调用顺序
+    比 AtomicU32 计数信息密度高
+  新「server thread leak-on-purpose」:
+    握手 client 失败 -> server 卡等 Finished
+    短 timeout + drop server_handle (不 join 阻塞)
+    让进程退出自动回收线程
+    代价是测试 binary 完成前 ~1 dangling thread
+    比为每 server 加 abort 信号简单且无 unsafe channel
+
+Recorded as DEV_LOG Phase T185.
