@@ -478,6 +478,7 @@ impl Dtls12ClientHandshake {
         let group = match self.server_named_curve {
             0x0017 => NamedGroup::SECP256R1,
             0x0018 => NamedGroup::SECP384R1,
+            0x0019 => NamedGroup::SECP521R1,
             0x001D => NamedGroup::X25519,
             _ => {
                 return Err(TlsError::HandshakeFailed(format!(

@@ -12697,3 +12697,77 @@ ASCII fix 复发:
   「重复踩坑 → codified known issue」 (EM DASH 二次复发后正式记录)
 
 Recorded as DEV_LOG Phase T182.
+
+### T183 — #60 `group_signature` TLS 握手矩阵迁移 + TLS 1.2 client ECDHE secp521r1 缺口顺手补齐
+
+> 请继续 #60
+
+Issue #60 描述写 "byte-exact signature KAT, 62 TC", 实际 C 源 `test_suite_sdv_hlt_group_signature.{c,data}`
+用 `HLT_*` harness 跑完整 TLS 握手, 31 行 / 8 TC family, 无 signature bytes 断言, 只测
+`CONNECT(...) == SUCCESS`. Rust 端忠实复刻语义 (而非误导性描述), 把 31 行迁到 26 个握手测试 +
+5 行不迁名单写进 module doc.
+
+测试改动 (tests/interop/tests/sig_alg_matrix.rs, 新 ~470 行):
+
+  C TC family                          C rows   Rust   备注
+  SDV_TLS_13_GROUP                     1 (loop)   6    secp256/384/521/X25519/ffdhe2048/3072
+  SDV_TLS_12_GROUP                     7          4    Brainpool 3 行不迁 (Rust 未实现)
+  SDV_TLS_ECDSA_SIGNATURE  (TLS 1.2)   5          3    SHA-1 / SHA-224 legacy 不迁
+  SDV_TLS_RSA_SIGNATURE    (TLS 1.2)   8          6    同 SHA-1/SHA-224 限制
+  SDV_TLS_RSAPSS_SIGNATURE             3          0    rsa_pss_pss_* 需 PSS-OID 证书
+  SDV_TLS13_RSA_SIGNATURE              3          3    RSA-PSS-RSAE SHA-256/384/512
+  SDV_TLS13_ECDSA_SIGNATURE            3          3    ECDSA P-256/P-384/P-521
+  SDV_TLS13_EDDSA_SIGNATURE            1          1    Ed25519
+  合计                                 31        26    5 行不迁
+
+helper 三件套:
+  CertKind enum 含新增 EcdsaCurve(EccCurveId) 变体
+    make_ecdsa_server_identity() 只生成 P-256
+    RFC 8446 §4.2.3 要求 ecdsa_secpXXXr1_shaYYY 必须配 P-XXX 证书
+  make_ecdsa_identity_for_curve(curve_id) 本地 helper
+    不污染 tests/interop/src/lib.rs 公共 API
+  tls12_cipher_suites(cert_kind, sig) 显式选 cipher suite
+    TLS 1.2 cipher suite 编码 kex × cert sig, default 列表与 SHA-384/512 sig 不匹配
+    选 TLS_ECDHE_{RSA,ECDSA}_WITH_AES_{128,256}_GCM_SHA{256,384}
+
+产品改动 (hitls-tls TLS 1.2 client ECDHE secp521r1 缺口顺手补齐):
+  迁移 SDV SECP521R1 行报 "unsupported ECDH curve: 0x0019"
+  client12.rs 三处 match self.server_named_curve + client_dtls12.rs 一处
+    原仅支持 0x0017/0x0018/0x001D (P-256/P-384/X25519)
+    缺 0x0019 (P-521)
+  补齐 4 行一行式 enum arm: 0x0019 => NamedGroup::SECP521R1
+  server 侧本来就支持 (KeyExchange 全 NamedGroup 通用), 仅 client kex 缺口
+
+不迁名单 (module doc):
+  Brainpool brainpoolP{256,384,512}r1 (3 行) - Rust 未实现
+  ECDSA/RSA SHA-1 / SHA-224 (4 行) - 现代实践拒绝 legacy
+  rsa_pss_pss_sha{256,384,512} (3 行)
+    需 id-RSASSA-PSS (1.2.840.113549.1.1.10) OID 证书
+    T107 加了 RsaPss PrivateKey 但 PSS-OID self-signed cert helper 仍缺
+
+验证:
+  cargo test -p hitls-integration-tests --test sig_alg_matrix   26/0
+    一开始 11/26 -> 加 cipher_suites + curve-matching cert 后 24/26
+    补 client secp521r1 后 26/26
+  cargo test -p hitls-integration-tests                         全 13 binary 全绿, 零回归
+  cargo test -p hitls-tls --lib                                 1556/0
+  cargo fmt --check + cargo clippy -D warnings                  clean
+
+作用域:
+  1 个新测试文件 (~470 行)
+  TLS 1.2/DTLS 1.2 client 4 处一行式 enum match 补充
+  零 breaking change
+
+沿用 + 新方法学:
+  R23 §12.8 + 沿用 T179-T182 「byte-mapped SDV 测试 + 不迁名单文档化」
+  「迁移驱动暴露 hitls-tls 缺口」(新)
+    测试迁移工程意外暴露产品代码 ECDHE curve 列表 P-521 缺口
+    顺手在同 PR 修而不另开 issue, 留下 trace (DEV_LOG + commit body) 便于审计
+    "testing exposes feature gap → fix together when minimal"
+  「Cert kind ≠ sig scheme ≠ named group」(迁移注意事项)
+    TLS 1.2 cipher suite 编码 (kex × cert sig)
+    TLS 1.3 cipher suite 与 cert 完全解耦但 RFC 8446 §4.2.3 强制
+      ecdsa_secpXXXr1_shaYYY 与证书曲线对齐
+    Rust 测试 helper 必须三者一致才不会被 server-side cert-aware sig scheme 匹配卡住
+
+Recorded as DEV_LOG Phase T183.
