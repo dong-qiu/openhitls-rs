@@ -12336,3 +12336,74 @@ Issue #45 进度: T176 ~20/53 → T177 ~26/53.
   「产品扩展 + 默认零 breaking」 (opt-in 不影响现有调用者)
 
 Recorded as DEV_LOG Phase T177.
+
+### T178 — #45 关 4 个 API 缺口收官：set_revocation_leaf_only(bool) 叶子-only 撤销模式 + TC005 DEV-flag 迁移
+
+> 等 #253 合并后继续T178
+
+承接 T175 cRLSign KU + T176 critical-ext + T177 require_crl 后, 关 T174 doc 列的 4 个 VERIFY-side API 缺口里的最后一个 —— ALL/DEV flag split.
+
+当前 Rust 行为 vs 三方对照:
+  Rust pre-T178       chain 每步 (无 DEV 选项)
+  openhitls-C 默认     VFY_FLAG_CRL_DEV (leaf only) / 严格 VFY_FLAG_CRL_ALL (chain)
+  OpenSSL 默认         X509_V_FLAG_CRL_CHECK (leaf only) / 严格 _CHECK_ALL (chain)
+
+Rust 默认最严, 缺 leaf-only —— T178 补.
+
+改动:
+  产品 (verify.rs, ~25 行):
+    CertificateVerifier 加 revocation_leaf_only: bool (默认 false)
+    new() 初始化 false
+    新 public API set_revocation_leaf_only(leaf_only: bool) builder-style
+    check_revocation_status 循环末尾加 `if self.revocation_leaf_only { break; }`
+    完整 doc-comment 含 openhitls-C / OpenSSL 双工具语义对照
+
+  测试 (migrated_crl_rfc5280_verify.rs 追加 6 个):
+    tc_line257 (TC005 r257)  3-tier rootCRL="" leaf-only → SUCCESS
+    tc_line266 (TC005 r266)  trophy: root.crl 撤销 intermediate + leaf-only → Ok
+                              (与 T175 tc_line263 同 fixture 同 input 但 ALL → CertRevoked 形成对照)
+    tc_line275 (TC005 r275)  3-tier clean leaf usr3 leaf-only → SUCCESS
+    tc_line278 (TC005 r278)  usr3 in intermediate_usr3.crl + leaf-only → CertRevoked
+    verify_revocation_leaf_only_accepts_clean_leaf  (synth +)
+    verify_revocation_leaf_only_catches_leaf_revocation  (synth -, inline build CRL with
+                                                          add_revoked(RevokedCertBuilder))
+
+关键 trophy 对照（首次落地的方法学）:
+  T175 tc_line263 (ALL, root.crl 撤销 intermediate) → CertRevoked
+  T178 tc_line266 (leaf-only, 同 fixture)          → Ok(chain len 3)
+  ↑ 「同 fixture 同 input 不同 mode 不同 result」 双向 pin ALL/DEV 语义差异
+
+4 个 API 缺口最终终板:
+  (a) cRLSign KU enforcement      ✅ T175
+  (b) critical-ext rejection       ✅ T176
+  (c) CRL_NOT_FOUND surfacing      ✅ T177
+  (d) ALL/DEV flag split           ✅ T178 本 PR (4/4 全关闭)
+
+验证:
+  cargo test --test migrated_crl_rfc5280_verify        23/0 (T175 7 + T176 4 + T177 6 + T178 6)
+  cargo test --test migrated_crl_rfc5280_gap            9/0 (T174 无回归)
+  cargo test -p hitls-pki --all-features             1564/0 (1558 → 1564)
+  cargo test --workspace --all-features              全 pass
+  cargo fmt --all --check                            clean
+  cargo clippy --workspace -- -D warnings            clean
+
+Issue #45 进度: T177 ~26/53 → T178 ~32/53. 剩 ~21 行均 fixture-specific 问题
+(SM2 with_userid / AKI matching / fixture self-inconsistency), 非 API 缺口.
+
+沿用方法学 + 新增方法学:
+  R23 §12.8 + T175-T177 「产品 fix + matching tests + sentinel」
+  Builder-style fluent API 一致性 (set_revocation_leaf_only ↔ set_check_revocation /
+                                   set_require_crl / set_required_eku)
+  「同 fixture 同 input 不同 mode 不同 result」trophy 对照 (T178 首次落地)
+
+#45 issue 端到端收官回顾:
+  T174  PARSE-side gap-closure       9 测试 + 0 产品 (sentinel)
+  T175  cRLSign KU enforcement       7 测试 + ~10 行产品
+  T176  critical-ext rejection       4 测试 + ~14 行 + helper
+  T177  CRL_NOT_FOUND surfacing      6 测试 + ~30 行 + 新 API
+  T178  ALL/DEV flag split           6 测试 + ~25 行 + 新 API
+  合计  5 个 PR 端到端               32 测试 + 3 处产品 + 2 个新 API
+
+4 个 API 缺口全部关闭 + 每个都有 matching tests + 都向后兼容 (默认零 breaking).
+
+Recorded as DEV_LOG Phase T178.

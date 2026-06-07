@@ -17,6 +17,7 @@ pub struct CertificateVerifier {
     verification_time: Option<i64>,
     check_revocation: bool,
     require_crl: bool,
+    revocation_leaf_only: bool,
     required_eku: Option<Oid>,
 }
 
@@ -36,6 +37,7 @@ impl CertificateVerifier {
             verification_time: None,
             check_revocation: false,
             require_crl: false,
+            revocation_leaf_only: false,
             required_eku: None,
         }
     }
@@ -106,6 +108,30 @@ impl CertificateVerifier {
     /// (`set_check_revocation(false)`).
     pub fn set_require_crl(&mut self, require: bool) -> &mut Self {
         self.require_crl = require;
+        self
+    }
+
+    /// Restrict revocation checking to the end-entity (leaf) certificate only
+    /// (default: disabled — every cert in the chain except the trusted root is
+    /// checked).
+    ///
+    /// When `leaf_only == true`, the revocation walk inside `verify_cert`
+    /// inspects only the chain's leaf cert (`chain[0]`) against any matching
+    /// CRL and returns immediately afterwards. Intermediate-CA revocations
+    /// (e.g. a root CRL that revokes an intermediate cert) are ignored — this
+    /// matches the openhitls-C `VFY_FLAG_CRL_DEV` ("device-cert") mode and
+    /// OpenSSL's default `X509_V_FLAG_CRL_CHECK` (without `_ALL`).
+    ///
+    /// When `false` (the default), every cert in the chain except the trusted
+    /// root is checked, matching openhitls-C `VFY_FLAG_CRL_ALL` and OpenSSL's
+    /// `X509_V_FLAG_CRL_CHECK_ALL`.
+    ///
+    /// Leaf-only mode has no effect when revocation checking is disabled
+    /// (`set_check_revocation(false)`), and composes with `set_require_crl`:
+    /// strict-mode require-CRL is then evaluated only against the leaf's
+    /// issuer.
+    pub fn set_revocation_leaf_only(&mut self, leaf_only: bool) -> &mut Self {
+        self.revocation_leaf_only = leaf_only;
         self
     }
 
@@ -505,6 +531,13 @@ impl CertificateVerifier {
             // If no CRL found for this issuer and strict mode is off, skip
             // (soft-fail). The strict-mode early-return at the top of the loop
             // body handles the `require_crl == true` case.
+
+            // Leaf-only mode (openhitls-C `VFY_FLAG_CRL_DEV` / OpenSSL default
+            // `X509_V_FLAG_CRL_CHECK`): inspect only the leaf cert and stop.
+            // Intermediate-CA revocation is intentionally ignored.
+            if self.revocation_leaf_only {
+                break;
+            }
         }
         Ok(())
     }
