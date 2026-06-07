@@ -12623,3 +12623,47 @@ T182 路线:
     跨平台 tests 应避免依赖区分大小写的路径或显式隔离 temp dir 名
 
 Recorded as DEV_LOG Phase T181.
+
+### R24 — #72 getrandom 0.3 → 0.4 workspace migration (R13 playbook 复用)
+
+> 请看看接下来应该干什么 → 用户选 A: #72 getrandom 0.3 → 0.4
+
+承接 R13 (0.2→0.3) 的相同 5 步模式. 本次 0.3 → 0.4 跨主版本号但 API 完全兼容,
+getrandom::fill(&mut buf) 签名不变, 123 sites 零修改.
+
+5 步 R13 playbook:
+  1. Bump direct deps          7 Cargo.toml (workspace 根 + 6 crate + hitls-crypto wasm_js feature)
+  2. Lock 刷新                  Cargo.lock + fuzz/Cargo.lock 双 refresh
+  3. Audit API delta           API 无变化, 123 sites 零修改 (R13 重命名 121 sites)
+  4. Workspace verify          build / test / clippy / fmt 全 pass
+  5. WASM 兼容确认             getrandom_backend="wasm_js" cfg 在 0.4 仍 valid
+
+Lock 文件双版本 acceptable:
+  getrandom v0.3.4 仍由 rand_core ← rand ← proptest (dev-only) 拉入
+  production code 全走 0.4
+  R13 doc 已说明该模式 acceptable
+
+WASM 兼容性:
+  .cargo/config.toml getrandom_backend="wasm_js" 在 0.4 valid
+  hitls-crypto target-specific wasm_js feature 引用同步
+  wasm32-unknown-unknown build clean
+
+验证:
+  cargo build --workspace --all-features    0 errors
+  cargo test --workspace --all-features     全 suite pass
+  cargo fmt --all --check                   clean
+  cargo clippy --workspace -- -D warnings   clean
+  fuzz build (cd fuzz && cargo build)       clean
+  WASM build                                clean
+
+Per-crate call site 分布:
+  crypto 43 / tls 57 / pki 10 / cli 8 / bignum 3 / auth 2 = 123 (全部零改)
+
+R24 vs R13 节省工时:
+  Code modifications     R13 121 sites      R24 0 sites
+  Test/debug time        R13 ~hours         R24 minutes
+  Per-crate 验证         R13 rename + verify  R24 build-only
+
+#72 issue 可关闭. R13 playbook 模式经一次复用证明可重用.
+
+Recorded as DEV_LOG Phase R24.
