@@ -53,9 +53,12 @@ enum Commands {
         /// Output file.
         #[arg(short, long)]
         output: String,
-        /// Password for non-AEAD CBC ciphers. The key + IV are derived via
+        /// Password for non-AEAD ciphers. The key + IV are derived via
         /// PBKDF2 from this password and a random 8-byte salt, OpenSSL-style.
         /// Output file format: "Salted__" || salt(8) || ciphertext.
+        /// Accepts OpenSSL `-pass` syntax: `pass:<password>` for an inline
+        /// literal, `file:<path>` to read the first line of a file (max 1024
+        /// bytes), or a bare string (treated as the literal password).
         #[arg(short = 'P', long)]
         pass: Option<String>,
         /// Hash for PBKDF2 (default: sha256). Supported: md5, sha1, sha224,

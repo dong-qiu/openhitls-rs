@@ -17,6 +17,11 @@ use std::fs;
 const SALTED_MAGIC: &[u8; 8] = b"Salted__";
 const SALT_LEN: usize = 8;
 const PBKDF2_ITERATIONS: u32 = 10_000;
+/// Maximum password length read from a `file:` source. Mirrors the openhitls
+/// C reference upper bound of 1024 characters; values above this are rejected
+/// to keep the PBKDF2 input bounded and to catch obviously-malformed files
+/// (a password file should not be megabytes long).
+const PASSWORD_FILE_MAX_LEN: usize = 1024;
 
 pub fn run(
     cipher: &str,
@@ -41,12 +46,13 @@ pub fn run(
             }
         }
         CipherKind::Cbc | CipherKind::Ctr | CipherKind::Ecb | CipherKind::Cfb => {
-            let password =
+            let pass_arg =
                 pass.ok_or("non-AEAD ciphers require --pass <password> for PBKDF2 key derivation")?;
+            let password = resolve_password(pass_arg)?;
             if decrypt {
-                pass_decrypt(&data, output, &params, password, md)?;
+                pass_decrypt(&data, output, &params, &password, md)?;
             } else {
-                pass_encrypt(&data, output, &params, password, md)?;
+                pass_encrypt(&data, output, &params, &password, md)?;
             }
         }
     }
@@ -198,6 +204,51 @@ fn pkcs7_unpad(data: &[u8], block: usize) -> Result<Vec<u8>, Box<dyn std::error:
         return Err("PKCS#7 padding bytes inconsistent".into());
     }
     Ok(data[..cut].to_vec())
+}
+
+/// Resolve a `--pass` argument into the raw password bytes, mirroring the
+/// OpenSSL / openhitls-C conventions:
+///
+/// * `pass:<password>` — the literal password is everything after `pass:`.
+/// * `file:<path>` — read the first line (no trailing newline) of `<path>`
+///   as the password. The file is bounded to `PASSWORD_FILE_MAX_LEN` bytes
+///   to match the openhitls-C reference. Files larger than the bound are
+///   rejected.
+/// * No prefix — for backward compatibility with T179/T180 tests, treat the
+///   whole argument as the password.
+///
+/// Empty passwords (`pass:` with nothing after, or a `file:` source whose
+/// first line is empty) are rejected per the C TC003 reference behaviour
+/// (`HITLS_APP_PASSWD_FAIL`).
+fn resolve_password(arg: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let password = if let Some(literal) = arg.strip_prefix("pass:") {
+        literal.to_string()
+    } else if let Some(path) = arg.strip_prefix("file:") {
+        let bytes =
+            fs::read(path).map_err(|e| format!("password file '{path}' read failed: {e}"))?;
+        if bytes.len() > PASSWORD_FILE_MAX_LEN {
+            return Err(format!(
+                "password file '{path}' is {} bytes; maximum is {PASSWORD_FILE_MAX_LEN}",
+                bytes.len()
+            )
+            .into());
+        }
+        let s = std::str::from_utf8(&bytes)
+            .map_err(|e| format!("password file '{path}' is not valid UTF-8: {e}"))?;
+        // Take the first line, stripping the trailing newline if present.
+        s.split('\n')
+            .next()
+            .unwrap_or("")
+            .trim_end_matches('\r')
+            .to_string()
+    } else {
+        arg.to_string()
+    };
+
+    if password.is_empty() {
+        return Err("password is empty (PBKDF2 requires a non-empty password)".into());
+    }
+    Ok(password)
 }
 
 fn pbkdf2_derive_key_iv(
@@ -1168,5 +1219,368 @@ mod tests {
         assert!(pkcs7_unpad(&buf, 16).is_err());
         // Non-block-aligned length.
         assert!(pkcs7_unpad(&[1, 2, 3], 16).is_err());
+    }
+
+    // ---- T182: C SDV mapping + `pass:` / `file:` protocols ----
+    //
+    // The C SDV `test_suite_ut_enc.{c,data}` defines three test cases:
+    //
+    //   TC001 — happy-path with various `-pass` source (`pass:` / `file:`).
+    //   TC002 — encrypt + decrypt round-trip across 7 cipher modes.
+    //   TC003 — negative cases (unknown cipher / hash, empty / oversize pass).
+    //
+    // The argv shape in C uses underscores (`aes128_cbc`); the Rust enc CLI
+    // uses hyphens (`aes-128-cbc`). That is the only name-style divergence;
+    // the semantics line up 1:1. Each test below maps to one or more C rows.
+    //
+    // Rows we do NOT migrate (and why):
+    //   * TC002 r6-r7 (`aes128_xts`) — the Rust CLI does not expose XTS yet.
+    //   * TC002 r8-r9 (`aes128_gcm`) / r10-r11 (`chacha20_poly1305`) — Rust
+    //     keeps the AEAD modes on the `HITLS_KEY` env-var key path for now,
+    //     so the C `-pass pass:...` flow does not apply. Bringing AEAD under
+    //     the same PBKDF2 path is a follow-up beyond #43's scope.
+    //   * TC001 r3 (`file:enter_pass_file`) — interactive password reading
+    //     via tty is out of scope for the CLI; covered by TC001 r1 anyway.
+
+    /// SDV TC001 r0 + TC002 r0-r1: aes-128-cbc + `pass:12345678` + file-level
+    /// encrypt followed by decrypt. C expects both steps to return
+    /// `HITLS_APP_SUCCESS`.
+    #[test]
+    fn sdv_tc001_r0_aes128_cbc_pass_literal() {
+        let dir = std::env::temp_dir().join("hitls_enc_sdv_tc001_r0");
+        let _ = fs::create_dir_all(&dir);
+        let input_path = dir.join("test_encfile");
+        let enc_path = dir.join("res_encfile");
+        let dec_path = dir.join("res_decfile");
+        fs::write(&input_path, b"openhitls SDV enc TC001 r0 plaintext").unwrap();
+        run(
+            "aes-128-cbc",
+            false,
+            input_path.to_str().unwrap(),
+            enc_path.to_str().unwrap(),
+            Some("pass:12345678"),
+            "sha256",
+        )
+        .unwrap();
+        run(
+            "aes-128-cbc",
+            true,
+            enc_path.to_str().unwrap(),
+            dec_path.to_str().unwrap(),
+            Some("pass:12345678"),
+            "sha256",
+        )
+        .unwrap();
+        assert_eq!(
+            fs::read(&dec_path).unwrap(),
+            b"openhitls SDV enc TC001 r0 plaintext"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// SDV TC001 r1: aes-128-cbc + `file:<path>`. The first line of the file
+    /// is the password; everything after the first newline is ignored.
+    #[test]
+    fn sdv_tc001_r1_aes128_cbc_pass_file() {
+        let dir = std::env::temp_dir().join("hitls_enc_sdv_tc001_r1");
+        let _ = fs::create_dir_all(&dir);
+        let input_path = dir.join("test_encfile");
+        let pass_path = dir.join("size_1024_pass");
+        let enc_path = dir.join("res_encfile");
+        let dec_path = dir.join("res_decfile");
+        fs::write(&input_path, b"plaintext for file: pass test").unwrap();
+        // Multi-line file — only the first line should be used as the password.
+        fs::write(&pass_path, b"12345678\nignored second line\n").unwrap();
+        let pass_arg = format!("file:{}", pass_path.to_str().unwrap());
+        run(
+            "aes-128-cbc",
+            false,
+            input_path.to_str().unwrap(),
+            enc_path.to_str().unwrap(),
+            Some(&pass_arg),
+            "sha256",
+        )
+        .unwrap();
+        // Decrypt with an inline `pass:12345678` — must match because the file
+        // resolved to the same literal.
+        run(
+            "aes-128-cbc",
+            true,
+            enc_path.to_str().unwrap(),
+            dec_path.to_str().unwrap(),
+            Some("pass:12345678"),
+            "sha256",
+        )
+        .unwrap();
+        assert_eq!(
+            fs::read(&dec_path).unwrap(),
+            b"plaintext for file: pass test"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// SDV TC001 r2: aes-128-cbc + `-md sha1` + `pass:12345678`. The
+    /// roundtrip dispatches PBKDF2 through sha1 instead of sha256.
+    #[test]
+    fn sdv_tc001_r2_aes128_cbc_md_sha1() {
+        let dir = std::env::temp_dir().join("hitls_enc_sdv_tc001_r2");
+        let _ = fs::create_dir_all(&dir);
+        let input_path = dir.join("test_encfile");
+        let enc_path = dir.join("res_encfile");
+        let dec_path = dir.join("res_decfile");
+        fs::write(&input_path, b"openhitls SDV TC001 r2 -- sha1 PBKDF2 path").unwrap();
+        for is_decrypt in [false, true] {
+            let (src, dst) = if is_decrypt {
+                (&enc_path, &dec_path)
+            } else {
+                (&input_path, &enc_path)
+            };
+            run(
+                "aes-128-cbc",
+                is_decrypt,
+                src.to_str().unwrap(),
+                dst.to_str().unwrap(),
+                Some("pass:12345678"),
+                "sha1",
+            )
+            .unwrap();
+        }
+        assert_eq!(
+            fs::read(&dec_path).unwrap(),
+            "openhitls SDV TC001 r2 -- sha1 PBKDF2 path".as_bytes()
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// SDV TC002 r2-r3: aes-128-ctr + `pass:12345678` encrypt+decrypt.
+    #[test]
+    fn sdv_tc002_r2_r3_aes128_ctr_pass_literal() {
+        let dir = std::env::temp_dir().join("hitls_enc_sdv_tc002_ctr");
+        let _ = fs::create_dir_all(&dir);
+        let input_path = dir.join("test_encfile");
+        let enc_path = dir.join("res_encfile");
+        let dec_path = dir.join("res_decfile");
+        fs::write(&input_path, b"SDV TC002 r2/r3 CTR roundtrip").unwrap();
+        for is_decrypt in [false, true] {
+            let (src, dst) = if is_decrypt {
+                (&enc_path, &dec_path)
+            } else {
+                (&input_path, &enc_path)
+            };
+            run(
+                "aes-128-ctr",
+                is_decrypt,
+                src.to_str().unwrap(),
+                dst.to_str().unwrap(),
+                Some("pass:12345678"),
+                "sha256",
+            )
+            .unwrap();
+        }
+        assert_eq!(
+            fs::read(&dec_path).unwrap(),
+            b"SDV TC002 r2/r3 CTR roundtrip"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// SDV TC002 r4-r5: aes-128-ecb + `pass:12345678` encrypt+decrypt.
+    #[test]
+    fn sdv_tc002_r4_r5_aes128_ecb_pass_literal() {
+        let dir = std::env::temp_dir().join("hitls_enc_sdv_tc002_ecb");
+        let _ = fs::create_dir_all(&dir);
+        let input_path = dir.join("test_encfile");
+        let enc_path = dir.join("res_encfile");
+        let dec_path = dir.join("res_decfile");
+        fs::write(&input_path, b"SDV TC002 r4/r5 ECB roundtrip").unwrap();
+        for is_decrypt in [false, true] {
+            let (src, dst) = if is_decrypt {
+                (&enc_path, &dec_path)
+            } else {
+                (&input_path, &enc_path)
+            };
+            run(
+                "aes-128-ecb",
+                is_decrypt,
+                src.to_str().unwrap(),
+                dst.to_str().unwrap(),
+                Some("pass:12345678"),
+                "sha256",
+            )
+            .unwrap();
+        }
+        assert_eq!(
+            fs::read(&dec_path).unwrap(),
+            b"SDV TC002 r4/r5 ECB roundtrip"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// SDV TC002 r12-r13: sm4-cfb + `pass:12345678` encrypt+decrypt.
+    #[test]
+    fn sdv_tc002_r12_r13_sm4_cfb_pass_literal() {
+        let dir = std::env::temp_dir().join("hitls_enc_sdv_tc002_sm4cfb");
+        let _ = fs::create_dir_all(&dir);
+        let input_path = dir.join("test_encfile");
+        let enc_path = dir.join("res_encfile");
+        let dec_path = dir.join("res_decfile");
+        fs::write(&input_path, b"SDV TC002 r12/r13 SM4-CFB").unwrap();
+        for is_decrypt in [false, true] {
+            let (src, dst) = if is_decrypt {
+                (&enc_path, &dec_path)
+            } else {
+                (&input_path, &enc_path)
+            };
+            run(
+                "sm4-cfb",
+                is_decrypt,
+                src.to_str().unwrap(),
+                dst.to_str().unwrap(),
+                Some("pass:12345678"),
+                "sha256",
+            )
+            .unwrap();
+        }
+        assert_eq!(fs::read(&dec_path).unwrap(), b"SDV TC002 r12/r13 SM4-CFB");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// SDV TC003 r0: unknown cipher `aes128_abc` → C `HITLS_APP_OPT_VALUE_INVALID`,
+    /// Rust returns `Err` containing the diagnostic.
+    #[test]
+    fn sdv_tc003_r0_unknown_cipher() {
+        let dir = std::env::temp_dir().join("hitls_enc_sdv_tc003_r0");
+        let _ = fs::create_dir_all(&dir);
+        let input_path = dir.join("test_encfile");
+        let enc_path = dir.join("res_encfile");
+        fs::write(&input_path, b"x").unwrap();
+        let err = run(
+            "aes-128-abc",
+            false,
+            input_path.to_str().unwrap(),
+            enc_path.to_str().unwrap(),
+            Some("pass:12345678"),
+            "sha256",
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string()
+                .starts_with("cipher 'aes-128-abc' not supported"),
+            "got: {err}"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// SDV TC003 r2: unknown PBKDF2 hash → C `HITLS_APP_OPT_VALUE_INVALID`,
+    /// Rust returns `Err` containing the diagnostic.
+    #[test]
+    fn sdv_tc003_r2_unknown_md() {
+        let dir = std::env::temp_dir().join("hitls_enc_sdv_tc003_r2");
+        let _ = fs::create_dir_all(&dir);
+        let input_path = dir.join("test_encfile");
+        let enc_path = dir.join("res_encfile");
+        fs::write(&input_path, b"x").unwrap();
+        let err = run(
+            "aes-128-cbc",
+            false,
+            input_path.to_str().unwrap(),
+            enc_path.to_str().unwrap(),
+            Some("pass:12345678"),
+            "md_abc",
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("PBKDF2 hash 'md_abc'"),
+            "got: {err}"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// SDV TC003 r3: empty password (`pass:` with nothing after) →
+    /// C `HITLS_APP_PASSWD_FAIL`. Rust rejects empty PBKDF2 passwords.
+    #[test]
+    fn sdv_tc003_r3_empty_pass() {
+        let dir = std::env::temp_dir().join("hitls_enc_sdv_tc003_r3");
+        let _ = fs::create_dir_all(&dir);
+        let input_path = dir.join("test_encfile");
+        let enc_path = dir.join("res_encfile");
+        fs::write(&input_path, b"x").unwrap();
+        let err = run(
+            "aes-128-cbc",
+            false,
+            input_path.to_str().unwrap(),
+            enc_path.to_str().unwrap(),
+            Some("pass:"),
+            "sha256",
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("password is empty"), "got: {err}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// SDV TC003 r4: oversize password file (1025 bytes vs the 1024 max) →
+    /// C `HITLS_APP_PASSWD_FAIL`. Rust rejects with a size diagnostic.
+    #[test]
+    fn sdv_tc003_r4_oversize_pass_file() {
+        let dir = std::env::temp_dir().join("hitls_enc_sdv_tc003_r4");
+        let _ = fs::create_dir_all(&dir);
+        let input_path = dir.join("test_encfile");
+        let enc_path = dir.join("res_encfile");
+        let pass_path = dir.join("size_1025_pass");
+        fs::write(&input_path, b"x").unwrap();
+        fs::write(&pass_path, vec![b'a'; PASSWORD_FILE_MAX_LEN + 1]).unwrap();
+        let pass_arg = format!("file:{}", pass_path.to_str().unwrap());
+        let err = run(
+            "aes-128-cbc",
+            false,
+            input_path.to_str().unwrap(),
+            enc_path.to_str().unwrap(),
+            Some(&pass_arg),
+            "sha256",
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("maximum is "), "got: {err}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Additional negative covering an absent `file:<path>` — not in the C
+    /// SDV directly but a natural sibling of TC003 r4 (the C
+    /// `file:noexistfile` path appears in app_pkcs12.c and follows the same
+    /// shape).
+    #[test]
+    fn sdv_extra_missing_pass_file() {
+        let dir = std::env::temp_dir().join("hitls_enc_sdv_missing_file");
+        let _ = fs::create_dir_all(&dir);
+        let input_path = dir.join("test_encfile");
+        let enc_path = dir.join("res_encfile");
+        fs::write(&input_path, b"x").unwrap();
+        let missing = dir.join("nonexistent_subdir").join("pass.txt");
+        let pass_arg = format!("file:{}", missing.to_str().unwrap());
+        let err = run(
+            "aes-128-cbc",
+            false,
+            input_path.to_str().unwrap(),
+            enc_path.to_str().unwrap(),
+            Some(&pass_arg),
+            "sha256",
+        )
+        .unwrap_err();
+        let s = err.to_string();
+        assert!(
+            s.contains("password file") && s.contains("read failed"),
+            "expected password-file read diagnostic, got: {s}"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// `resolve_password` unit tests — bare strings stay literal (backward
+    /// compatibility with T179/T180 tests that pre-date the prefix).
+    #[test]
+    fn test_resolve_password_protocols() {
+        assert_eq!(resolve_password("pass:secret123").unwrap(), "secret123");
+        assert_eq!(resolve_password("hunter2").unwrap(), "hunter2");
+        assert!(resolve_password("pass:").is_err());
+        // `file:` with a missing path bubbles through fs::read.
+        assert!(resolve_password("file:/no/such/path").is_err());
     }
 }
