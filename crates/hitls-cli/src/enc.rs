@@ -3,11 +3,14 @@
 //! Supported ciphers:
 //! * AEAD (key from `HITLS_KEY` env var or random on encrypt):
 //!   `aes-128-gcm`, `aes-256-gcm`, `chacha20-poly1305`, `sm4-gcm`.
-//! * Non-AEAD CBC (PBKDF2-derived key+IV from `--pass`):
-//!   `aes-128-cbc`, `aes-256-cbc`.
+//! * Non-AEAD (PBKDF2-derived key+IV from `--pass`):
+//!   * CBC (PKCS#7-padded): `aes-128-cbc`, `aes-256-cbc`.
+//!   * CTR (no padding): `aes-128-ctr`, `aes-256-ctr`.
+//!   * ECB (PKCS#7-padded, no IV): `aes-128-ecb`, `aes-256-ecb`.
+//!   * CFB (no padding): `sm4-cfb`.
 //!
-//! For CBC modes the file format mirrors OpenSSL `enc`:
-//!   `"Salted__"` (8 bytes) || salt (8 bytes) || ciphertext (PKCS#7-padded).
+//! For all PBKDF2 modes the file format mirrors OpenSSL `enc`:
+//!   `"Salted__"` (8 bytes) || salt (8 bytes) || ciphertext.
 
 use std::fs;
 
@@ -37,13 +40,13 @@ pub fn run(
                 aead_encrypt(&data, output, &params)?;
             }
         }
-        CipherKind::Cbc => {
+        CipherKind::Cbc | CipherKind::Ctr | CipherKind::Ecb | CipherKind::Cfb => {
             let password =
-                pass.ok_or("CBC ciphers require --pass <password> for PBKDF2 key derivation")?;
+                pass.ok_or("non-AEAD ciphers require --pass <password> for PBKDF2 key derivation")?;
             if decrypt {
-                cbc_decrypt_with_pass(&data, output, &params, password, md)?;
+                pass_decrypt(&data, output, &params, password, md)?;
             } else {
-                cbc_encrypt_with_pass(&data, output, &params, password, md)?;
+                pass_encrypt(&data, output, &params, password, md)?;
             }
         }
     }
@@ -54,7 +57,22 @@ pub fn run(
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum CipherKind {
     Aead,
+    /// CBC: block cipher with PKCS#7 padding + 16-byte IV.
     Cbc,
+    /// CTR: stream cipher (no padding) + 16-byte counter/nonce.
+    Ctr,
+    /// ECB: block cipher with PKCS#7 padding, no IV.
+    Ecb,
+    /// CFB: stream-like cipher (no padding) + 16-byte IV.
+    Cfb,
+}
+
+impl CipherKind {
+    /// Whether the cipher mode requires an IV / nonce derived from PBKDF2 in
+    /// addition to the key. Used to compute the PBKDF2 `dk_len`.
+    fn needs_iv(self) -> bool {
+        matches!(self, Self::Cbc | Self::Ctr | Self::Cfb)
+    }
 }
 
 struct CipherParams {
@@ -103,18 +121,84 @@ fn cipher_params(name: &str) -> Result<CipherParams, Box<dyn std::error::Error>>
             key_len: 32,
             nonce_len: 16,
         }),
+        "aes-128-ctr" => Ok(CipherParams {
+            name: "aes-128-ctr",
+            kind: CipherKind::Ctr,
+            key_len: 16,
+            nonce_len: 16,
+        }),
+        "aes-256-ctr" => Ok(CipherParams {
+            name: "aes-256-ctr",
+            kind: CipherKind::Ctr,
+            key_len: 32,
+            nonce_len: 16,
+        }),
+        "aes-128-ecb" => Ok(CipherParams {
+            name: "aes-128-ecb",
+            kind: CipherKind::Ecb,
+            key_len: 16,
+            nonce_len: 0,
+        }),
+        "aes-256-ecb" => Ok(CipherParams {
+            name: "aes-256-ecb",
+            kind: CipherKind::Ecb,
+            key_len: 32,
+            nonce_len: 0,
+        }),
+        "sm4-cfb" => Ok(CipherParams {
+            name: "sm4-cfb",
+            kind: CipherKind::Cfb,
+            key_len: 16,
+            nonce_len: 16,
+        }),
         _ => Err(format!(
             "cipher '{name}' not supported. Supported: \
              aes-256-gcm, aes-128-gcm, chacha20-poly1305, sm4-gcm, \
-             aes-128-cbc, aes-256-cbc"
+             aes-128-cbc, aes-256-cbc, aes-128-ctr, aes-256-ctr, \
+             aes-128-ecb, aes-256-ecb, sm4-cfb"
         )
         .into()),
     }
 }
 
 // ---------------------------------------------------------------------------
-// CBC mode — PBKDF2 + OpenSSL-compatible `Salted__` format.
+// Non-AEAD modes — PBKDF2 + OpenSSL-compatible `Salted__` format.
+//
+// `pass_encrypt` / `pass_decrypt` are the generic entry points; the per-mode
+// raw-encrypt / raw-decrypt helpers below delegate to the right `hitls_crypto`
+// primitive based on the cipher name. ECB has no IV and adds PKCS#7 padding;
+// CTR / CFB are streaming modes (no padding); CBC has both an IV and PKCS#7
+// padding (handled by `hitls_crypto::modes::cbc`).
 // ---------------------------------------------------------------------------
+
+const AES_BLOCK_SIZE: usize = 16;
+
+/// PKCS#7-pad `data` to a multiple of `block` bytes. Used for the ECB mode
+/// (whose Rust primitive requires block-aligned input).
+fn pkcs7_pad(data: &[u8], block: usize) -> Vec<u8> {
+    let pad_len = block - (data.len() % block);
+    let mut out = Vec::with_capacity(data.len() + pad_len);
+    out.extend_from_slice(data);
+    out.extend(std::iter::repeat(pad_len as u8).take(pad_len));
+    out
+}
+
+/// Strip PKCS#7 padding from `data`, returning the unpadded slice. Errors on
+/// malformed padding (wrong length byte, length > block size, length 0).
+fn pkcs7_unpad(data: &[u8], block: usize) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    if data.is_empty() || data.len() % block != 0 {
+        return Err("PKCS#7 input length not block-aligned".into());
+    }
+    let pad_len = *data.last().unwrap() as usize;
+    if pad_len == 0 || pad_len > block || pad_len > data.len() {
+        return Err("PKCS#7 padding byte out of range".into());
+    }
+    let cut = data.len() - pad_len;
+    if data[cut..].iter().any(|&b| b as usize != pad_len) {
+        return Err("PKCS#7 padding bytes inconsistent".into());
+    }
+    Ok(data[..cut].to_vec())
+}
 
 fn pbkdf2_derive_key_iv(
     password: &str,
@@ -143,35 +227,58 @@ fn pbkdf2_derive_key_iv(
     Ok((key.to_vec(), iv.to_vec()))
 }
 
-fn cbc_encrypt_raw(
-    cipher_name: &str,
+/// Encrypt `plaintext` under the given non-AEAD mode. `iv` is consulted only
+/// for IV-bearing modes; for ECB it is ignored.
+fn pass_encrypt_raw(
+    params: &CipherParams,
     key: &[u8],
     iv: &[u8],
     plaintext: &[u8],
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    match cipher_name {
-        "aes-128-cbc" | "aes-256-cbc" => {
-            Ok(hitls_crypto::modes::cbc::cbc_encrypt(key, iv, plaintext)?)
+    Ok(match params.name {
+        "aes-128-cbc" | "aes-256-cbc" => hitls_crypto::modes::cbc::cbc_encrypt(key, iv, plaintext)?,
+        "aes-128-ctr" | "aes-256-ctr" => {
+            let mut buf = plaintext.to_vec();
+            hitls_crypto::modes::ctr::ctr_crypt(key, iv, &mut buf)?;
+            buf
         }
-        _ => unreachable!("non-CBC cipher routed through CBC path"),
-    }
+        "aes-128-ecb" | "aes-256-ecb" => {
+            // The Rust ECB primitive requires block-aligned input — add
+            // PKCS#7 padding here so we accept arbitrary plaintext sizes.
+            let padded = pkcs7_pad(plaintext, AES_BLOCK_SIZE);
+            hitls_crypto::modes::ecb::ecb_encrypt(key, &padded)?
+        }
+        "sm4-cfb" => hitls_crypto::modes::cfb::sm4_cfb_encrypt(key, iv, plaintext)?,
+        other => unreachable!("non-PBKDF2 cipher '{other}' routed through pass path"),
+    })
 }
 
-fn cbc_decrypt_raw(
-    cipher_name: &str,
+/// Decrypt `ciphertext` under the given non-AEAD mode.
+fn pass_decrypt_raw(
+    params: &CipherParams,
     key: &[u8],
     iv: &[u8],
     ciphertext: &[u8],
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    match cipher_name {
+    Ok(match params.name {
         "aes-128-cbc" | "aes-256-cbc" => {
-            Ok(hitls_crypto::modes::cbc::cbc_decrypt(key, iv, ciphertext)?)
+            hitls_crypto::modes::cbc::cbc_decrypt(key, iv, ciphertext)?
         }
-        _ => unreachable!("non-CBC cipher routed through CBC path"),
-    }
+        "aes-128-ctr" | "aes-256-ctr" => {
+            let mut buf = ciphertext.to_vec();
+            hitls_crypto::modes::ctr::ctr_crypt(key, iv, &mut buf)?;
+            buf
+        }
+        "aes-128-ecb" | "aes-256-ecb" => {
+            let padded = hitls_crypto::modes::ecb::ecb_decrypt(key, ciphertext)?;
+            pkcs7_unpad(&padded, AES_BLOCK_SIZE)?
+        }
+        "sm4-cfb" => hitls_crypto::modes::cfb::sm4_cfb_decrypt(key, iv, ciphertext)?,
+        other => unreachable!("non-PBKDF2 cipher '{other}' routed through pass path"),
+    })
 }
 
-fn cbc_encrypt_with_pass(
+fn pass_encrypt(
     data: &[u8],
     output: &str,
     params: &CipherParams,
@@ -180,8 +287,13 @@ fn cbc_encrypt_with_pass(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut salt = [0u8; SALT_LEN];
     getrandom::fill(&mut salt).map_err(|e| format!("random failed: {e}"))?;
-    let (key, iv) = pbkdf2_derive_key_iv(password, &salt, md, params.key_len, params.nonce_len)?;
-    let ct = cbc_encrypt_raw(params.name, &key, &iv, data)?;
+    let iv_len = if params.kind.needs_iv() {
+        params.nonce_len
+    } else {
+        0
+    };
+    let (key, iv) = pbkdf2_derive_key_iv(password, &salt, md, params.key_len, iv_len)?;
+    let ct = pass_encrypt_raw(params, &key, &iv, data)?;
 
     // OpenSSL-compatible: "Salted__" || salt(8) || ciphertext
     let mut out = Vec::with_capacity(SALTED_MAGIC.len() + SALT_LEN + ct.len());
@@ -192,7 +304,7 @@ fn cbc_encrypt_with_pass(
     Ok(())
 }
 
-fn cbc_decrypt_with_pass(
+fn pass_decrypt(
     data: &[u8],
     output: &str,
     params: &CipherParams,
@@ -211,8 +323,13 @@ fn cbc_decrypt_with_pass(
     }
     let salt = &data[SALTED_MAGIC.len()..header_len];
     let ct = &data[header_len..];
-    let (key, iv) = pbkdf2_derive_key_iv(password, salt, md, params.key_len, params.nonce_len)?;
-    let pt = cbc_decrypt_raw(params.name, &key, &iv, ct)?;
+    let iv_len = if params.kind.needs_iv() {
+        params.nonce_len
+    } else {
+        0
+    };
+    let (key, iv) = pbkdf2_derive_key_iv(password, salt, md, params.key_len, iv_len)?;
+    let pt = pass_decrypt_raw(params, &key, &iv, ct)?;
     fs::write(output, &pt)?;
     Ok(())
 }
@@ -696,5 +813,201 @@ mod tests {
         assert_eq!(p.kind, CipherKind::Cbc);
         assert_eq!(p.key_len, 32);
         assert_eq!(p.nonce_len, 16);
+    }
+
+    // ---- CTR / ECB / CFB (#43 T180) ----
+
+    /// Round-trip via the public `run()` entry point. Used to exercise all
+    /// non-AEAD modes uniformly.
+    fn pass_file_roundtrip(cipher_name: &str, pt: &[u8]) {
+        let dir = std::env::temp_dir().join(format!("hitls_enc_pass_{cipher_name}"));
+        let _ = fs::create_dir_all(&dir);
+        let input_path = dir.join("input.bin");
+        let enc_path = dir.join("encrypted.bin");
+        let dec_path = dir.join("decrypted.bin");
+        fs::write(&input_path, pt).unwrap();
+
+        run(
+            cipher_name,
+            false,
+            input_path.to_str().unwrap(),
+            enc_path.to_str().unwrap(),
+            Some("hunter2"),
+            "sha256",
+        )
+        .unwrap();
+        let enc_bytes = fs::read(&enc_path).unwrap();
+        assert!(
+            enc_bytes.starts_with(SALTED_MAGIC),
+            "{cipher_name} output missing Salted__ header"
+        );
+        assert!(enc_bytes.len() > SALTED_MAGIC.len() + SALT_LEN);
+
+        run(
+            cipher_name,
+            true,
+            enc_path.to_str().unwrap(),
+            dec_path.to_str().unwrap(),
+            Some("hunter2"),
+            "sha256",
+        )
+        .unwrap();
+        assert_eq!(fs::read(&dec_path).unwrap(), pt);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_ctr_aes128_roundtrip() {
+        pass_file_roundtrip(
+            "aes-128-ctr",
+            b"CTR stream cipher, no padding, arbitrary length 0xAA",
+        );
+    }
+
+    #[test]
+    fn test_ctr_aes256_roundtrip() {
+        pass_file_roundtrip(
+            "aes-256-ctr",
+            b"CTR-256 stream cipher round-trip with longer plaintext",
+        );
+    }
+
+    /// CTR is a stream cipher: ciphertext length == plaintext length, so the
+    /// total output is exactly `Salted__(8) + salt(8) + plaintext.len()`.
+    #[test]
+    fn test_ctr_no_padding_overhead() {
+        let dir = std::env::temp_dir().join("hitls_enc_ctr_nopad");
+        let _ = fs::create_dir_all(&dir);
+        let input_path = dir.join("input.bin");
+        let enc_path = dir.join("out.bin");
+        let pt = b"exactly 25 bytes of plaintext.";
+        assert_eq!(pt.len(), 30);
+        fs::write(&input_path, pt).unwrap();
+        run(
+            "aes-128-ctr",
+            false,
+            input_path.to_str().unwrap(),
+            enc_path.to_str().unwrap(),
+            Some("p"),
+            "sha256",
+        )
+        .unwrap();
+        let enc_bytes = fs::read(&enc_path).unwrap();
+        assert_eq!(
+            enc_bytes.len(),
+            SALTED_MAGIC.len() + SALT_LEN + pt.len(),
+            "CTR ciphertext should not introduce padding overhead"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_ecb_aes128_roundtrip() {
+        pass_file_roundtrip("aes-128-ecb", b"ECB block cipher with PKCS#7 padding");
+    }
+
+    #[test]
+    fn test_ecb_aes256_roundtrip() {
+        pass_file_roundtrip(
+            "aes-256-ecb",
+            b"ECB-256 with arbitrary length payload spanning blocks",
+        );
+    }
+
+    /// ECB output is PKCS#7-padded to a multiple of 16 bytes, so an empty
+    /// plaintext produces exactly one 16-byte ciphertext block.
+    #[test]
+    fn test_ecb_empty_plaintext_pads_one_block() {
+        let dir = std::env::temp_dir().join("hitls_enc_ecb_empty");
+        let _ = fs::create_dir_all(&dir);
+        let input_path = dir.join("input.bin");
+        let enc_path = dir.join("out.bin");
+        let dec_path = dir.join("dec.bin");
+        fs::write(&input_path, b"").unwrap();
+        run(
+            "aes-128-ecb",
+            false,
+            input_path.to_str().unwrap(),
+            enc_path.to_str().unwrap(),
+            Some("p"),
+            "sha256",
+        )
+        .unwrap();
+        let enc_bytes = fs::read(&enc_path).unwrap();
+        assert_eq!(
+            enc_bytes.len(),
+            SALTED_MAGIC.len() + SALT_LEN + AES_BLOCK_SIZE,
+            "empty plaintext PKCS#7-pads to one block"
+        );
+        run(
+            "aes-128-ecb",
+            true,
+            enc_path.to_str().unwrap(),
+            dec_path.to_str().unwrap(),
+            Some("p"),
+            "sha256",
+        )
+        .unwrap();
+        assert!(fs::read(&dec_path).unwrap().is_empty());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_sm4_cfb_roundtrip() {
+        pass_file_roundtrip(
+            "sm4-cfb",
+            b"SM4-CFB GM/T 0002-2012 streaming roundtrip data",
+        );
+    }
+
+    #[test]
+    fn test_cipher_params_ctr_ecb_cfb_entries() {
+        let p = cipher_params("aes-128-ctr").unwrap();
+        assert_eq!(p.kind, CipherKind::Ctr);
+        assert!(p.kind.needs_iv());
+        assert_eq!((p.key_len, p.nonce_len), (16, 16));
+
+        let p = cipher_params("aes-256-ctr").unwrap();
+        assert_eq!((p.key_len, p.nonce_len), (32, 16));
+
+        let p = cipher_params("aes-128-ecb").unwrap();
+        assert_eq!(p.kind, CipherKind::Ecb);
+        assert!(!p.kind.needs_iv());
+        assert_eq!((p.key_len, p.nonce_len), (16, 0));
+
+        let p = cipher_params("aes-256-ecb").unwrap();
+        assert_eq!((p.key_len, p.nonce_len), (32, 0));
+
+        let p = cipher_params("sm4-cfb").unwrap();
+        assert_eq!(p.kind, CipherKind::Cfb);
+        assert!(p.kind.needs_iv());
+        assert_eq!((p.key_len, p.nonce_len), (16, 16));
+    }
+
+    #[test]
+    fn test_pkcs7_pad_unpad_roundtrip() {
+        for n in 0..=33 {
+            let v: Vec<u8> = (0..n).map(|i| i as u8).collect();
+            let padded = pkcs7_pad(&v, 16);
+            assert_eq!(padded.len() % 16, 0);
+            assert!(padded.len() > v.len(), "PKCS#7 always adds at least 1 byte");
+            let unpadded = pkcs7_unpad(&padded, 16).unwrap();
+            assert_eq!(unpadded, v);
+        }
+    }
+
+    #[test]
+    fn test_pkcs7_unpad_rejects_malformed() {
+        // Length-byte > block size.
+        assert!(pkcs7_unpad(&[0x00; 16], 16).is_err());
+        assert!(pkcs7_unpad(&[0xFF; 16], 16).is_err());
+        // Inconsistent padding bytes.
+        let mut buf = vec![0u8; 16];
+        buf[15] = 3;
+        buf[14] = 3;
+        buf[13] = 2; // wrong
+        assert!(pkcs7_unpad(&buf, 16).is_err());
+        // Non-block-aligned length.
+        assert!(pkcs7_unpad(&[1, 2, 3], 16).is_err());
     }
 }

@@ -12471,3 +12471,77 @@ T180+ 路线:
   OpenSSL 兼容    Salted__ magic header 是 #43 issue 的核心诉求, cross-tool > 单方便
 
 Recorded as DEV_LOG Phase T179.
+
+### T180 — #43 enc 恢复非-AEAD 第二弹：AES-CTR + AES-ECB + SM4-CFB
+
+> 等 #255 合并后继续 T180
+
+承接 T179 AES-CBC + PBKDF2 + OpenSSL Salted__ 格式, T180 扩展到剩余 4 非-AEAD modes
+(CTR / ECB / CFB).
+
+改动:
+  CipherKind 扩展:
+    {Aead, Cbc} → {Aead, Cbc, Ctr, Ecb, Cfb}
+    新 method needs_iv() 区分 IV-bearing (CBC/CTR/CFB) vs 无 IV (ECB)
+    用于计算 PBKDF2 dk_len = key_len + (iv_len if needs_iv else 0)
+
+  5 个新 cipher_params 条目:
+    aes-128-ctr / aes-256-ctr  (key 16/32 nonce 16)
+    aes-128-ecb / aes-256-ecb  (key 16/32 nonce 0)
+    sm4-cfb                    (key 16 iv 16)
+
+  重构 CBC-only → 通用 pass path:
+    cbc_encrypt_raw / decrypt_raw            → pass_encrypt_raw / decrypt_raw
+    cbc_encrypt_with_pass / decrypt_with_pass → pass_encrypt / decrypt
+    按 params.name match 分发各 mode primitive
+    run() arm 从 Cbc => 扩展为 Cbc | Ctr | Ecb | Cfb =>
+
+  PKCS#7 helpers (CLI 层):
+    Rust ecb_encrypt 要求 block-aligned input
+    pkcs7_pad(data, block)  → Vec<u8>
+    pkcs7_unpad(data, block)→ Result<Vec<u8>>
+        三重校验: block-aligned + pad_len ∈ [1,block] + bytes consistent
+
+10 新测试 + 1 helper:
+  pass_file_roundtrip(cipher_name, plaintext)  通用 helper (扩 T179 模式)
+  test_ctr_aes128_roundtrip                    AES-128-CTR
+  test_ctr_aes256_roundtrip                    AES-256-CTR
+  test_ctr_no_padding_overhead                 byte-exact 长度断言 (Salted__+salt+pt.len)
+  test_ecb_aes128_roundtrip                    AES-128-ECB
+  test_ecb_aes256_roundtrip                    AES-256-ECB
+  test_ecb_empty_plaintext_pads_one_block      PKCS#7 行为验证 (空→1 block→空)
+  test_sm4_cfb_roundtrip                       SM4-CFB GM/T 0002-2012
+  test_cipher_params_ctr_ecb_cfb_entries       5 条目 + needs_iv() 断言
+  test_pkcs7_pad_unpad_roundtrip               长度 0..=33 共 34 轮 + 长度断言
+  test_pkcs7_unpad_rejects_malformed           4 种 malformed (pad>block / pad=0 /
+                                                inconsistent / non-aligned)
+
+MSRV 兼容修复:
+  初版 std::iter::repeat_n (Rust 1.82+ stable)
+  MSRV 1.75 不可用, clippy 立刻报错
+  改 std::iter::repeat(x).take(n) 兼容 1.75
+
+T181+ 路线:
+  T181 加 --md sha1/sha512
+  T182 byte-exact C SDV KAT migration
+
+验证:
+  cargo test -p hitls-cli --all-features enc::  34/0 (24 → 34)
+  cargo test -p hitls-cli --all-features        227/0 + 5 ignored
+  cargo fmt --all --check                       clean
+  cargo clippy --workspace -- -D warnings       clean
+
+作用域:
+  CipherKind +3 变体 + needs_iv()
+  5 新 cipher_params 条目
+  4 CBC-only fn 重构为通用 pass-*
+  2 PKCS#7 helpers
+  10 新测试
+  零 breaking change (AEAD + T179 CBC 测试仍 pass)
+
+沿用 + 新方法学:
+  R23 §12.8 + T179 OpenSSL 兼容优先
+  「通用 dispatch + mode-specific raw 分离」 (新 mode 只需 cipher_params + pass_*_raw)
+  CI-driven MSRV 检查 (clippy 立刻报 repeat_n 1.82+, 跨工具反馈循环短)
+
+Recorded as DEV_LOG Phase T180.
