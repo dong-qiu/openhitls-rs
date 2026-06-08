@@ -13055,6 +13055,93 @@ Group 2: RFC 8446 §4.1.3 MUST 但 Rust 不查的 gap 2 tests:
 
 Recorded as DEV_LOG Phase T186.
 
+### T187 — #45 CRL 收官: CRL 日期校验 + 签名 tamper + 撤销 flag gating + 1 个 AKI gap TODO
+
+> 请继续刚才未完成的工作
+
+承接 T174-T178 (#45 累计 32/53), 关 TC001/TC003 的 date / signature / DN-tamper / flag-gating 收尾行
++ 1 个 AKI matching gap. 新增 7 tests, 覆盖率 ~32/53 -> ~39/53 (~74%);
+剩 ~14 行均为 SM2 with_userId / err_userId 变体 (Rust 缺 SM2 ZA-bound verify API), follow-up.
+
+新 helper synth_dated_chain(this_update, next_update, revoke_leaf) -> (CA, leaf, CRL, dn):
+  参数化 thisUpdate / nextUpdate / revocation 状态的 Ed25519 三件套
+  对应 RFC 5280 §5.1.2.4-5 的 thisUpdate / nextUpdate 边界
+  比 T175 的 synth_chain(ku) 多了时间维度
+
+7 个新测试 (按 C TC 编号):
+  tc_tc001_r8_x509_crl_verify_expired_crl_rejected
+    TC001 #8 expired CRL
+    verification_time > nextUpdate -> InvalidCrl("CRL has expired")
+    pin verify.rs line 519-523
+  tc_tc001_r9_x509_crl_verify_not_yet_valid_crl_rejected
+    TC001 #9 not-yet-valid CRL
+    verification_time < thisUpdate -> InvalidCrl("CRL not yet valid")
+  tc_tc001_r8_r9_boundary_verification_time_at_endpoints_accepted
+    边界对称
+    verification_time == thisUpdate (strict < 接受)
+    verification_time == nextUpdate (strict > 接受)
+  tc_tc003_r4_x509_crl_verify_tampered_signature_rejected
+    TC003 #4 tampered signature
+    build CRL -> flip last byte -> from_der 仍 ok (DER 结构未破)
+    -> verify 触发 InvalidCrl("CRL signature ...")
+  tc_tc003_r3_x509_crl_verify_tampered_issuer_dn_no_match
+    TC003 #3 tampered DN
+    alien KP + alien DN -> self-consistent 但 issuer 与 CA 不同的 CRL
+    soft-fail (不 set_require_crl): 无 CRL match -> 静默跳过 -> Ok
+    strict (T177 set_require_crl(true)): InvalidCrl("no CRL found for issuer")
+    同 fixture 双路径双断言
+  tc_tc001_r6_x509_crl_verify_tampered_aki_accepted_gap
+    TC001 #6 tampered AKI gap pin
+    RFC 5280 §5.2.1 SHOULD AKI <-> SKI 匹配
+    Rust find_crl_for_issuer 仅按 DN 匹配
+    -> TODO(#45-aki-match)
+  tc_tc001_r2_r4_x509_crl_verify_revocation_flag_gating
+    TC001 #2/#4 组合
+    同 CRL+leaf
+    check_revocation(true) -> CertRevoked
+    check_revocation(false) -> 跳过 -> Ok
+
+1 个 TODO:
+  TODO(#45-aki-match)  RFC 5280 §5.2.1 AKI <-> SKI 匹配未实现
+                       pin by tc_tc001_r6_*_tampered_aki_accepted_gap
+
+不迁名单 (剩 ~14 SM2 with_userId 行):
+  Rust hitls_crypto::sm2 verify API 当前不接受 user-id (ZA) 参数
+  GB/T 32918.2 §6.2 ZA = SM3(ENTL_A || ID_A || a || b || x_G || y_G || x_A || y_A)
+  是 hitls-crypto API 增强工作 -> TODO(#45-sm2-userid) follow-up issue
+  不属 hitls-pki 测试侧 scope
+
+验证:
+  cargo test -p hitls-pki --all-features --test migrated_crl_rfc5280_verify   30/0 (23 -> 30, +7)
+  cargo test -p hitls-pki --all-features                                      1571/0 全 pass
+  cargo fmt --check + cargo clippy -D warnings                                clean
+
+作用域:
+  1 个已有测试文件 +~260 行 (+7 tests + 1 helper)
+  零产品代码改动 (用现有 verify.rs date/sig-verify + T177 set_require_crl + T178 set_revocation_leaf_only)
+  1 个 TODO (AKI matching)
+  1 个不迁名单条目 (SM2 userId 留 follow-up)
+
+沿用 + 新方法学:
+  沿用 T175 synth_chain 模板, 扩展为 synth_dated_chain 加时间维度
+  沿用 #61/#58/#48 「TODO + pin 测试」二人组
+  新「同 fixture 双断言路径」:
+    在 tc_tc003_r3 与 tc_tc001_r2_r4 两次应用
+    一个 (CA, leaf, CRL) 三件套两次构造 verifier (一软一硬 / 一开一关)
+    pin 当前 mode-aware 行为差异
+    比为每种 mode 单独 fixture 节省 ~50% LOC
+  新「raw byte patch 测 sig-verify」:
+    build 合法 CRL -> to_der -> 末字节 ^= 0xFF -> from_der re-parse (DER 结构未破)
+    -> verify 步触发签名失败
+    演示当上层 codec 通过时下游 crypto 层是否真把守
+  新「不迁名单按 root cause 分类」:
+    剩 14 行 SM2 userId 不是 hitls-pki 测试缺陷
+    而是 hitls-crypto SM2 API 缺 ZA-bound verify
+    module doc + DEV_LOG 双地点登记
+    避免后续 contributor 误以为 #45 完全没修
+
+Recorded as DEV_LOG Phase T187.
+
 ### T188 — #44 CSR (PKCS#10 / RFC 2986) negative-parse 测试: 合成 mutation 方法学 + 11 tests + 1 个 RFC 2986 §4 gap TODO
 
 > 走 B (并行 #44 off origin/main, T187 在 #267 排队中)
