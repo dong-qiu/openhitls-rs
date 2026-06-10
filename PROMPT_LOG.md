@@ -13054,3 +13054,79 @@ Group 2: RFC 8446 §4.1.3 MUST 但 Rust 不查的 gap 2 tests:
     演示当 encoder 强制安全字段时仍能测试 client 鲁棒性
 
 Recorded as DEV_LOG Phase T186.
+
+### T188 — #44 CSR (PKCS#10 / RFC 2986) negative-parse 测试: 合成 mutation 方法学 + 11 tests + 1 个 RFC 2986 §4 gap TODO
+
+> 走 B (并行 #44 off origin/main, T187 在 #267 排队中)
+
+C SDV test_suite_sdv_x509_csr.{c,data}: issue「168 TCs」实为 ~100 行 / ~14 TC family,
+多 POSITIVE round-trips, 真 negative 子集小. 本 PR 聚焦攻击面缺口 + RFC 2986 §4 version=0 gap.
+
+与 #267 (T187) 并行 (option B):
+  CI Gate strict-mode 让 CSR 与 CRL 改动并行 PR 自动 sequence merge
+  改动文件不重叠
+  新 migrated_csr_negative_parse.rs vs 已有 migrated_crl_rfc5280_verify.rs
+
+沿用 T186 rogue-server / T187 CRL signature-tamper 方法学:
+  build 合法 fixture + 字节级 mutation
+  替代 binary fixture checked-in
+
+Helper:
+  build_valid_ed25519_csr / build_valid_rsa_csr -> (CertificateRequest, Vec<u8>)
+
+5 groups / 11 tests:
+  Group 1 Positive baselines (2): csr_valid_baseline_parses_and_verifies / csr_pem_roundtrip
+  Group 2 Negative sig/alg (3):
+    csr_tampered_signature_fails_verify (flip last DER byte)
+    csr_unsupported_signature_algorithm_rejected
+      Ed25519 OID 06 03 2B 65 70 在 CSR 出现 2 次 (SPKI + signatureAlgorithm)
+      用 rposition 取末次, 0x70 -> 0x63
+      -> InvalidCert("unsupported CSR signature algorithm")
+    csr_unknown_oid_after_bit_flip
+      RSA sha256WithRSAEncryption 末字节 0x0B -> 0x7F
+  Group 3 Structural DER (3): csr_truncated_der_rejected / csr_garbage_bytes_rejected / csr_empty_input_rejected -> Asn1Error
+  Group 4 PEM framing (2): csr_pem_wrong_block_label_rejected ("CERTIFICATE" 错 label) / csr_pem_no_block_rejected (裸文本)
+  Group 5 RFC 2986 §4 gap pin (1):
+    csr_wrong_version_accepted_gap
+    RFC §4 version MUST be 0, Rust 接受任意 INTEGER
+    02 01 00 -> 02 01 07 -> parsed.version == 0x07
+    -> TODO(#44-strict-version)
+
+中间踩坑: OID 重复 mutation
+  初版 windows(5).position 取首处命中 SPKI 内 algorithm OID 而非 signatureAlgorithm
+  verify_signature() sig_oid 仍 Ed25519 -> 走正常 verify path -> Ok(false) 非 Err
+  改 (0..=).rev().find(...) 反向搜
+
+不迁名单 (写入 module doc):
+  ~64 行 POSITIVE PARSE_FUNC across alg variants
+    已在 mod.rs:1346-1413 单测覆盖, 本 PR 不重复
+  ~14 行 CTRL_FUNC / CTRL_SET_API
+    内部 API 控制, 无 negative-parse 攻击面
+
+1 个 TODO:
+  TODO(#44-strict-version)  RFC 2986 §4 version MUST be 0 不校验
+
+验证:
+  cargo test -p hitls-pki --all-features --test migrated_csr_negative_parse   11/0
+  cargo test -p hitls-pki --all-features                                       1575/0
+  cargo fmt --check + cargo clippy -D warnings                                 clean
+
+作用域:
+  1 个新测试文件 (~270 行 / 11 tests + 2 helper)
+  零产品代码改动
+  1 个 TODO
+
+沿用 + 新方法学:
+  沿用 T186 rogue-server / T187 CRL signature-tamper 「build valid + byte patch」
+  沿用 #61/#58/#48/#45 「TODO + pin 测试」二人组
+  新「重复 OID 模式 rposition 取目标」 (新坑+方法学):
+    CSR (PKCS#10) 内 SPKI.algorithm 与 outer signatureAlgorithm 同 alg 时
+    同款 OID 必双出现, mutation 测试需明确从尾搜定位 signatureAlgorithm
+    否则断言与 root cause 错位
+    「双角色字段的隐藏 mutation 陷阱」
+  新「与 #267 并行 PR 模式」:
+    CI Gate strict-mode 让独立改动文件的并行 PR 自动 sequence merge
+    不阻塞等待前一 PR 合入
+    rebase 由 strict-mode 提醒后 git fetch + 解决
+
+Recorded as DEV_LOG Phase T188.
