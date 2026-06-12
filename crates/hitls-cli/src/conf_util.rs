@@ -27,7 +27,8 @@
 //! - `conf_subj_TC001` (data-driven encode) — covered by `req::parse_subject`
 //!   unit tests already; not duplicated here
 //! - `conf_subj_TC002` (NULL/missing-slash negatives) — pinned in
-//!   [`tests::dn_parser_negative_cases_pin_req_module`]
+//!   `tests::dn_parser_negative_cases_pin_req_module` (rustdoc cannot
+//!   link into a `#[cfg(test)]` module, so this stays as plain code text)
 //! - `conf_X509Ext_TC001/TC002` (cnf parser + extension dispatch) —
 //!   NOT ported; see TODO
 
