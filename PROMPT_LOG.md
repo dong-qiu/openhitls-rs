@@ -13809,3 +13809,103 @@ Non-port scope cuts (写入 module doc + README):
     codified 为 sub-PR 提交清单的一部分
 
 Recorded as DEV_LOG Phase T193.
+
+### T194 — #47-F keymgmt non-port + #47 6-PR 系列收官 (#47 6 子 PR 系列第 6 / 最终弹)
+
+> 针对Phase B，依次完成各个issue，每个issue完成并合入远程仓库main后再启动下一个issue。如果issue较大，可以拆成子任务。
+
+承接 T189-T193, 关闭 #47 6-PR 系列.
+keymgmt 是 C 中第二个 GM 操作员模式 CLI 子命令:
+  与 T191 sm 共享 HITLS_APP_SM_MODE gating
+  所有 19 个 UT_HITLS_APP_KEYMGMT_TC* 全部 #ifndef HITLS_APP_SM_MODE -> SKIP_TEST()
+  沿用 T191 sm 同款 non-port 决策模式
+
+改动:
+  1. crates/hitls-cli/src/keymgmt_defer.rs (新模块 ~100 行 / 4 pin tests):
+     module-level doc 列 keymgmt 9 个 CLI op:
+       create / find / derive / delete / erase / mac / sign / verify / status·version·selftest
+     强调 co-deferred with sm:
+       keymgmt 依赖 sm 的 user DB 做授权
+       keymgmt UUID 存储被 sm 登录解锁
+       两个 TODO 必须一起 land
+     4 个 pin tests:
+       keymgmt_defer_readme_exists_and_explains_non_port
+         pin section heading + HITLS_APP_SM_MODE + TODO(#47-keymgmt-defer) marker
+       keymgmt_defer_readme_lists_19_c_tcs
+         pin "0/19" 字面值
+       keymgmt_defer_readme_lists_subsystem_components
+         pin 6 个 CLI op keyword (UUID-indexed / create / find / derive / delete / erase)
+       keymgmt_defer_codeferred_with_sm
+         pin "Co-deferred" 字符串确保跨模块 dependency 不被遗忘
+  
+  2. crates/hitls-cli/README.md 追加 keymgmt 专章 + #47 系列收官总表:
+     keymgmt 9 个 CLI op 详列
+     Rust workspace 4 缺失项:
+       persistent key DB file format
+       encrypted PKCS#12 wrapper for SM2
+       MAC abstraction layer
+       共享 sm user DB
+     「#47 series — 6/6 closed」总表 (每行 sub-PR/T-phase/子命令/结果/tests/TODOs)
+     总计: 3 ported + 1 mixed + 2 non-port / 63 net new tests / 9 follow-up TODOs
+     「#47 issue can now be closed」收官声明
+  
+  3. main.rs:
+     mod keymgmt_defer
+     顶部 comment 引导读者去 README + 说明 co-deferred with sm
+
+#47 6-PR 系列收官总表:
+  A T189 genrsa           Ported              19 tests   1 TODO (#47-genrsa-encryption)
+  B T190 pkey (C key)     Ported (stub→real)  11 tests   5 TODO (pkey-encrypted-pkcs8/brainpool/sm2/p224/rsa-pss)
+  C T191 sm               Non-port            3 pin       1 TODO (#47-sm-defer)
+  D T192 conf             Mixed                16 tests   1 TODO (#47-conf-cnf)
+  E T193 rsa              Ported               10 tests   1 TODO (#47-rsa-codec-extract)
+  F T194 keymgmt          Non-port             4 pin       1 TODO (#47-keymgmt-defer)
+  
+  合计: 6/6 closed
+       3 ported + 1 mixed + 2 non-port
+       63 net new tests
+       9 follow-up TODOs
+
+验证:
+  cargo test -p hitls-cli keymgmt              4/0
+  cargo test -p hitls-cli sm_defer              3/0 (T191 pin tests 不被 README 更新破坏)
+  cargo test -p hitls-cli                       304/0 (+4 vs T193 的 300)
+                                                  + 4 snapshots
+  cargo fmt --check                            clean
+  cargo clippy --workspace -D warnings        clean
+  RUSTDOCFLAGS=-D warnings cargo doc -p hitls-cli --no-deps  clean
+
+作用域:
+  1 个新 module keymgmt_defer.rs (~100 行 / 4 pin tests)
+  README +90 行 (keymgmt 专章 + #47 收官总表 + 状态表更新)
+  main.rs +4 行 (mod 声明 + comment + 重排)
+  0 product code (同 T191 模式)
+  1 个 TODO (#47-keymgmt-defer)
+
+沿用 + 新方法学:
+  沿用 T191 sm_defer.rs non-port 模式:
+    README + 测试 pin + 5 字段 rationale
+  沿用 T193 「本地预跑 rustdoc」
+  
+  新「co-deferred subsystem pin」:
+    当两个 non-port 决策实际共享同一上游子系统 (sm + keymgmt 都需 GM 操作员模式 user DB + access control) 时
+    显式声明 co-deferred
+    让任何一个 TODO 被 picking up 时同时考虑另一个
+    pin test 断言「Co-deferred」字符串确保该 cross-module dependency 不被遗忘
+  
+  新「sub-PR 系列收官总表」:
+    在最后一个 sub-PR 的 README 中加「N/N closed」总表
+    每行 sub-PR 编号 / phase / 结果 / tests / TODOs 数字
+    让 issue closer 一眼看完整个工作量分布 + 决策矩阵 + follow-up TODO 总数
+    比 issue comment 散落分布的总结可靠
+  
+  新「混合决策矩阵」(系列层面回顾):
+    #47 6 个子命令 6 种处理方式不能预先统一规划
+    而是 per-subcommand 读 C 源后决定
+    最终 3 ported / 1 mixed / 2 non-port
+    没有任何一个 sub-PR 的策略可以预先固定
+    本方法学 (heterogeneous decision per sub-PR) 让 acceptance criteria 实际工作量比字面更精确:
+      acceptance 说「implement & test」或「document」
+      实际是 per-helper / per-component 决策
+
+Recorded as DEV_LOG Phase T194.
