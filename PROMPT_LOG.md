@@ -13684,3 +13684,128 @@ T191 sm vs T192 conf 区别:
     比单纯 silent #[allow] 有 audit trail
 
 Recorded as DEV_LOG Phase T192.
+
+### T193 — #47-E rsa CLI 子命令: legacy PKCS#1 输出 (#47 6 子 PR 系列第 5 弹)
+
+> 针对Phase B，依次完成各个issue，每个issue完成并合入远程仓库main后再启动下一个issue。如果issue较大，可以拆成子任务。
+
+承接 T189-T192. rsa 是 legacy OpenSSL rsa 子命令:
+  RSA-only 版本的 pkey
+  decode + re-encode 但 PEM label 用 PKCS#1 RSA PRIVATE KEY 而非 PKCS#8 PRIVATE KEY
+  + -noout flag (decode-only validation)
+
+改动:
+  1. crates/hitls-cli/src/rsa_cmd.rs (新模块 ~450 行 = ~210 product + ~240 tests):
+     pub enum RsaResult { Help, Success, OptInvalid, OptUnknown, UioFail, DecodeFail }
+       对应 C 6 类 exit code
+     pub fn run_argv(argv: &[&str]) -> RsaResult
+       手写 argv parser (同 T189 genrsa 模式)
+       支持 -in / -out / -text / -noout / -help
+     解码路径:
+       hitls_pki::pkcs8::parse_pkcs8_pem(&pem)
+       match Pkcs8PrivateKey::Rsa(_)
+       非 RSA -> DecodeFail (RSA-only invariant)
+     输出路径:
+       内联 PKCS#1 RSAPrivateKey 9-INTEGER SEQUENCE 编码
+       (第 3 次写: T189 + T190 + 本 PR)
+       PEM label RSA PRIVATE KEY (与 pkey.rs 的 PKCS#8 PRIVATE KEY 不同)
+     -noout 提前 return Success
+     -text 打印 OpenSSL 兼容 RSA Private-Key: N bit, 2 primes
+  
+  2. main.rs:
+     mod rsa_cmd
+     Commands::Rsa { input, out, text, noout } variant
+     dispatch 调 rsa_cmd::run
+  
+  3. crates/hitls-cli/README.md:
+     rsa 专章
+     状态表更新 (rsa ✅ ported)
+     TODO(#47-rsa-codec-extract) 锚点
+
+测试 (10 tests):
+  UT_HITLS_APP_rsa_TC001 6 子 case 全迁:
+    ut_rsa_tc001_r0_in_noout_success                 rsa -in priv.pem -noout
+    ut_rsa_tc001_r1_in_out_success                   rsa -in priv.pem -out file.pem (断言输出 RSA PRIVATE KEY)
+    ut_rsa_tc001_r2_in_out_text_success              -text 路径
+    ut_rsa_tc001_r3_in_out_text_noout_success        -text -noout 组合
+    ut_rsa_tc001_r4_out_path_unwritable_uio_fail     /test/noexist/out.pem -> UioFail
+    ut_rsa_tc001_r5_in_path_missing_decode_fail      noexist.pem -> DecodeFail
+  UT_HITLS_APP_rsa_TC002 -help:
+    ut_rsa_tc002_help
+  Rust-extra 4:
+    rust_extra_unknown_flag_rejected           -bogus -> OptUnknown
+    rust_extra_missing_in_rejected             无 -in -> OptInvalid
+    rust_extra_empty_in_value_rejected         -in "" -> OptInvalid
+    rust_extra_ec_input_rejected_as_decode_fail  EC PKCS#8 入 -> DecodeFail (RSA-only invariant)
+
+Non-port scope cuts (写入 module doc + README):
+  C T003-T012 是基于 stub 的 negative path tests:
+    STUB_REPLACE(HITLS_APP_OptBegin, ...)
+    STUB_REPLACE(CRYPT_EAL_DecodeBuffKey, ...)
+    STUB_REPLACE(BSL_UIO_New, ...)
+    STUB_REPLACE(BSL_UIO_Ctrl, ...)
+    STUB_REPLACE(HITLS_APP_OptGetValueStr, ...)
+  Rust 实现走完全不同的内部调用栈:
+    无 BSL_UIO 层
+    无 CRYPT_EAL_DecodeBuffKey 间接层
+    无 OptBegin / OptGetValueStr 中间层 (手写 argv parser 直接 match)
+  这些 stub 在 Rust 无对应 path
+  非测试覆盖缺口而是测试目标不存在
+  等价 error 已被 TC001 的 -out unwritable + -in missing 覆盖
+  其余通过 Rust-extra 4 测试补齐
+
+1 个 TODO:
+  TODO(#47-rsa-codec-extract):
+    RSA PKCS#1 9-INTEGER encoder 现在在 3 处 inline:
+      genrsa.rs (T189)
+      pkey.rs (T190)
+      rsa_cmd.rs (本 PR)
+    #47 系列收官后应抽到 hitls-pki::pkcs8::encode_rsa_pkcs1_der
+    per T190 sub-PR 跨复用提示「第 3 次出现应抽 helper」
+    本 PR 正是第 3 次
+
+验证:
+  cargo test -p hitls-cli rsa                              32/0 (10 rsa_cmd + 22 transitive)
+  cargo test -p hitls-cli                                   300/0 (+11 vs T192 289)
+                                                              + 4 snapshots + 7 ignored
+  cargo fmt --check                                         clean
+  cargo clippy --workspace -D warnings                     clean
+  本地预跑 RUSTDOCFLAGS=-D warnings cargo doc -p hitls-cli --no-deps  clean (吸取 T192 教训)
+
+作用域:
+  1 个新 module rsa_cmd.rs (~450 行 = ~210 product + ~240 tests)
+  main.rs +1 Commands variant + dispatch
+  README.md rsa 专章 +30 行 + 状态表更新
+  10 个新 tests
+  1 个 TODO
+
+沿用 + 新方法学:
+  沿用 T189 genrsa.rs:
+    手写 argv parser + Result enum 模式
+  沿用 T190 pkey.rs:
+    真实 RSA decode + 内联 PKCS#1 encoder
+  沿用 T191/T192:
+    README 专章 + 状态表更新
+  
+  新「stub-based C unit test 不迁移」入档:
+    当 C 测试用 STUB_REPLACE 替换内部函数测特定 error path 时
+    Rust 走不同内部调用栈无对应 path
+    非「测试覆盖缺口」而是「测试目标不存在」
+    等价 error 已被其他 TC 覆盖时直接 scope cut + 文档化即可
+    本 PR 5 个 stub-based TC 全部走此路径
+  
+  新「同 enum 跨子命令 1:1 复用」:
+    T189 GenrsaResult 和 T193 RsaResult 6 个 variant 形状相同
+    Help / Success / OptInvalid / OptUnknown / UioFail / DecodeFail (CryptoFail subset)
+    故意保留「相同形状」让两个子命令的测试 pattern 一致
+    复用 enum 也是选项 (per-subcommand Result 类型 vs 共享 AppResult)
+    本系列选「分立同形」:
+      让每个 module 独立
+      测试 1:1 mappable to C TC 数值
+  
+  新「本地预跑 rustdoc」:
+    T192 在 PR 上踩 [test::xxx] intra-doc link 失败的坑
+    本 PR 在 push 前本地跑 RUSTDOCFLAGS=-D warnings cargo doc 验证
+    codified 为 sub-PR 提交清单的一部分
+
+Recorded as DEV_LOG Phase T193.

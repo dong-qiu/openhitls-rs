@@ -20,7 +20,7 @@ The table below carries that decision for each C subcommand the issue lists.
 | `pkey` (a.k.a. C `key` tests) | ✅ ported (stub → real) | T190 / PR #270 — see `pkey.rs` |
 | `sm` | ⏸️ deferred (not ported) | **See dedicated section below** |
 | `conf` (utility helpers) | 🟡 partial port | T192 / PR #272 — see `conf_util.rs` + section below |
-| `rsa` | TBD | T193 / #47-E |
+| `rsa` | ✅ ported | T193 / PR #273 — see `rsa_cmd.rs` + section below |
 | `keymgmt` | TBD | T194 / #47-F |
 
 ### `sm` — non-port rationale (T191 / #47-C)
@@ -151,3 +151,40 @@ would be a feature of its own, not a unit-test migration. The C
 `TODO(#47-conf-cnf)` — revisit if an OpenSSL `.cnf` parser is needed
 for `req -extfile` / `x509 -extfile` workflows. Pinned in
 `conf_util.rs` module doc.
+
+### `rsa` — port rationale + scope cuts (T193 / #47-E)
+
+The openHiTLS C `apps/src/app_rsa.c` is the legacy OpenSSL `rsa`
+subcommand: an RSA-restricted counterpart of `pkey` with the
+historical PKCS#1 `RSA PRIVATE KEY` PEM output label and the `-noout`
+flag (decode-only validation).
+
+Implemented in `src/rsa_cmd.rs` with the same `Result` enum shape as
+`genrsa.rs`. Supports `-in`, `-out`, `-text`, `-noout`, `-help`. Input
+is PKCS#8 PEM; output is PKCS#1 PEM (`RSA PRIVATE KEY` label) — note
+this differs from `pkey` which preserves the PKCS#8 `PRIVATE KEY`
+label.
+
+#### C TC tally
+
+- `UT_HITLS_APP_rsa_TC001` (6 argv sub-cases) — migrated as
+  `ut_rsa_tc001_r0..r5`.
+- `UT_HITLS_APP_rsa_TC002` (`-help`) — migrated as `ut_rsa_tc002_help`.
+- `UT_HITLS_APP_rsa_T003..T012` (stub-based negative paths via
+  `STUB_REPLACE` on internal C functions: `HITLS_APP_OptBegin`,
+  `CRYPT_EAL_DecodeBuffKey`, `BSL_UIO_New`, `BSL_UIO_Ctrl`,
+  `HITLS_APP_OptGetValueStr`) — **NOT migrated**. The Rust
+  implementation uses different internal call paths (no `BSL_UIO`
+  layer, no `CRYPT_EAL_DecodeBuffKey` indirection), so these stubs
+  have no Rust analogue. The scope-cut is documented in the module
+  doc; the equivalent error paths (decode-fail, uio-fail) are
+  exercised by the migrated TC001 sub-cases plus 4 Rust-extra
+  pinning tests.
+
+#### Codec extraction TODO
+
+`TODO(#47-rsa-codec-extract)` — the RSA PKCS#1 encoder (CRT
+computation + 9-INTEGER SEQUENCE) is now inlined in `genrsa.rs`
+(T189), `pkey.rs` (T190), and `rsa_cmd.rs` (T193). Per the T190
+sub-PR-cross-reuse note, the shared codec should be extracted to
+`hitls-pki::pkcs8::encode_rsa_pkcs1_der` once the #47 series closes.
