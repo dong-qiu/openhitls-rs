@@ -2,11 +2,15 @@ use clap::{Parser, Subcommand};
 
 mod conf_util;
 mod crl;
+// `keymgmt` subcommand intentionally NOT implemented — see
+// crates/hitls-cli/README.md for the non-port rationale (T194 / #47-F).
+// Co-deferred with `sm` (T191) — both share HITLS_APP_SM_MODE gating.
 mod dgst;
 mod enc;
 mod genpkey;
 mod genrsa;
 mod kdf;
+mod keymgmt_defer;
 // `sm` subcommand intentionally NOT implemented — see crates/hitls-cli/README.md
 // for the non-port rationale (T191 / #47-C). The module below carries the
 // decision and tests that pin it.

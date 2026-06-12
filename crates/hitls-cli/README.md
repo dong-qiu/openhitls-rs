@@ -21,7 +21,7 @@ The table below carries that decision for each C subcommand the issue lists.
 | `sm` | ⏸️ deferred (not ported) | **See dedicated section below** |
 | `conf` (utility helpers) | 🟡 partial port | T192 / PR #272 — see `conf_util.rs` + section below |
 | `rsa` | ✅ ported | T193 / PR #273 — see `rsa_cmd.rs` + section below |
-| `keymgmt` | TBD | T194 / #47-F |
+| `keymgmt` | ⏸️ deferred (not ported) | T194 / PR #274 — see section below (co-deferred with `sm`) |
 
 ### `sm` — non-port rationale (T191 / #47-C)
 
@@ -188,3 +188,85 @@ computation + 9-INTEGER SEQUENCE) is now inlined in `genrsa.rs`
 (T189), `pkey.rs` (T190), and `rsa_cmd.rs` (T193). Per the T190
 sub-PR-cross-reuse note, the shared codec should be extracted to
 `hitls-pki::pkcs8::encode_rsa_pkcs1_der` once the #47 series closes.
+
+### `keymgmt` — non-port rationale (T194 / #47-F, closes the #47 6-PR series)
+
+The openHiTLS C `apps/src/app_keymgmt.c` is the **second** GM-compliance
+operator-mode CLI subcommand, gated behind the same compile-time
+`HITLS_APP_SM_MODE` feature as `sm` (T191). All 19
+`UT_HITLS_APP_KEYMGMT_TC*` test cases are
+`#ifndef HITLS_APP_SM_MODE -> SKIP_TEST()`.
+
+#### What the C `keymgmt` subcommand does
+
+A **UUID-indexed key database** with the following CLI operations
+(each maps to a `keymgmt <op>` invocation):
+
+- `create` — generate and store a key for a given algorithm
+  (SM4, SM4-XTS, SM2, MAC algorithms like HMAC-SM3 / SM4-CBC-MAC)
+- `find` — look up a stored key by UUID; returns the raw key bytes
+  or constructs an `EAL_PkeyCtx` for SM2
+- `derive` — produce a sub-key from a parent UUID via PBKDF2
+- `delete` — remove one or many UUIDs from the database
+- `erase` — wipe all stored keys
+- `mac` — compute a MAC of an input file using a stored MAC key
+- `sign` / `verify` — SM2 signature operations using a stored SM2 key
+- `status` / `version` / `selftest` — health-check endpoints
+
+#### Why the Rust port defers it
+
+This subsystem is structurally identical in scope to `sm` (T191) and
+**larger** in feature surface — a self-contained access-controlled
+key store with ~1.6K LOC in C plus the encrypted PKCS#12 wrappers
+for SM2 key persistence. Porting it requires:
+
+- A **persistent key-database file format** (UUID → algorithm OID →
+  encrypted key bytes), interoperable with C tooling.
+- An **encrypted PKCS#12** wrapper for SM2 private-key storage with
+  PBES2 + HMAC integrity, gated by the password from the `sm`
+  operator login.
+- A **MAC abstraction layer** that wraps HMAC-SM3 + SM4-CBC-MAC
+  under one stored-key API.
+- Operator-mode access control sharing the user DB introduced (but
+  also deferred) by `sm`.
+
+Like `sm`, this is a distinct **subsystem feature**, not a unit-test
+migration. The Rust workspace has none of the above infrastructure
+and adding it isn't part of the #47 "port 5 missing CLI subcommands"
+work item.
+
+#### Migrated C TC tally
+
+The C source has **19 TCs**
+(`UT_HITLS_APP_KEYMGMT_TC001..TC019`). All 19 are
+`#ifndef HITLS_APP_SM_MODE -> SKIP_TEST()` gated, i.e. they only run
+when the C build is compiled with the SM mode enabled. The Rust port
+migrates **0/19** with the rationale above; the C tests are tracked
+as scope-cuts in `docs/c-test-na-list.md`.
+
+#### Co-deferred with `sm`
+
+`keymgmt` depends on `sm`'s operator user-database for authorization
+(the keymgmt UUID store is unlocked by the `sm` login). The two
+TODOs are therefore Co-deferred — neither makes sense to land in
+isolation:
+
+- `TODO(#47-sm-defer)` (T191) — operator authentication + user DB.
+- `TODO(#47-keymgmt-defer)` (T194) — key store + operations on
+  authenticated keys.
+
+A future GM-compliance subsystem must address both at once.
+
+#### #47 series — 6/6 closed
+
+| Sub-PR | Subcommand | Result |
+|--------|------------|--------|
+| A (T189) | `genrsa` | Ported, 19 tests, 1 TODO |
+| B (T190) | `pkey` (a.k.a. C `key`) | Ported (real, replacing stub), 11 tests, 5 TODOs |
+| C (T191) | `sm` | Non-port, 3 pin tests, 1 TODO (`#47-sm-defer`) |
+| D (T192) | `conf` | Mixed (`SplitString` ported, `ProcDnName` covered, `ProcExt` deferred), 16 tests, 1 TODO |
+| E (T193) | `rsa` | Ported, 10 tests, 1 TODO |
+| F (T194) | `keymgmt` | Non-port, 4 pin tests, 1 TODO (`#47-keymgmt-defer`) |
+
+Total: **3 ported + 1 mixed + 2 non-port**, **63 net new tests**,
+**9 follow-up TODOs**. The #47 issue can now be closed.
