@@ -402,6 +402,7 @@ dependencies = [
  "hitls-types",
  "hitls-utils",
  "insta",
+ "tempfile",
 ]
 
 [[package]]

@@ -36,6 +36,8 @@ Parms = "Parms"     # RFC 3279 ASN.1 type name (validationParms / ValidationParm
 symetric = "symetric"     # upstream script name: test-tls13-symetric-ciphers.py
 extentions = "extentions" # upstream script name: test-tls13-shuffled-extentions.py
 exhange = "exhange"       # upstream conversation name: "psk_key exhange modes"
+# Upstream openHiTLS C symbols that contain typos but must be referenced verbatim
+UNKOWN = "UNKOWN"         # C source symbol: HITLS_APP_OPT_UNKOWN (apps/include/app_errno.h)
 
 [type.markdown]
 extend-glob = ["*.md"]

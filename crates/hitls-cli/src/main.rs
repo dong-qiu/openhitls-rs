@@ -4,6 +4,7 @@ mod crl;
 mod dgst;
 mod enc;
 mod genpkey;
+mod genrsa;
 mod kdf;
 mod list;
 mod mac;
@@ -65,6 +66,23 @@ enum Commands {
         /// sha256, sha384, sha512, sm3.
         #[arg(long, default_value = "sha256")]
         md: String,
+    },
+    /// Generate an RSA private key (legacy OpenSSL-compatible interface,
+    /// see C `apps/src/app_genrsa.c`). Subset of `genpkey`; kept separate
+    /// for compatibility with the C `UT_HITLS_APP_genrsa_TC*` test matrix
+    /// and tools that wrap the legacy CLI.
+    Genrsa {
+        /// Modulus size in bits. Must be one of 1024, 2048, 3072, 4096.
+        #[arg(short = 'b', long, default_value_t = 2048)]
+        bits: u32,
+        /// PEM-level encryption cipher. Accepted names mirror the openHiTLS
+        /// C cipher whitelist (e.g. aes128_cbc, aes256_xts, sm4_cbc). Actual
+        /// encryption is deferred; see TODO(#47-genrsa-encryption).
+        #[arg(long)]
+        cipher: Option<String>,
+        /// Output file. Defaults to stdout.
+        #[arg(short, long)]
+        out: Option<String>,
     },
     /// Generate a private key.
     Genpkey {
@@ -423,6 +441,9 @@ fn main() {
             pass,
             md,
         } => enc::run(cipher, *decrypt, input, output, pass.as_deref(), md),
+        Commands::Genrsa { bits, cipher, out } => {
+            genrsa::run(Some(*bits), cipher.as_deref(), out.as_deref())
+        }
         Commands::Genpkey {
             algorithm,
             bits,
