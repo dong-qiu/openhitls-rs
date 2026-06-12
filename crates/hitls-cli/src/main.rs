@@ -104,6 +104,9 @@ enum Commands {
         /// Input file.
         #[arg(short, long)]
         input: String,
+        /// Output file. Defaults to stdout.
+        #[arg(short, long)]
+        out: Option<String>,
         /// Output public key only.
         #[arg(long)]
         pubout: bool,
@@ -452,9 +455,10 @@ fn main() {
         } => genpkey::run(algorithm, *bits, curve.as_deref(), output.as_deref()),
         Commands::Pkey {
             input,
+            out,
             pubout,
             text,
-        } => pkey::run(input, *pubout, *text),
+        } => pkey::run_with_out(input, out.as_deref(), *pubout, *text),
         Commands::Req {
             new,
             key,
