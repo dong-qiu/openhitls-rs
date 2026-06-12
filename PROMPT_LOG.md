@@ -13334,3 +13334,133 @@ Recorded as DEV_LOG Phase T188.
     因为 1024 < 2048 是合规要求不应放松
 
 Recorded as DEV_LOG Phase T189.
+
+### T190 — #47-B key CLI 子命令 (#47 6 子 PR 系列第 2 弹, pkey 真实化)
+
+> 针对Phase B，依次完成各个issue，每个issue完成并合入远程仓库main后再启动下一个issue。如果issue较大，可以拆成子任务。
+
+承接 T189 #47-A genrsa.
+关键发现:
+  C test_suite_ut_app_key.c 测试名叫 key, 实际是测 pkey 子命令 workflow
+    genpkey → pkey decode/re-encode → pkey -pubout → sign/verify round-trip
+    + ENCKEY 加密版本
+  Rust 原 pkey.rs 是 stub:
+    只打 PEM label + hex-dump
+    不真解码 不真 pubout
+  本 PR 把 pkey.rs 改成真实实现 + 迁移 C TC001/TC002 核心子集 + 文档化 5 个 follow-up gap.
+
+产品改动 crates/hitls-cli/src/pkey.rs (~310 行, 替换原 86 行 stub):
+  API:
+    pub fn run_with_out(input, output, pubout, text)
+      output: Option<&str> 加入文件写入路径
+      OpenSSL 兼容 pkey -in ... -out ... [-pubout] [-text]
+    #[cfg(test)] fn run(...)
+      保留旧签名以兼容 test fixture
+      main.rs 已切到 run_with_out
+    main.rs::Commands::Pkey 加 out: Option<String> 字段
+    dispatch 切到 run_with_out
+  Decode + re-encode (encode_priv):
+    RSA: 解析 Pkcs8PrivateKey::Rsa(RsaPrivateKey)
+      内联 PKCS#1 RSAPrivateKey 9-INTEGER 编码 (沿用 T189 genrsa.rs CRT 算法)
+      div_rem(p-1).1 / mod_inv(p)
+      encode_pkcs8_pem_raw 包 PKCS#8
+    Ed25519: 解析 Pkcs8PrivateKey::Ed25519(Ed25519KeyPair)
+      取 .seed()
+      encode_ed25519_pkcs8_der(seed)
+    EC (P-256/384/521): 解析 Pkcs8PrivateKey::Ec { curve_id, key_pair }
+      encode_ec_pkcs8_der(curve_id, &priv_bytes)
+  Pubout (encode_pubout):
+    RSA: 内联 SubjectPublicKeyInfo { rsaEncryption-NULL, BIT STRING(SEQUENCE { n, e }) }
+      encode_spki_pem
+    Ed25519: 内联 SubjectPublicKeyInfo { id-ed25519, BIT STRING(pub_32) }
+    EC: encode_ec_spki_der(curve_id, &pub_bytes) 已有 helper
+  -text flag: 打印 algorithm summary
+
+5 个 TODO 文档化 (写入 module doc):
+  #47-pkey-encrypted-pkcs8
+    C TC: UT_HITLS_APP_ENCKEY_TC001/TC002
+    -passin <pass> / -passout <pass>
+    PBES2 (PBKDF2 + AES) encrypted PKCS#8
+    需新加 (沿用 T179-T182 enc.rs PBKDF2 路径)
+  #47-pkey-brainpool
+    C TC: TC001/TC002 EC brainpoolp256/384/512r1
+    Rust hitls-crypto 不实现 Brainpool
+    (T183 #60 / T188 #44 也文档化)
+  #47-pkey-sm2
+    C TC: TC001/TC002 EC sm2
+    Pkcs8PrivateKey::Sm2 解析存在但 SPKI 编码 + sign/verify end-to-end wiring 缺
+  #47-pkey-p224
+    C TC: TC001 EC P-224
+    Rust hitls-crypto 不实现 NIST P-224
+  #47-pkey-rsa-pss
+    T107 mTLS PSS-OID 证书
+    id-RSASSA-PSS PKCS#8 variant 重新编码
+    与 T107 server RsaPss 路径配合
+
+测试 (11 tests):
+  UT_HITLS_APP_KEY_TC001 等价 5:
+    ut_pkey_tc001_rsa_2048_decode_reencode_round_trips
+      RSA-2048 PKCS#8 解码 -> encode_priv -> 重 parse -> n_bytes/e_bytes 一致
+      run_with_out + pubout 写 PUBLIC KEY PEM
+    ut_pkey_tc001_ed25519_round_trip
+      Ed25519 seed=0x42 ×32
+      run_with_out pubout -> 重 parse priv -> 双 Ed25519KeyPair .public_key() 一致
+    ut_pkey_tc001_ec_p256_round_trip / _p384_ / _p521_
+      EcdsaKeyPair generate + encode_ec_pkcs8_der -> parse -> run_with_out pubout
+  Integration tests 5:
+    run_outputs_priv_pem_to_stdout_path (stdout 路径)
+    run_with_out_writes_to_file (-out 写文件 + 重读断言 PRIVATE KEY label)
+    run_with_text_flag_prints_algorithm
+    run_nonexistent_file_errors
+    run_garbage_pem_errors ("not a pem file\\n" -> Err)
+  Gap pin 1:
+    gap_encrypted_pkcs8_passin_passout_deferred
+      pin run_with_out 当前签名不含 passin/passout
+      post-PBES2 会有新 run_with_passin 形态
+
+中间踩坑:
+  OID 模块路径:
+    初版 hitls_pki::oid::known::ed25519()
+    hitls_pki::oid 模块不存在
+    改 hitls_utils::oid::{known, Oid} (OID 实际在 hitls-utils)
+  clippy assertions_on_constants:
+    assert!(true, "...") 被拒
+    改 let _: fn(...) -> _ = run_with_out
+    type-asserts function signature
+
+验证:
+  cargo test -p hitls-cli pkey                    40/0
+    (11 pkey + 既有 4 + genpkey 等其他)
+  cargo test -p hitls-cli                          271/0 (前 265 + 6 net new)
+                                                    + 4 snapshots + 7 ignored
+  cargo fmt --check                                clean
+  cargo clippy --workspace --all-features -D warnings  clean
+
+作用域:
+  crates/hitls-cli/src/pkey.rs  86 -> ~600 行
+    净 ~310 product + ~290 tests + ~6 行 main.rs 调整
+  main.rs::Commands::Pkey 加 out 字段
+  11 个新 tests
+  5 个 TODO + 5 个 C TC family scope cuts 文档化
+
+沿用 + 新方法学:
+  沿用 T189 genrsa.rs 内联 RSA PKCS#1 编码 (div_rem 算 CRT)
+  沿用 #61/#58/#48/#45/#44/#47-A 「TODO + pin 测试」二人组
+  新「stub → real 替换 with gap docs」(新方法学):
+    发现现有 Rust 子命令是 stub (不真做事) 时
+    替换为真实实现但保持对 C TC 矩阵的「scope cut + TODO 入档」分类
+    5 个 algorithm family 文档化为 follow-up, 不强行实现
+    允许子 PR 在「真 vs stub」与「全 vs 部分」两个维度都有清晰边界
+  新「sub-PR 跨 TC 复用 / scope cut 共享」:
+    本 PR 用到的 RSA PKCS#1 编码已在 T189 genrsa 内联
+    现在第 2 次写
+    可以提示第 3 次出现时应抽 helper:
+      T191 #47-C sm 不需要 RSA
+      T193 #47-E rsa 会再用一次
+      那时统一抽到 hitls-pki::pkcs8::encode_rsa_pkcs8_der
+  新「OID 路径 hitls_pki vs hitls_utils」(隐藏陷阱):
+    cert / pkcs8 等 PKI 模块在 hitls_pki
+    底层 OID 常量在 hitls_utils::oid::known
+    命名空间分裂踩坑后 codified
+
+Recorded as DEV_LOG Phase T190.
