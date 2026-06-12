@@ -13562,3 +13562,125 @@ Recorded as DEV_LOG Phase T190.
     双向指引让任何方向的读者都能找到完整决策
 
 Recorded as DEV_LOG Phase T191.
+
+### T192 — #47-D conf utility helpers: SplitString port + DN/ProcExt 决策 (#47 6 子 PR 系列第 4 弹)
+
+> 针对Phase B，依次完成各个issue，每个issue完成并合入远程仓库main后再启动下一个issue。如果issue较大，可以拆成子任务。
+
+承接 T189/T190/T191.
+读完 C test_suite_ut_app_conf.c 后判定 conf 不是 stand-alone 子命令而是 3 类 utility helper:
+  1. HITLS_APP_SplitString —— 分隔符切分字符串
+  2. HITLS_APP_CFG_ProcDnName —— /CN=foo/O=bar DN parser
+  3. HITLS_APP_CONF_ProcExt —— OpenSSL .cnf 文件解析 + 扩展 dispatch
+
+本 PR 用三种处理方式分别对应:
+  SplitString -> 完整 port
+  CFG_ProcDnName -> cross-coverage pin (Rust req.rs::parse_subject 已覆盖)
+  CONF_ProcExt -> non-port 文档化
+
+改动:
+  1. crates/hitls-cli/src/conf_util.rs (新模块 ~270 行):
+     pub enum SplitError { InvalidArg, ConfFail }
+       对应 C HITLS_APP_INVALID_ARG / HITLS_APP_CONF_FAIL
+     pub fn split_string(input, separator, allow_empty, capacity) -> Result<Vec<String>, SplitError>:
+       mirror C HITLS_APP_SplitString 语义
+       trim 空白
+       拒绝 whitespace separator -> InvalidArg
+       capacity overflow -> ConfFail
+       empty disallowed -> ConfFail
+     15 个测试全 pass:
+       3 个 _Api_TC001 negative:
+         empty input
+         whitespace separator
+         zero capacity
+       9 个 _Func_TC001 数据驱动行:
+         simple CSV
+         allow_empty 矩阵
+         空白 trim
+         inner-space preserve
+         collapse runs
+       2 个 _Error_TC001:
+         disallow empty 拒绝
+         capacity overflow -> CONF_FAIL
+       1 个 dn_parser_negative_cases_pin_req_module:
+         跨模块 pin 测试
+         断言 req.rs::parse_subject + test_parse_subject_* 仍在
+         (C conf_subj_TC002 的 cross-coverage 锚点)
+  
+  2. crates/hitls-cli/README.md 追加 conf 专章:
+     3 helper 状态表:
+       SplitString ✅ ported
+       CFG_ProcDnName ✅ covered by req.rs
+       CONF_ProcExt ⏸️ deferred
+     C TC 计:
+       6 TCs 中 SplitString 系列 3/3 migrated (+ 1 个 .data 行扩展到 9 子 case + 2 个 capacity test)
+       conf_subj 系列复用 req.rs::parse_subject 既有 unit tests + 1 pin test
+       conf_X509Ext 系列 0/2
+     TODO(#47-conf-cnf) follow-up 锚点
+     ProcExt 非 port 理由:
+       OpenSSL .cnf 需要 INI tokenizer
+       变量展开 ($key / ${env::VAR} / ${section::key})
+       per-extension parser (SAN/BCons/KeyUsage/EKU 等)
+       是独立 feature 不是测试迁移
+  
+  3. main.rs:
+     加 mod conf_util (按字母顺序排在最前, fmt 自动排序)
+
+T191 sm vs T192 conf 区别:
+  T191 sm:
+    C 子命令性质: GM 操作员模式 (500+ 行独立子系统)
+    Rust 处理: 全部 non-port + 文档化
+    新 module: sm_defer.rs (3 pin tests)
+    迁移测试数: 0 functional + 3 pin
+  T192 conf:
+    C 子命令性质: utility helpers 3 类
+    Rust 处理: 3 helper 分别 (port / cross-coverage pin / non-port)
+    新 module: conf_util.rs (15 functional tests) + 1 pin test
+    迁移测试数: 14 functional + 1 cross-module pin
+  
+  T192 演示 heterogeneous decision per helper:
+    同一 C 文件内不同 helper 可走不同处理路径
+    只要 README 表清楚说明 + 测试 pin 决策即可
+
+验证:
+  cargo test -p hitls-cli conf                15/0
+  cargo test -p hitls-cli sm_defer             3/0 (README 更新不破 T191 测试 pin)
+  cargo test -p hitls-cli                      289/0 (+15 vs T191 的 274)
+                                                + 4 snapshots
+  cargo fmt --check                            clean
+  cargo clippy --workspace -D warnings        clean
+
+作用域:
+  1 个新 module conf_util.rs (~270 行 = ~100 product + ~170 tests)
+  README +60 行 (conf 专章 + 状态表更新)
+  main.rs +1 mod 声明
+  15 + 1 个新 tests
+  1 个 TODO (#47-conf-cnf)
+  2 个 C TC family non-port 文档化
+
+沿用 + 新方法学:
+  沿用 T189-T191 「6-PR 顺序拆解」+ 「TODO + pin 测试」+ 「README + 模块 doc 双向引用」
+  沿用 T191 「rationale 5 字段强制 list」
+  
+  新「heterogeneous decision per helper」:
+    当 C 文件包含多个 helper (即使在同一 .c 文件 + 同一 test_suite 文件) 时
+    逐 helper 决策 (port / cross-coverage / non-port)
+    不强求统一处理
+    状态表把每个 helper 与 Rust 处理结果一行对应清晰
+  
+  新「cross-coverage pin」:
+    当 Rust 已有功能等价物 (req.rs::parse_subject 覆盖 CFG_ProcDnName) 时
+    不重复实现而写一个 pin test 锁住交叉覆盖关系
+    文件读取断言 + grep 关键 symbol
+    后人改 req.rs 时如果删了 parse_subject -> pin test fail
+    立刻发现 conf_subj_TC002 的覆盖丢失
+    比纯文档可靠
+  
+  新「dead_code allow 带 follow-up 路径注释」:
+    当 helper 仅被 unit tests 用、未在 product 路径被调用时
+    #[allow(dead_code)] 加 doc-comment 说明:
+      未来内部调用者出现时自动 drop
+      保 pub 让 pattern-match 不用 re-export 折腾
+    比单纯 silent #[allow] 有 audit trail
+
+Recorded as DEV_LOG Phase T192.
