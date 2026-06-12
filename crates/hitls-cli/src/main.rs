@@ -18,6 +18,7 @@ mod pkeyutl;
 mod prime;
 mod rand_cmd;
 mod req;
+mod rsa_cmd;
 mod s_client;
 mod s_server;
 mod sm_defer;
@@ -71,6 +72,23 @@ enum Commands {
         /// sha256, sha384, sha512, sm3.
         #[arg(long, default_value = "sha256")]
         md: String,
+    },
+    /// Display, convert, or extract details of an RSA private key
+    /// (legacy OpenSSL-compatible interface, see C
+    /// `apps/src/app_rsa.c`). RSA-only counterpart of `pkey`.
+    Rsa {
+        /// Input file (PKCS#8 PEM).
+        #[arg(short, long)]
+        input: String,
+        /// Output file. Defaults to stdout.
+        #[arg(short, long)]
+        out: Option<String>,
+        /// Print key details to stderr.
+        #[arg(long)]
+        text: bool,
+        /// Do not write the key (decode-only).
+        #[arg(long)]
+        noout: bool,
     },
     /// Generate an RSA private key (legacy OpenSSL-compatible interface,
     /// see C `apps/src/app_genrsa.c`). Subset of `genpkey`; kept separate
@@ -452,6 +470,12 @@ fn main() {
         Commands::Genrsa { bits, cipher, out } => {
             genrsa::run(Some(*bits), cipher.as_deref(), out.as_deref())
         }
+        Commands::Rsa {
+            input,
+            out,
+            text,
+            noout,
+        } => rsa_cmd::run(input, out.as_deref(), *text, *noout),
         Commands::Genpkey {
             algorithm,
             bits,
