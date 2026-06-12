@@ -13464,3 +13464,101 @@ Recorded as DEV_LOG Phase T189.
     命名空间分裂踩坑后 codified
 
 Recorded as DEV_LOG Phase T190.
+
+### T191 — #47-C sm CLI 子命令: non-port 文档化决策 (#47 6 子 PR 系列第 3 弹)
+
+> 针对Phase B，依次完成各个issue，每个issue完成并合入远程仓库main后再启动下一个issue。如果issue较大，可以拆成子任务。
+
+承接 T189 / T190.
+读完 C 端 test_suite_ut_app_sm.c 后判定 sm 不适合按测试迁移路径处理:
+  C sm 是 GM 操作员模式 (HITLS_APP_SM_MODE 编译期 feature)
+  实质是一个 500+ 行独立子系统:
+    UserDb 二进制文件格式
+    HMAC-SM3-PBKDF2 派生密钥
+    Unix root 检查
+    终端密码输入
+    错误密码计数
+  本 PR 按 #47 acceptance criteria 「Decide per-subcommand: implement & test, or document non-port rationale」
+  走文档路径.
+
+改动:
+  1. crates/hitls-cli/README.md (新文件):
+     Non-ported subcommands section + 列表:
+       genrsa ✅ T189
+       pkey ✅ T190
+       sm ⏸️ T191
+       conf TBD
+       rsa TBD
+       keymgmt TBD
+     sm — non-port rationale 专章:
+       C sm 5 个组件:
+         root check (getuid != 0 拒绝)
+         UserDb 二进制格式 (含字段表 version/deriveMacId/integrityMacId/iter/salt/saltLen/dKey/dKeyLen)
+         终端 password 提示 (BSL_UI_ReadPwdUtil)
+         HMAC-SM3-PBKDF2 与 C 端常量
+         错误密码计数 (二次错密码 -> PASSWD_FAIL 锁账户)
+       Rust workspace 缺失项明列
+       「porting 是 distinct feature, not test migration」结论
+     C TC 计:
+       4 TCs (TC001/002/003/005)
+       全 #ifndef HITLS_APP_SM_MODE -> SKIP_TEST() 条件
+       迁移 0/4
+     TODO(#47-sm-defer) follow-up 锚点
+  
+  2. crates/hitls-cli/src/sm_defer.rs (新模块):
+     module-level doc 引述 #47 acceptance criteria
+     3 个测试 pin README 决策不被悄悄丢失:
+       sm_defer_readme_exists_and_explains_non_port
+         pin section heading + HITLS_APP_SM_MODE + TODO marker
+       sm_defer_readme_lists_4_c_tcs
+         pin "0/4" 字面值
+         确保数字不被改成 0/3 模糊化
+       sm_defer_readme_lists_subsystem_components
+         pin 4 个 keyword:
+           UserDb / PBKDF2 / getuid / BSL_UI_ReadPwdUtil
+         保证 rationale 不被简化
+  
+  3. main.rs:
+     加 mod sm_defer
+     顶部 comment 引导读者去 README
+
+验证:
+  cargo test -p hitls-cli sm_defer        3/0
+  cargo test -p hitls-cli                  274/0 (+3 vs T190 的 271)
+                                            + 4 snapshots
+  cargo fmt --check                        clean
+  cargo clippy --workspace -D warnings    clean
+
+作用域:
+  1 个新 README (~80 行 markdown 含字段表 + rationale 5 项)
+  1 个新 sm_defer.rs (~80 行 3 tests)
+  main.rs +5 行 (mod 声明 + 顺序排序 + 引导 comment)
+  0 个 product code 改动 (不实现 sm subcommand)
+
+沿用 + 新方法学:
+  沿用 #47-A/B 「6-PR 顺序拆解」+ 「C exit code → Rust enum」(本 PR 无 CLI 实现)
+  
+  新「non-port 决策入档为代码 + 测试 pin」 (新方法学):
+    当 C 子命令实际是 distinct subsystem (非 crypto primitive, 非测试迁移)
+    且 #47-style acceptance criteria 允许「document non-port rationale」时:
+      决策不仅放 README, 还用测试 pin
+      assert README contains specific markers
+      后人若 silently 删除 / 简化 rationale, 测试 fail 立刻发现
+      「文档不是 prose, 是 contract」
+      可机器执行的决策
+  
+  新「rationale 5 字段强制 list」:
+    rationale 必须列:
+      (a) C 子命令做什么
+      (b) Rust workspace 缺什么
+      (c) C TC 计 N/M
+      (d) follow-up TODO 锚点
+      (e) 「是 distinct feature, not test migration」明确结论
+    任何一项遗漏 -> 后人重启决策时无 context
+  
+  新「README + 模块 doc 双向引用」:
+    README 「TODO(#47-sm-defer) — pinned in sm_defer.rs」
+    sm_defer.rs mod doc 「decision documented in crates/hitls-cli/README.md」
+    双向指引让任何方向的读者都能找到完整决策
+
+Recorded as DEV_LOG Phase T191.

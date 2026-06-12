@@ -6,6 +6,9 @@ mod enc;
 mod genpkey;
 mod genrsa;
 mod kdf;
+// `sm` subcommand intentionally NOT implemented — see crates/hitls-cli/README.md
+// for the non-port rationale (T191 / #47-C). The module below carries the
+// decision and tests that pin it.
 mod list;
 mod mac;
 mod pkcs12;
@@ -16,6 +19,7 @@ mod rand_cmd;
 mod req;
 mod s_client;
 mod s_server;
+mod sm_defer;
 mod speed;
 mod verify;
 mod x509cmd;
