@@ -19,7 +19,7 @@ The table below carries that decision for each C subcommand the issue lists.
 | `genrsa` | ✅ ported | T189 / PR #269 — see `genrsa.rs` |
 | `pkey` (a.k.a. C `key` tests) | ✅ ported (stub → real) | T190 / PR #270 — see `pkey.rs` |
 | `sm` | ⏸️ deferred (not ported) | **See dedicated section below** |
-| `conf` | TBD | T192 / #47-D |
+| `conf` (utility helpers) | 🟡 partial port | T192 / PR #272 — see `conf_util.rs` + section below |
 | `rsa` | TBD | T193 / #47-E |
 | `keymgmt` | TBD | T194 / #47-F |
 
@@ -98,3 +98,56 @@ mode is genuinely needed. For now the decision is documented and frozen.
 
 `TODO(#47-sm-defer)` — pinned in `sm_defer.rs` so the deferral surfaces
 as part of `cargo test -p hitls-cli`.
+
+### `conf` — partial port rationale (T192 / #47-D)
+
+The openHiTLS C `apps/src/app_conf.c` is **not a stand-alone subcommand**.
+It is a header of three utility helpers used internally by `req` / `x509`:
+
+| C helper | Status | Rust home |
+|----------|--------|-----------|
+| `HITLS_APP_SplitString` | ✅ ported | `conf_util.rs::split_string` |
+| `HITLS_APP_CFG_ProcDnName` | ✅ covered by req.rs | `req.rs::parse_subject` (+ its own unit tests) |
+| `HITLS_APP_CONF_ProcExt` | ⏸️ deferred (non-port) | OpenSSL `.cnf` parser — see below |
+
+C TC tally (`test_suite_ut_app_conf.{c,data}`):
+
+- `SplitString_Api_TC001` (3 negative API cases) — migrated as
+  `ut_split_api_tc001_*`
+- `SplitString_Func_TC001` (8 `.data` rows: simple CSV, empty matrix,
+  whitespace trimming, inner-space preservation) — migrated as
+  `ut_split_func_tc001_*`
+- `SplitString_Error_TC001` (empty-disallowed + capacity overflow) —
+  migrated as `ut_split_error_tc001_*`
+- `conf_subj_TC001/TC002` — DN parsing is already covered by
+  `req.rs::parse_subject` + its own `test_parse_subject_*` unit tests;
+  we add `dn_parser_negative_cases_pin_req_module` in `conf_util.rs`
+  to pin the cross-coverage relationship.
+- `conf_X509Ext_TC001/TC002` — NOT migrated; see below.
+
+#### Why `HITLS_APP_CONF_ProcExt` is deferred
+
+`ProcExt` consumes an OpenSSL `openssl.cnf` style configuration file
+(INI-like syntax with `[section]` headers + `key = value` directives,
+variable expansion via `${env::VAR}` and `$key`, and stanza-internal
+list expansion) and dispatches each extension directive to a callback
+that translates it into an `HITLS_X509_Ext` structure. The Rust
+workspace has no OpenSSL `.cnf` parser, and porting one entails:
+
+- An INI-style tokenizer covering OpenSSL's specific quoting + line
+  continuation rules.
+- Variable resolution (`$key` within the same section, `${env::VAR}`
+  for environment lookups, `${section::key}` for cross-section
+  reference) — features the OpenSSL `.cnf` parser supports verbatim.
+- Per-extension parsers: `subjectAltName = DNS:foo.example,IP:1.2.3.4`,
+  `basicConstraints = CA:true,pathlen:0`, `keyUsage = critical,
+  digitalSignature, keyEncipherment`, etc. The C side wires these into
+  ASN.1 structures via the X509Ext_TC001 callback.
+
+This is a distinct subsystem in the same spirit as `sm` — porting it
+would be a feature of its own, not a unit-test migration. The C
+`X509Ext_TC001/TC002` TCs are tracked as scope cuts in `docs/c-test-na-list.md`.
+
+`TODO(#47-conf-cnf)` — revisit if an OpenSSL `.cnf` parser is needed
+for `req -extfile` / `x509 -extfile` workflows. Pinned in
+`conf_util.rs` module doc.

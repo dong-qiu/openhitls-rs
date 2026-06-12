@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand};
 
+mod conf_util;
 mod crl;
 mod dgst;
 mod enc;
