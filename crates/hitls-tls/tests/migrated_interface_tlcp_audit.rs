@@ -975,3 +975,173 @@ fn cm_ticket_key_cb_can_be_installed() {
         .build();
     assert!(cfg.ticket_key_cb.is_some());
 }
+
+// ===========================================================================
+// T199 / #46-D — hlt_{config,cert,cm}_interface (51 .data rows / 0 fn)
+//
+// The `hlt_*` files declare no `void UT_*` cases; they are parameterised
+// HLT (handshake-level test) wrappers that drive real TCP handshakes against
+// shared `HLT_TlsHandshake` scaffolding. The Rust port already covers the
+// handshake happy-path end-to-end in `tests/interop/tests/tlcp.rs`
+// (11 tests, ECDHE/ECC + GCM/CBC). What remains as novel-worth-porting
+// for this sub-PR is the **static metadata** + **accessor surface** the
+// hlt rows touch but the existing interop tests don't byte-pin:
+//
+// - `hlt_config_interface` (12 .data rows): cipher-by-codepoint lookup +
+//   AuthAlg / KeyExchangeAlg per suite + per-version `flight_transmit`
+//   visibility.
+// - `hlt_cert_interface` (4 .data rows): cert chain set + clear-and-rebuild
+//   pattern via the builder (`FROM_CONFIG`); the `FROM_CTX` variant has no
+//   Rust analogue (no live-ctx cert injection — plan §6 out-of-scope).
+// - `hlt_cm_interface` (13 .data rows): `GetNegotiateGroup` accessor surface
+//   pin on the server handshake-state machine (the value itself is asserted
+//   by the live interop tests).
+// ===========================================================================
+
+use hitls_tls::crypt::{AuthAlg, KeyExchangeAlg};
+
+// ---------------------------------------------------------------------------
+// hlt_config_interface — cipher-by-codepoint lookup + per-version flight.
+// ---------------------------------------------------------------------------
+
+/// Mirrors C `SDV_TLS_CFG_GET_CIPHERBYID_FUNC_TC001`: `TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256`
+/// resolves to a non-error params row.
+#[test]
+fn hlt_cipher_lookup_ecdhe_rsa_aes128_gcm_succeeds() {
+    let params =
+        Tls12CipherSuiteParams::from_suite(CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256)
+            .unwrap();
+    assert_eq!(params.suite.0, 0xC02F);
+}
+
+/// Negative for the same family: a bogus codepoint (0xFFFF) returns an
+/// error from both TLS 1.2 and TLS 1.3 param tables.
+#[test]
+fn hlt_cipher_lookup_unknown_codepoint_rejected() {
+    let bogus = CipherSuite(0xFFFF);
+    assert!(Tls12CipherSuiteParams::from_suite(bogus).is_err());
+    assert!(CipherSuiteParams::from_suite(bogus).is_err());
+}
+
+/// Mirrors C `SDV_TLS_CFG_GET_CIPHERVERSION_FUNC_TC001` + `_GET_CIPHERSUITE_FUNC_TC001`:
+/// pin the IANA codepoints of the well-known suites the hlt `.data` rows
+/// reference. T196 already pinned the TLS 1.3 set (0x1301-0x1303 + the
+/// legacy CBC-SHA at 0x002F); add the ECDHE/DHE GCM set used by hlt_cm.
+#[test]
+fn hlt_cipher_iana_codepoints_well_known_suite_set() {
+    assert_eq!(CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256.0, 0xC02F);
+    assert_eq!(CipherSuite::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384.0, 0xC030);
+    assert_eq!(CipherSuite::TLS_DHE_RSA_WITH_AES_256_GCM_SHA384.0, 0x009F);
+}
+
+/// Mirrors C `SDV_TLS_CFG_GET_AUTHID_FUNC_TC001`: ECDHE-RSA suites
+/// report `KeyExchangeAlg::Ecdhe` + `AuthAlg::Rsa`.
+#[test]
+fn hlt_authalg_ecdhe_rsa_suite_uses_rsa_auth_ecdhe_kx() {
+    let params =
+        Tls12CipherSuiteParams::from_suite(CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256)
+            .unwrap();
+    assert_eq!(params.kx_alg, KeyExchangeAlg::Ecdhe);
+    assert_eq!(params.auth_alg, AuthAlg::Rsa);
+}
+
+/// DHE-RSA suites report `KeyExchangeAlg::Dhe` + `AuthAlg::Rsa`.
+#[test]
+fn hlt_authalg_dhe_rsa_suite_uses_rsa_auth_dhe_kx() {
+    let params =
+        Tls12CipherSuiteParams::from_suite(CipherSuite::TLS_DHE_RSA_WITH_AES_256_GCM_SHA384)
+            .unwrap();
+    assert_eq!(params.kx_alg, KeyExchangeAlg::Dhe);
+    assert_eq!(params.auth_alg, AuthAlg::Rsa);
+}
+
+/// Mirrors C `SDV_TLS_CFG_GET_FLIGHTTRANSMITSWITH_FUNC_TC001:TLS1_2`:
+/// the `flight_transmit_enable` field is observable on a TLS-1.2-locked
+/// builder. T198 pinned the default + off round-trip version-agnostic;
+/// this row pins the explicit per-version handshake path the hlt row
+/// drives.
+#[test]
+fn hlt_flight_transmit_visible_under_tls12_handshake_path() {
+    let cfg = TlsConfig::builder()
+        .role(TlsRole::Client)
+        .min_version(TlsVersion::Tls12)
+        .max_version(TlsVersion::Tls12)
+        .flight_transmit_enable(false)
+        .build();
+    assert!(!cfg.flight_transmit_enable);
+}
+
+/// Same for TLS 1.3.
+#[test]
+fn hlt_flight_transmit_visible_under_tls13_handshake_path() {
+    let cfg = TlsConfig::builder()
+        .role(TlsRole::Client)
+        .min_version(TlsVersion::Tls13)
+        .max_version(TlsVersion::Tls13)
+        .flight_transmit_enable(false)
+        .build();
+    assert!(!cfg.flight_transmit_enable);
+}
+
+// ---------------------------------------------------------------------------
+// hlt_cert_interface — cert chain load + clear-and-rebuild pattern.
+// ---------------------------------------------------------------------------
+
+/// Mirrors C `SDV_TLS_CERT_LoadAndDelCert_FUNC_TC001:FROM_CONFIG`: load
+/// a chain via the config builder, then rebuild the config with a
+/// replacement chain — the second config reflects only the replacement
+/// (no leaked state from the first). T197 already pins set-and-observe;
+/// this row pins the "load+rebuild semantics" the C TC name implies.
+#[test]
+fn hlt_cert_load_via_config_chain_replace_pattern() {
+    let first = vec![0xC1, 0x01];
+    let cfg1 = TlsConfig::builder()
+        .role(TlsRole::Server)
+        .certificate_chain(vec![first.clone()])
+        .build();
+    assert_eq!(cfg1.certificate_chain, vec![first]);
+
+    let second = vec![0xC2, 0x02];
+    let cfg2 = TlsConfig::builder()
+        .role(TlsRole::Server)
+        .certificate_chain(vec![second.clone()])
+        .build();
+    assert_eq!(cfg2.certificate_chain, vec![second]);
+}
+
+/// Mirrors C `SDV_TLS_CERT_LoadAndDelCert_FUNC_TC001:FROM_CTX`: the
+/// `FROM_CTX` variant injects/clears a cert chain on a **constructed
+/// connection ctx** at runtime. The Rust port has no equivalent —
+/// `TlsConnection::new(stream, config)` takes the config by value and
+/// has no `set_certificate_chain` accessor. The plan doc must keep
+/// `HITLS_CFG_UpRef` listed (the upstream API for live-ctx mutation),
+/// confirming the scope-cut.
+#[test]
+fn hlt_cert_no_separate_ctx_cert_set_path_documented() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let plan_path = format!("{manifest_dir}/../../docs/issue-46-plan.md");
+    let plan = std::fs::read_to_string(&plan_path).unwrap_or_else(|e| {
+        panic!("missing audit doc at {plan_path}: {e}");
+    });
+    assert!(
+        plan.contains("HITLS_CFG_UpRef"),
+        "FROM_CTX scope-cut depends on HITLS_CFG_UpRef being listed as out-of-scope"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// hlt_cm_interface — handshake-state accessor surface pin.
+// ---------------------------------------------------------------------------
+
+/// Mirrors C `SDV_HITLS_CM_HITLS_GetNegotiateGroup_FUNC_TC001`-004:
+/// after a handshake the connection exposes the negotiated group. The
+/// numeric value depends on a live handshake (covered by
+/// `tests/interop/tests/tlcp.rs`); pin only the **accessor surface**
+/// (function pointer with the expected signature) so a future API rename
+/// or removal trips this test.
+#[test]
+fn hlt_negotiated_group_accessor_surface_pinned() {
+    use hitls_tls::crypt::NamedGroup;
+    use hitls_tls::handshake::server::ServerHandshake;
+    let _: fn(&ServerHandshake) -> Option<NamedGroup> = ServerHandshake::negotiated_group;
+}

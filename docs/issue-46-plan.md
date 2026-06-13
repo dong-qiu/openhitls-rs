@@ -92,8 +92,8 @@ sub-PR, README + tests-pin documentation):
 | ✅ plan | ✅ T195 | (this doc) + 5–8 representative frame_config negatives | 11 (delivered) | merged (PR #275) |
 | ✅ 46-A | ✅ T196 | `frame_config_interface` remainder (cipher metadata + reneg round-trip) | 10 (delivered) | merged (PR #276) |
 | ✅ 46-B | ✅ T197 | `frame_cert_interface` + `frame_cert_interface_2` | 11 (delivered) | merged (PR #277) |
-| ✅ 46-C | ✅ T198 | `frame_cm_interface` (largest, 92 fns) | 25 (delivered) | this PR |
-| 46-D | T199 | `hlt_config_interface` + `hlt_cert_interface` + `hlt_cm_interface` | ~10 | Handshake-level interop |
+| ✅ 46-C | ✅ T198 | `frame_cm_interface` (largest, 92 fns) | 25 (delivered) | merged (PR #278) |
+| ✅ 46-D | ✅ T199 | `hlt_config_interface` + `hlt_cert_interface` + `hlt_cm_interface` | 10 (delivered) | this PR |
 | **closeout** | T200 | rollup table + #46 close | — | series summary |
 
 Per-source-file totals will likely land at **~70 net new tests** across

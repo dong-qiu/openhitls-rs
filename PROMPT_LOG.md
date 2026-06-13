@@ -14295,3 +14295,73 @@ Recorded as DEV_LOG Phase T197.
     超过则 split 出 migrated_interface_tlcp_hlt.rs
 
 Recorded as DEV_LOG Phase T198.
+
+### T199 — #46-D hlt_{config,cert,cm}_interface 迁移 (#46 5 sub-PR 第 5 弹)
+
+> 针对Phase B，依次完成各个issue，每个issue完成并合入远程仓库main后再启动下一个issue。如果issue较大，可以拆成子任务。
+
+承接 T198 #46-C。
+按 audit doc §4 sub-PR 表执行第 5 弹:
+  hlt_* 3 文件 / 51 .data 行 / 0 fn 声明
+  HLT-style 包裹器跑真实 TCP 握手, 逻辑全在 .data 参数化里
+
+核心判断:
+  Rust 端等效已存在 tests/interop/tests/tlcp.rs 11 个真实 TCP 握手 (ECDHE/ECC + GCM/CBC)
+  本 PR 不复述, 而是 pin hlt 行触及但 interop 未 byte-pin 的两块:
+    (1) 静态 metadata (cipher-by-codepoint lookup / per-suite AuthAlg + KeyExchangeAlg / per-version flight_transmit)
+    (2) 握手状态机 accessor surface (negotiated_group 函数指针签名)
+
+改动 — migrated_interface_tlcp_audit.rs 追加 10 tests:
+  hlt_config_interface (7):
+    cipher_lookup ECDHE-RSA-AES128-GCM 成功
+    0xFFFF 双拒 (TLS12 + TLS13 params)
+    IANA codepoints 0xC02F + 0xC030 + 0x009F
+    ECDHE-RSA kx=Ecdhe + auth=Rsa
+    DHE-RSA kx=Dhe + auth=Rsa
+    flight_transmit TLS1_2 显式锁版本
+    flight_transmit TLS1_3 显式锁版本
+  hlt_cert_interface (2):
+    chain replace pattern (load A then rebuild config with B, no state leak)
+    FROM_CTX scope-cut pin (assert plan §6 列 HITLS_CFG_UpRef)
+  hlt_cm_interface (1):
+    GetNegotiateGroup accessor surface pin
+    `let _: fn(&ServerHandshake) -> Option<NamedGroup> = ServerHandshake::negotiated_group;`
+
+踩坑:
+  ServerHandshake 在 hitls_tls::handshake::server::ServerHandshake
+  mod.rs 不 re-export
+  初版写 hitls_tls::handshake::ServerHandshake 触发 E0432
+  fix: 走子模块全路径 handshake::server::ServerHandshake
+
+累计:
+  T195 (11) + T196 (10) + T197 (11) + T198 (25) + T199 (10) = 67 tests
+  默认 65 + TLCP-gated 2
+
+验证:
+  cargo test -p hitls-tls --all-features --test migrated_interface_tlcp_audit  67/0 (含 TLCP-gated 2)
+  cargo test -p hitls-tls --test migrated_interface_tlcp_audit                 65/0 (默认 feature)
+  cargo test -p hitls-tls --tests                                              1114+65+6/0 零回归
+  cargo fmt --check + cargo clippy + cargo doc --no-deps --all-features        clean
+
+作用域:
+  同文件追加 ~155 行 (10 tests + 1 use 段)
+  docs/issue-46-plan.md §4 表 T199 ✅ + T198 行标记 merged
+  0 product code
+
+沿用 + 新方法学:
+  沿用 T195-T198 audit-first / same-file 累计追加 / Rust 现有覆盖率作 scope cut 第一标准 / callback-install pin
+
+  新「function-pointer accessor pin」 (codified):
+    pin 函数签名 (let _: fn(&T) -> R = T::method;) 比测调用结果更稳定
+    后人删/重命名 method -> 编译错
+    改返回类型 -> 编译错
+    适合 live-state accessor 无法在单测驱动到目标 state 的场景
+    比「装到能跑握手再测值」成本低
+    比「完全不测 accessor」覆盖明确
+
+  新「同模块路径 grep 必看 mod.rs pub mod」:
+    子模块类型 import 前先 grep mod.rs 看是否 pub use
+    不 re-export 时走子模块全路径
+    T199 撞 E0432 codified
+
+Recorded as DEV_LOG Phase T199.
