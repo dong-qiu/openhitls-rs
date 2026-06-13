@@ -284,3 +284,96 @@ fn csr_wrong_version_accepted_gap() {
         "parser stores the corrupted version verbatim (TODO(#44-strict-version))"
     );
 }
+
+// ---------------------------------------------------------------------------
+// T203 / #44 close — missing-subject + bad-attr-OID acceptance categories.
+//
+// Last gap from the #44 acceptance criteria: "Add #[test] per failure
+// category (bad-sig / missing-subject / bad-attr-OID / unsupported-alg)".
+// T188 covered bad-sig + unsupported-alg + structural DER + PEM framing +
+// version gap; this PR closes missing-subject + bad-attr-OID.
+//
+// Both rows turn out to be **RFC 2986 lenient-acceptance pins** rather
+// than parse-rejection tests:
+//
+// - RFC 2986 §4.1: `subject Name` where `Name ::= CHOICE { rdnSequence
+//   RDNSequence }` and `RDNSequence ::= SEQUENCE OF RelativeDistinguishedName`.
+//   The SEQUENCE OF is allowed to be empty (X.501 §9.3). A CSR with an
+//   empty Subject DN is therefore RFC-compliant, just unusual — pin that
+//   the Rust parser accepts it without error and `subject.entries.is_empty()`.
+// - RFC 2986 §4.1: `attributes [0] IMPLICIT SET OF Attribute` is
+//   intentionally extensible — receivers MUST tolerate unknown
+//   attribute OIDs. Pin that a CSR carrying an attribute with an
+//   unknown / bogus extension OID parses cleanly and the extension
+//   round-trips into `csr.attributes`.
+// ---------------------------------------------------------------------------
+
+/// Mirrors C `UT_X509_CSR_PARSE_FUNC_TC*:missing-subject` row family.
+/// RFC 2986 §4.1 (via X.501 §9.3) allows an empty `RDNSequence`. Pin that
+/// the Rust parser accepts it without error and surfaces an empty
+/// `DistinguishedName` — a future strict-mode fix that rejects empty
+/// Subject would flip this assertion.
+#[test]
+fn csr_empty_subject_dn_accepted_pin() {
+    let kp = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+    let sk = SigningKey::Ed25519(kp);
+    let empty_dn = DistinguishedName { entries: vec![] };
+    let csr = CertificateRequestBuilder::new(empty_dn).build(&sk).unwrap();
+    let der = csr.raw.clone();
+
+    let parsed = CertificateRequest::from_der(&der)
+        .expect("CSR with empty Subject DN must parse per RFC 2986 §4.1");
+    assert!(
+        parsed.subject.entries.is_empty(),
+        "empty Subject DN must round-trip as DistinguishedName with no entries"
+    );
+    // The signature is over CertificationRequestInfo which includes the
+    // (empty) Subject — verify_signature must still succeed.
+    assert!(
+        parsed.verify_signature().unwrap_or(false),
+        "empty-Subject CSR signature must still verify"
+    );
+}
+
+/// Mirrors C `UT_X509_CSR_PARSE_FUNC_TC*:bad-attr-OID` row family.
+/// RFC 2986 §4.1: `attributes [0] IMPLICIT SET OF Attribute` is
+/// extensible — a CSR carrying an attribute with an unknown extension OID
+/// parses cleanly without raising `Asn1Error`. The Rust port stashes
+/// the raw OID + value bytes in `csr.attributes` so callers can inspect
+/// them; pin that the unknown OID survives the round-trip byte-exact.
+#[test]
+fn csr_unknown_extension_oid_accepted_pin() {
+    let kp = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+    let sk = SigningKey::Ed25519(kp);
+    let dn = DistinguishedName {
+        entries: vec![("CN".to_string(), "T203 unknown-OID pin".to_string())],
+    };
+
+    // A bogus OID in the iso(1) experimental arc (1.3.6.1.4.1.99999.42)
+    // — encoded as DER OID value bytes. The builder accepts arbitrary
+    // bytes so the test can stash whatever it wants.
+    let bogus_oid: Vec<u8> = vec![0x2B, 0x06, 0x01, 0x04, 0x01, 0x8D, 0x9F, 0x4F, 0x2A];
+    let payload: Vec<u8> = vec![0x04, 0x03, b'h', b'i', b'!']; // OCTET STRING "hi!"
+
+    let csr = CertificateRequestBuilder::new(dn)
+        .add_extension(bogus_oid.clone(), false, payload.clone())
+        .build(&sk)
+        .unwrap();
+    let der = csr.raw.clone();
+
+    let parsed = CertificateRequest::from_der(&der)
+        .expect("CSR with unknown extension OID must parse per RFC 2986 §4.1");
+    // The parser surfaces the attribute in `attributes` with the OID and
+    // value bytes intact.
+    let found = parsed.attributes.iter().any(|ext| ext.oid == bogus_oid);
+    assert!(
+        found,
+        "unknown attribute OID must round-trip into csr.attributes; got: {:?}",
+        parsed.attributes.iter().map(|e| &e.oid).collect::<Vec<_>>()
+    );
+    // Signature still verifies — the attribute is part of the signed TBS.
+    assert!(
+        parsed.verify_signature().unwrap_or(false),
+        "unknown-OID-bearing CSR signature must still verify"
+    );
+}
