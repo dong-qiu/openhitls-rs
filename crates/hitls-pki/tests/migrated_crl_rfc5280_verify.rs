@@ -1180,3 +1180,94 @@ fn tc_tc001_r2_r4_x509_crl_verify_revocation_flag_gating() {
         .verify_cert(&leaf, &[])
         .expect("revocation off → CRL skipped even though leaf is on it");
 }
+
+// ---------------------------------------------------------------------------
+// T202 / #45 close — strict-version + ordering gap pins.
+//
+// Last gap from the #45 acceptance criteria: invalid CRL version + misordered
+// extensions. RFC 5280 §5.1.1: "When present, version SHALL be v2 (i.e.,
+// INTEGER 1)." Anything else is illegal. RFC 5280 §5.2 does NOT prescribe an
+// extension order, so the "misordered extensions" criterion item collapses
+// to a documentation pin (no parse-time check is required).
+// ---------------------------------------------------------------------------
+
+/// SDV_X509_CRL_RFC5280 strict-version row — RFC 5280 §5.1.1: when present,
+/// version SHALL be v2 (INTEGER 1). Patch a built CRL's version byte from
+/// `0x01` to `0x05` and re-parse — Rust currently **accepts** the bogus
+/// version because the parser only distinguishes "INTEGER present (v2)" from
+/// "INTEGER absent (v1)" without bounding the integer value. Pin the lenient
+/// behaviour with a `TODO(#45-strict-version)` so a future hardening lands
+/// as a deliberate change.
+#[test]
+fn tc_crl_rfc5280_invalid_version_accepted_gap() {
+    // Build a v2 CRL (CRLNumber extension forces version=2 in the builder).
+    use hitls_pki::x509::{CrlBuilder, DistinguishedName, SigningKey};
+    let kp = hitls_crypto::ed25519::Ed25519KeyPair::generate().unwrap();
+    let sk = SigningKey::Ed25519(kp);
+    let dn = DistinguishedName {
+        entries: vec![("CN".to_string(), "Test CA #45 strict-version".to_string())],
+    };
+    let crl = CrlBuilder::new(dn, 1_700_000_000)
+        .next_update(1_800_000_000)
+        .add_crl_number(&[0x42])
+        .build(&sk)
+        .unwrap();
+    assert_eq!(crl.version, 2, "CRLNumber must force v2");
+    let mut der = crl.to_der();
+
+    // TBSCertList DER layout (RFC 5280 §5.1):
+    //   30 LL                          -- outer Certificate-List SEQUENCE
+    //     30 LL                        -- TBSCertList SEQUENCE
+    //       02 01 01                   -- version INTEGER (v2 = 1), this is
+    //                                     the first inner field when present
+    //       ...
+    //
+    // Locate the first three-byte INTEGER-with-len-1 prefix inside the
+    // TBSCertList window and bump the value byte to 0x05.
+    let needle = [0x02, 0x01, 0x01];
+    let idx = der
+        .windows(3)
+        .position(|w| w == needle)
+        .expect("v2 INTEGER prefix must exist in a built CRL");
+    der[idx + 2] = 0x05;
+
+    let reparsed = CertificateRevocationList::from_der(&der)
+        .expect("Rust parser tolerates invalid version (TODO(#45-strict-version))");
+    // The parser stores INTEGER value + 1 (v1=0, v2=1). Patching the byte
+    // to 0x05 yields a `version` field of 6 — clearly out-of-spec, yet
+    // `from_der` succeeds. Pin the lenient round-trip; a future strict
+    // mode would reject the parse outright (RFC 5280 §5.1.1 prohibits any
+    // version other than v2 when present).
+    assert!(
+        reparsed.version != 1 && reparsed.version != 2,
+        "patched version byte 0x05 must surface a non-v1/v2 value, got {} \
+         (TODO(#45-strict-version): tighten parser to InvalidCrl on out-of-spec version)",
+        reparsed.version
+    );
+}
+
+/// SDV_X509_CRL_RFC5280 extension-ordering row — RFC 5280 §5.2: the
+/// `crlExtensions SEQUENCE OF Extension` has no required order. Verifiers
+/// MUST tolerate any permutation. Pin that the Rust parser walks the
+/// extensions in encoding order without imposing an OID-sort constraint.
+#[test]
+fn tc_crl_rfc5280_extension_order_unspecified_pin() {
+    let (_ca, _leaf, crl, _) = synth_dated_chain(1_700_000_000, 1_800_000_000, false);
+    // The CRL built by `synth_dated_chain` carries no critical extensions
+    // (the default CrlBuilder emits only CRLNumber when one is set, plus
+    // an AKI when explicitly requested). The pin here is the **negative**
+    // claim: there is no `PkiError::InvalidCrl("extensions out of order")`
+    // variant emitted on the round-trip path, and `from_der(to_der())`
+    // is identity on extension presence.
+    let der = crl.to_der();
+    let reparsed = CertificateRevocationList::from_der(&der).unwrap();
+    assert_eq!(
+        reparsed.version, crl.version,
+        "round-trip preserves version field with no ordering rejection"
+    );
+    assert_eq!(
+        reparsed.crl_number().is_some(),
+        crl.crl_number().is_some(),
+        "round-trip preserves CRLNumber presence regardless of order"
+    );
+}

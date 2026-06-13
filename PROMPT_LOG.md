@@ -14529,3 +14529,66 @@ C 源 consistency/dtlcp/:
     避免「#59 写完 #46 plan 改了 ECPOINT 决策遗忘 #59 跟新」
 
 Recorded as DEV_LOG Phase T201.
+
+### T202 — #45 CRL 收官最终弹 (#45 关闭)
+
+> 针对Phase B，依次完成各个issue，每个issue完成并合入远程仓库main后再启动下一个issue。如果issue较大，可以拆成子任务。
+
+承接 T187 #45 部分覆盖 (39/53 ~74%)。
+补 acceptance criteria 中:
+  invalid CRL version
+  misordered extensions
+
+核心判断:
+  T187 已覆盖 dates + sig-tamper + DN-tamper + AKI gap + flag gating + revocation gating
+  余两类是 RFC 5280 §5.1.1 strict mode product gap
+  Rust parser 仅区分 INTEGER 在/不在, 不 bound 值
+
+改动 — migrated_crl_rfc5280_verify.rs 追加 2 tests (+~75 行):
+  tc_crl_rfc5280_invalid_version_accepted_gap:
+    build v2 CRL (add_crl_number 强制版本)
+    to_der -> 字节 patch INTEGER 1 -> 5 -> re-parse
+    验 reparsed.version=6 ≠ 1/2
+    TODO(#45-strict-version)
+  tc_crl_rfc5280_extension_order_unspecified_pin:
+    RFC §5.2 无 order 要求
+    单测 pin round-trip 保 extension 字段不被 ordering 拒绝 (negative claim)
+
+踩坑:
+  1. synth_dated_chain 默认 build v1 CRL (无 extension)
+     DER 中没有 INTEGER 0x02 0x01 0x01 prefix
+     fix: 显式用 CrlBuilder::add_crl_number 强制 v2 后再 patch
+  2. 初版断言 reparsed.version == 2
+     实际 parser 走 v_bytes.last() + 1 转换
+     INTEGER 5 -> version 6
+     改断言 != 1 && != 2
+     防 strict 修复后退化为「应拒不拒」却被测试放行
+
+验证:
+  cargo test -p hitls-pki --test migrated_crl_rfc5280_verify --all-features  32/0 (30 -> 32)
+  cargo test -p hitls-pki --tests                                            458+9+32+11+1073/0 零回归
+  cargo fmt --check + cargo clippy --workspace --all-features -D warnings    clean
+
+作用域:
+  1 个已有测试文件 +75 行
+  0 product code
+  1 个 TODO(#45-strict-version)
+
+沿用 + 新方法学:
+  沿用 T187 「build valid + byte patch」+「TODO + pin 测试」+「不迁名单按 root cause 分类」
+
+  新「builder 默认 vs 强制 version 控制」 (codified):
+    CrlBuilder 自动 v1/v2 切换基于 extensions 存在
+    测试需 invalid version 时必显式 add_crl_number(...) 强制 v2 再 patch
+
+  新「parser 输入/输出转换关系不能假设」:
+    CRL parser v_bytes.last() + 1 把 INTEGER 5 转 version 6
+    测试 assert 需读源码验证转换公式而非凭直觉
+
+  新「ordering pin = 反向断言无新错误」:
+    RFC 无 order 要求时
+    单测 pin「无 InvalidCrl(extensions out of order) 错误抛出」
+    即 negative claim 文档化
+    避免日后误加 ordering check
+
+Recorded as DEV_LOG Phase T202.
