@@ -1,0 +1,52 @@
+name: 'Setup Rust (resilient)'
+description: >-
+  Pre-warm the rustup toolchain download with bash retries to absorb
+  transient static.rust-lang.org network timeouts, then delegate to
+  dtolnay/rust-toolchain for default selection, PATH, components, targets
+  and problem matchers. Inputs mirror dtolnay/rust-toolchain so call sites
+  only swap the `uses:` line and keep their existing `with:` block.
+
+inputs:
+  toolchain:
+    description: 'Toolchain to install (e.g. stable, nightly-YYYY-MM-DD, 1.95.0).'
+    required: false
+    default: 'stable'
+  components:
+    description: 'Comma/space-separated components (e.g. clippy, rustfmt).'
+    required: false
+    default: ''
+  targets:
+    description: 'Comma/space-separated target triples.'
+    required: false
+    default: ''
+
+runs:
+  using: 'composite'
+  steps:
+    # The toolchain channel manifest + std is the large download that
+    # times out under a flaky static.rust-lang.org connection (the failure
+    # that left PR #283 blocked ~3.5h waiting for a manual re-run). rustup
+    # install is idempotent, so retrying it here is safe; once it succeeds
+    # the dtolnay step below finds the toolchain present and does no
+    # further network I/O for it. A plain bash loop avoids pulling in a
+    # new third-party action (supply-chain surface) — rustup is already on
+    # every GitHub-hosted runner image, including Windows (Git bash).
+    - name: Pre-warm toolchain download (retry on network flake)
+      shell: bash
+      run: |
+        tc="${{ inputs.toolchain }}"
+        for attempt in 1 2 3; do
+          if rustup toolchain install "$tc" --profile minimal --no-self-update; then
+            exit 0
+          fi
+          echo "::warning::rustup toolchain install '$tc' attempt ${attempt}/3 failed (network?); retrying in 20s"
+          sleep 20
+        done
+        echo "::error::rustup toolchain install '$tc' failed after 3 attempts"
+        exit 1
+
+    - uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ inputs.toolchain }}
+        components: ${{ inputs.components }}
+        targets: ${{ inputs.targets }}
