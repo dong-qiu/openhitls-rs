@@ -38,6 +38,7 @@ extentions = "extentions" # upstream script name: test-tls13-shuffled-extentions
 exhange = "exhange"       # upstream conversation name: "psk_key exhange modes"
 # Upstream openHiTLS C symbols that contain typos but must be referenced verbatim
 UNKOWN = "UNKOWN"         # C source symbol: HITLS_APP_OPT_UNKOWN (apps/include/app_errno.h)
+VERISON = "VERISON"       # C source symbol: SDV_CMS_SIGNEDATA_VERIFY_WITH_INVALID_VERISON_TC001
 # OpenSSL-compatible CLI flag names referenced verbatim (these are stable
 # external interface tokens, not typos in our prose)
 passin = "passin"         # OpenSSL CLI flag: openssl pkey -passin pass:...
