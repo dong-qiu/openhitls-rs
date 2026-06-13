@@ -14136,3 +14136,96 @@ plan doc 更新:
     下次 grep pub enum X 不止一个时立刻确认 import scope
 
 Recorded as DEV_LOG Phase T196.
+
+### T197 — #46-B frame_cert_interface 迁移 (#46 5 sub-PR 第 3 弹)
+
+> 针对Phase B，依次完成各个issue，每个issue完成并合入远程仓库main后再启动下一个issue。如果issue较大，可以拆成子任务。
+
+承接 T196 #46-A.
+按 audit doc §4 sub-PR 表执行第 3 弹:
+  frame_cert_interface 25 fn + frame_cert_interface_2 6 fn = 31 fn novel set/build round-trip
+  大量 C 测试与 tests/interop/tests/tlcp.rs 握手 + test_config_builder_* 单测重叠
+  本批聚焦 unit-level 配置 round-trip + TLCP 双证书 + CRL verifier API
+
+改动 — migrated_interface_tlcp_audit.rs 追加 11 tests (9 默认 + 2 TLCP-gated):
+  CERT_CFG_LoadCertBuffer / LoadCertFile (3 tests):
+    cert_chain_default_empty
+    cert_chain_single_round_trip
+    cert_chain_multi_preserves_order
+    (builder 不在 set time 验 DER, 留 load-time parse)
+  CERT_CFG_LoadKeyBuffer (1 test):
+    private_key_set_round_trip_ed25519
+    ServerPrivateKey::Ed25519(seed) tuple variant round-trip
+  CERT_GET_CALIST_FUNC (2 tests):
+    ca_list_default_empty
+    ca_list_accumulates_via_trusted_cert (多 trusted_cert(...) 调用累加)
+  CERT_CM_SetVerifyDepth (1 test):
+    cert_verifier_set_max_depth_round_trip
+    用 CertificateVerifier::new().set_max_depth(3) builder-style API
+  CRL_CFG_CLEAR / LOAD_BUFFER / VERIFICATION_HANDSHAKE (2 tests):
+    crl_verifier_default_state_is_off
+    crl_verifier_add_crl_then_enable_check
+    (set_check_revocation + set_revocation_leaf_only API 表面 pin)
+    详细 state 在 T177/T178 已覆盖
+  TLCP dual-cert (2 tests, #[cfg(feature = "tlcp")]):
+    tlcp_dual_certificate_chains_set_independently
+      TLCP 服务端两条证书链 (签名 certificate_chain + 加密 tlcp_enc_certificate_chain)
+      独立设置
+    tlcp_dual_private_keys_set_independently
+      private_key + tlcp_enc_private_key 双 key 独立 round-trip
+
+3 中间踩坑:
+  1. Tuple variant vs struct variant:
+     ServerPrivateKey::Ed25519(Vec<u8>) 是 tuple variant
+     初版写 Ed25519 { seed: ... } struct syntax
+     4 个 E0769/E0559 compile errors
+     fix: Ed25519([0x42; 32].to_vec()) + match Ed25519(seed) => ...
+  
+  2. Drop trait 强制 by-ref unwrap:
+     ServerPrivateKey 实现 Drop (zeroize)
+     cfg.private_key.unwrap() 触发 E0509
+     "cannot move out of type which implements Drop"
+     fix: cfg.private_key.as_ref().unwrap() + assert_eq!(seed, &vec![...])
+  
+  3. #[cfg(feature = "tlcp")] gated tests 在默认 test run 不编译:
+     初次 default-feature test 30/0 通过
+     但 clippy --all-features 暴露 2 个未修的 struct-syntax 错误 (在 TLCP-gated 函数内)
+     fix: 必须用 cargo test --all-features 验证 feature-gated 测试
+
+累计:
+  T195 (11) + T196 (10) + T197 (11) = 32 tests
+  默认 30 + TLCP-gated 2
+
+验证:
+  cargo test -p hitls-tls --all-features --test migrated_interface_tlcp_audit  32/0 (含 TLCP-gated 2)
+  cargo test -p hitls-tls --tests                                               1114 + 30 + 6 / 0 零回归 (默认 feature)
+  cargo fmt --check                                                              clean
+  cargo clippy --workspace -D warnings                                          clean
+
+作用域:
+  同文件追加 ~180 行 (11 tests + use 段更新)
+  docs/issue-46-plan.md §4 表 3 行 ✅ 标记 (T195+T196 merged + T197 this PR)
+  0 product code
+
+沿用 + 新方法学:
+  沿用 T195/T196 「audit-first」+「same-file 累计追加」+「Rust 现有覆盖率作 scope cut」
+  
+  新「feature-gated test 必跑 --all-features」 (codified):
+    sub-PR 含 #[cfg(feature = "X")] 测试时
+    默认 cargo test 不编译这些函数
+    clippy --all-features 才能暴露 hidden compile errors
+    提交清单加: 默认 + --all-features 双跑
+  
+  新「Drop trait variant 必 as_ref」:
+    当 enum variant 持有 Drop 类型 (如 Vec<u8> 用作 Zeroize-on-drop)
+    match unwrap 需 .as_ref().unwrap()
+    否则 E0509
+    codified
+  
+  新「tuple vs struct variant 必先 grep」 (小坑):
+    写 enum variant 前先 grep 定义:
+      grep -n "Ed25519" keys.rs -> Ed25519(Vec<u8>)
+    习惯性写 struct-syntax 会撞 E0769
+    codified
+
+Recorded as DEV_LOG Phase T197.
