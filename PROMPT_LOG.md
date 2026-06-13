@@ -14052,3 +14052,87 @@ frame_config_interface 28 TC family 决策矩阵 (样本):
       「Rust 未实现」 (待 follow-up)
 
 Recorded as DEV_LOG Phase T195.
+
+### T196 — #46-A frame_config_interface 剩余迁移: cipher metadata + reneg round-trip (#46 5 sub-PR 第 2 弹)
+
+> 针对Phase B，依次完成各个issue，每个issue完成并合入远程仓库main后再启动下一个issue。如果issue较大，可以拆成子任务。
+
+承接 T195 #46-plan, 按 audit doc §4 sub-PR 表执行第 2 弹.
+
+改动 — migrated_interface_tlcp_audit.rs 追加 10 tests:
+  CFG_GET_HASHID_API_TC001 (3 tests):
+    cfg_get_hashid_legacy_cbc_sha_tls12_uses_sha256_prf
+      TLS_RSA_WITH_AES_128_CBC_SHA PRF 是 SHA-256 (legacy SHA-1 在 MAC)
+      mac_hash_alg_id() == Sha1
+    cfg_get_hashid_tls13_aes128_gcm_uses_sha256
+    cfg_get_hashid_tls13_aes256_gcm_uses_sha384
+  CFG_CIPHER_ISAEAD_API_TC001 (2 tests):
+    cfg_cipher_isaead_tls13_all_aead
+      TLS 1.3 三套件全 AEAD
+      无 mac_len 字段即 AEAD signal
+    cfg_cipher_isaead_legacy_cbc_is_not_aead
+      CBC suite is_cbc=true + mac_len>0
+  CFG_GET_CIPHERSUITESTDNAME_API_TC001 (1 test):
+    cfg_get_ciphersuitestdname_codepoint_identity
+      pin RFC 8446 / RFC 5246 codepoints
+      0x1301-0x1303 + 0x002F
+  Classification (2 tests):
+    cfg_category_classification_tls12_vs_tls13
+      is_tls12_suite / is_tls13_suite 互斥分类
+    cfg_unknown_cipher_rejected_by_both_classifiers
+      0xFFFF 两边都返 false
+  CFG_SET_GET_RENEGOTIATIONSUPPORT_FUNC_TC001 (2 tests):
+    cfg_set_get_renegotiation_round_trip
+      默认 false
+      allow_renegotiation(true) 后 true
+    cfg_renegotiation_field_visible_under_tls13
+      TLS 1.3 builder 仍接受字段
+      RFC 8446 禁止 reneg 但 field 不删
+      pin shape
+
+Imports 小坑:
+  初版 use hitls_types::HashAlgId
+  但 Tls12CipherSuiteParams::hash_alg_id() 返 hitls_tls::crypt::HashAlgId
+  两个 distinct types 同名 (一个用作底层算法 ID, 一个用作 TLS-side 算法 wrap)
+  改 use hitls_tls::crypt::HashAlgId
+  4 个 compile errors 后修
+
+同一文件累计:
+  T195 (11 tests) + T196 (10 tests) = 21 tests
+  audit_plan_docs_in_sync cross-file pin 继续生效
+
+plan doc 更新:
+  docs/issue-46-plan.md §4 sub-PR 表前 2 行打 ✅ 标记 + delivered 计数 (11 + 10)
+  pin test 自动捕获 plan doc 一致性 (不会因 ✅ 标记被破坏)
+
+验证:
+  cargo test -p hitls-tls --test migrated_interface_tlcp_audit   21/0 (T195 11 + T196 10)
+  cargo test -p hitls-tls --tests                                  1114 + 21 + 6 / 0 零回归
+  cargo fmt --check                                                clean
+  cargo clippy --workspace -D warnings                            clean
+
+作用域:
+  同文件追加 ~200 行 (10 tests + use 段更新)
+  docs/issue-46-plan.md §4 表 2 行 ✅ 标记
+  0 product code
+  0 新 TODO (沿用 T195 的 3 个)
+
+沿用 + 新方法学:
+  沿用 T195 「audit-first multi-file 系列」+ 「Rust 现有覆盖率作 scope cut 第一标准」+ 「C-only API gap 显式列表」
+  沿用 T194 「sub-PR 系列总表 ✅ 进度标记」
+  
+  新「same-file 累计追加」:
+    sub-PR 系列连续 batch 时同一测试文件累计追加而非每次新建
+    audit_plan_docs_in_sync 跨文件 pin 自动跟随 plan doc 更新
+    无需额外 sync 仪式
+  
+  新「distinct same-name types 隐藏陷阱」 (小踩坑入档):
+    hitls_types::HashAlgId 与 hitls_tls::crypt::HashAlgId
+      是两个不同 enum 但同名
+      一个用作底层算法 ID
+      一个用作 TLS-side 算法 wrap
+    trait method 返回类型决定哪个
+    import 时需对齐
+    下次 grep pub enum X 不止一个时立刻确认 import scope
+
+Recorded as DEV_LOG Phase T196.
