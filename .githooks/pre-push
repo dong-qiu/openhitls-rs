@@ -3,9 +3,16 @@
 # pre-push: fast fmt/clippy gate + AI review for openHiTLS-rs.
 #
 # Two stages run before a push is allowed:
-#   1. Fast local presubmit — `cargo fmt --check` + `cargo clippy`. In a
-#      trunk-based workflow there is no PR to catch a broken build, so
-#      this gate keeps the trunk green by construction (~40s warm).
+#   1. Fast local presubmit — `typos` + `cargo fmt --check` + `cargo
+#      clippy` + `cargo doc`. In a trunk-based workflow there is no PR to
+#      catch a broken build, so this gate keeps the trunk green by
+#      construction. typos + rustdoc are added here because both are
+#      *required* CI gates (CI Gate `needs: typos`, `needs: docs`) and
+#      have been recurring sources of multi-hour post-push churn — typos
+#      false-positives on C-source identifiers / OpenSSL CLI flag tokens,
+#      and rustdoc intra-doc links to test-gated symbols. Catching them
+#      locally (seconds for typos, an incremental rebuild for doc) turns
+#      a full CI round-trip + fixup commit into a pre-push fix.
 #   2. AI review — an external-auditor-framed `claude -p` against the
 #      diff being pushed, aborting on a critical finding or on signs the
 #      reviewer didn't actually engage with the change.
@@ -18,7 +25,7 @@
 #
 # Skip a single push:
 #
-#     SKIP_PRESUBMIT=1 git push ...   # skip the fmt/clippy gate only
+#     SKIP_PRESUBMIT=1 git push ...   # skip the typos/fmt/clippy/doc gate only
 #     SKIP_AI_REVIEW=1 git push ...   # skip the AI review only
 #     git push --no-verify ...        # git-native bypass (skips both)
 #
@@ -56,9 +63,11 @@
 #
 # Behaviour matrix:
 #
-#     diff is empty / docs-only ........ skip (silent, exit 0)
-#     fmt/clippy gate fails ............ abort push (exit 1)
-#     `cargo` not in PATH .............. skip gate with warning, continue
+#     diff is empty .................... skip (silent, exit 0)
+#     typos finds an issue ............. abort push (exit 1)
+#     diff is docs-only ................ run typos, then skip AI review
+#     fmt/clippy/doc gate fails ........ abort push (exit 1)
+#     `typos`/`cargo` not in PATH ...... skip that gate w/ warning, continue
 #     `claude` CLI not in PATH ......... skip with warning (exit 0)
 #     review returns VERDICT: pass ..... allow push (exit 0)
 #     review returns VERDICT: block .... abort push (exit 1)
@@ -118,6 +127,32 @@ fi
 
 n_files="$(printf '%s\n' "$changed" | wc -l | tr -d ' ')"
 
+# ── Stage 0: spell check (typos) ──────────────────────────────────────
+# typos is a *required* CI gate (CI Gate `needs: typos`) and a recurring
+# source of post-push churn: false positives on C-source identifiers
+# (e.g. HITLS_APP_OPT_UNKOWN) and OpenSSL CLI flag tokens (passin/passout)
+# have each cost a full CI round-trip + fixup commit. It scans the whole
+# tree (matching the crate-ci/typos CI job, not just the diff) and runs
+# in <5s, so it runs here BEFORE the docs-only AI-review skip below —
+# a typo in a .md file or a code comment is just as blocking on CI.
+# Fix real typos; allow genuine false-positives in typos.toml.
+# Bypass with SKIP_PRESUBMIT=1.
+if [ "${SKIP_PRESUBMIT:-}" = "1" ]; then
+    echo "[presubmit] SKIP_PRESUBMIT=1 set, skipping typos." >&2
+elif ! command -v typos >/dev/null 2>&1; then
+    echo "[presubmit] 'typos' not in PATH, skipping spell check." >&2
+    echo "[presubmit] Install: cargo install typos-cli" >&2
+else
+    echo "[presubmit] typos ..." >&2
+    if ! typos >&2; then
+        echo "[presubmit] BLOCK: typos found spelling issues. Fix them, or add a" >&2
+        echo "[presubmit]        genuine false-positive to typos.toml ([default.extend-words]" >&2
+        echo "[presubmit]        for a whole word, or [default.extend-identifiers])." >&2
+        exit 1
+    fi
+    echo "[presubmit] typos clean." >&2
+fi
+
 # Classify the diff by path against the literal crate directory layout
 # in CLAUDE.md. Update this when adding new crypto-sensitive crates.
 crypto_paths='^crates/(hitls-crypto|hitls-bignum|hitls-tls|hitls-pki|hitls-auth)/'
@@ -146,14 +181,16 @@ if [ "$has_only_docs" = "1" ]; then
     exit 0
 fi
 
-# ── Stage 1: fast local presubmit (fmt + clippy) ──────────────────────
-# Trunk-based: no PR exists to catch a broken build, so a fmt/clippy
-# gate runs here before the (slower) AI review. Keeps the trunk green
-# by construction. Bypass with SKIP_PRESUBMIT=1.
+# ── Stage 1: fast local presubmit (fmt + clippy + doc) ────────────────
+# Trunk-based: no PR exists to catch a broken build, so this gate runs
+# here before the (slower) AI review. Keeps the trunk green by
+# construction. cargo doc mirrors the required "Documentation Check" CI
+# job (RUSTDOCFLAGS=-D warnings) and reuses clippy's warm build, so it
+# is an incremental cost. Bypass with SKIP_PRESUBMIT=1.
 if [ "${SKIP_PRESUBMIT:-}" = "1" ]; then
-    echo "[presubmit] SKIP_PRESUBMIT=1 set, skipping fmt/clippy gate." >&2
+    echo "[presubmit] SKIP_PRESUBMIT=1 set, skipping fmt/clippy/doc gate." >&2
 elif ! command -v cargo >/dev/null 2>&1; then
-    echo "[presubmit] 'cargo' not in PATH, skipping fmt/clippy gate." >&2
+    echo "[presubmit] 'cargo' not in PATH, skipping fmt/clippy/doc gate." >&2
 else
     echo "[presubmit] cargo fmt --all --check ..." >&2
     if ! cargo fmt --all -- --check >&2; then
@@ -165,7 +202,12 @@ else
         echo "[presubmit] BLOCK: clippy reported warnings/errors — fix before pushing." >&2
         exit 1
     fi
-    echo "[presubmit] fmt + clippy clean." >&2
+    echo "[presubmit] cargo doc --workspace --all-features --no-deps ..." >&2
+    if ! RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps >&2; then
+        echo "[presubmit] BLOCK: rustdoc reported warnings/errors — fix before pushing." >&2
+        exit 1
+    fi
+    echo "[presubmit] fmt + clippy + doc clean." >&2
 fi
 
 # ── Stage 2: AI review ────────────────────────────────────────────────
