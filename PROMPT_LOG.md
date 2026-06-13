@@ -13909,3 +13909,146 @@ keymgmt 是 C 中第二个 GM 操作员模式 CLI 子命令:
       实际是 per-helper / per-component 决策
 
 Recorded as DEV_LOG Phase T194.
+
+### T195 — #46-plan TLCP interface_tlcp 718-row 缺口 audit + 首批 11 tests + 5 sub-PR 拆分计划
+
+> 针对Phase B，依次完成各个issue，每个issue完成并合入远程仓库main后再启动下一个issue。如果issue较大，可以拆成子任务。
+
+承接 #47 6-PR 系列收官 (T189-T194).
+#46 是 Phase B 最大单点缺口:
+  718 .data 行 / 80 unique TC 函数 / ~10K LOC C 源 / 4 大类源文件
+  沿用 #47 系列「audit-first」模式
+
+C 源 inventory:
+  frame_config_interface         28 fn / 151 行   HITLS_CFG_* config setter/getter
+  frame_cert_interface + _2      31 fn / 152 行   HITLS_X509_* cert manager 低层
+  frame_cm_interface             92 fn / 364 行   HITLS_CFG_SetCert* / GetVerify* 包装 (最大)
+  hlt_config/cert/cm_interface    0 fn /  51 行   共享 HLT 握手 scaffold 参数化
+  合计                           151 / 718
+
+Rust 现有覆盖:
+  crates/hitls-tls/src/config/mod.rs::tests 100+ test_config_builder_* 单测
+    version range / ALPN / cipher suites / session resumption / PSK / EMS/ETM / OCSP / SCT / 等
+  tests/interop/tests/tlcp.rs 11 个 TLCP/DTLCP 握手 happy-path
+
+核心判断:
+  C 测多为 HITLS_CFG_* API 排列组合 round-trip + version 矩阵参数化
+  与 Rust TlsConfig::builder() 现有单测语义高度重叠
+  不是无条件 718 行迁移
+  而是审计 + 找未覆盖语义 + 迁移真实缺口
+
+frame_config_interface 28 TC family 决策矩阵 (样本):
+  scope cut (~20 TC family):
+    CFG_UPREF_FUNC_TC001                  Rust Arc<TlsConfig>, 无 UpRef
+    NOCLIENTCERTSUPPORT                    由 verify_peer(false) 覆盖
+    CLIENTVERIFYSUPPORT                    由 verify_peer(true) 覆盖
+    SET_TMPDH/TMPDHCB/SETTMPDH              Rust 用 FFDHE groups
+    CLIENTHELLOCB                          仅 SNI cb, generic CH cb 延后
+    COOKIEGEN/VERIFYCB                     DTLS cookie 内部
+    SET_GET_VERSION/VERSIONSUPPORT          由 version_range 测试覆盖
+    SET_SIGNATURE_FUNC                      覆盖
+    SET_ECPOINTFORMATS_FUNC                Rust uncompressed only
+    POSTHANDSHAKEAUTHSUPPORT                由 T98 PHA 覆盖
+    HELLO_VERIFY_REQ                       DTLS 内部
+    QUIETSHUTDOWN                          N/A
+    DHAUTOSUPPORT                          N/A
+    CIPHERSERVERPREFERENCE                  默认行为
+  port (~8 TC family):
+    RESUMPTIONONRENEGOSUPPORT
+    SET_GROUPS_FUNC empty-input
+    RENEGOTIATIONSUPPORT_FUNC novel
+    GET_*_API_TC001 cipher metadata
+    其他 round-trip / negative gap
+
+5 sub-PR 拆分计划:
+  plan T195   本 PR + frame_config 首批     ~10 tests
+  46-A T196   frame_config_interface 剩余    ~10 tests
+  46-B T197   frame_cert_interface + _2       ~15 tests
+  46-C T198   frame_cm_interface (92 fn 最大) ~25 tests
+  46-D T199   hlt_config/cert/cm_interface    ~10 tests
+  closeout T200 系列收官 + #46 close
+  
+  预计净 ~70 tests 跨 5 sub-PR
+  vs C 718 行
+  压缩反映 C 重型参数化已被 Rust 协议/握手测试覆盖
+
+改动:
+  1. docs/issue-46-plan.md (新文件 ~140 行):
+     完整 inventory + per-source-file 表
+     frame_config_interface 28 TC family 决策矩阵
+     5 sub-PR 拆分计划
+     out-of-scope C-only API 显式列表:
+       HITLS_CFG_UpRef
+       HITLS_CFG_SetTmpDh / SetTmpDhCb
+       HITLS_CFG_SetECPointFormats
+       HITLS_CFG_SetHelloVerifyReq
+       HITLS_CFG_SetQuietShutdown
+       HITLS_CFG_SetClientHelloCb
+       HITLS_CFG_SetCookieGenCb / SetCookieVerifyCb
+       HITLS_CFG_SetDhAutoSupport
+     TODO(#46-plan) 锚点
+  
+  2. crates/hitls-tls/tests/migrated_interface_tlcp_audit.rs (新文件 ~200 行 / 11 tests):
+     首批 10 迁移:
+       cfg_set_get_version_round_trip
+       cfg_swapped_version_bounds_accepted_for_now (TODO(#46-version-bounds))
+       cfg_set_get_client_verify_round_trip_tls12 / _tls13
+       cfg_no_client_cert_default_matches_verify_peer_false
+       cfg_resumption_default_matches_session_resumption_setting
+       cfg_supported_groups_empty_input_pinned (TODO(#46-groups-empty))
+       cfg_signature_algorithms_empty_input_pinned (TODO(#46-sigalg-empty))
+       cfg_supported_groups_non_empty_round_trip
+       cfg_signature_algorithms_non_empty_round_trip
+     1 个跨文件 pin 测试:
+       audit_plan_docs_in_sync
+         读 docs/issue-46-plan.md
+         断言 section headings + 5 sub-PR tags + 4 out-of-scope API names + TODO marker
+         同 T192 dn_parser_negative_cases_pin_req_module 模式
+
+3 个新 TODO:
+  TODO(#46-version-bounds)  builder 应拒绝 min > max
+  TODO(#46-groups-empty)    builder 应拒绝 empty supported_groups
+  TODO(#46-sigalg-empty)    builder 应拒绝 empty signature_algorithms
+
+验证:
+  cargo test -p hitls-tls --test migrated_interface_tlcp_audit   11/0
+  cargo test -p hitls-tls --tests                                  1114 + 11 + 6 / 0 全套零回归
+  cargo fmt --check                                                clean
+  cargo clippy --workspace -D warnings                            clean
+  本地预跑 rustdoc 发现 hitls-tls 内 ech::build_grease_ech_payload 链接错误
+    pre-existing on main, 与本 PR 无关
+
+作用域:
+  1 个新 plan doc (docs/issue-46-plan.md ~140 行)
+  1 个新测试文件 (migrated_interface_tlcp_audit.rs ~200 行 / 11 tests)
+  0 product code
+  3 个新 TODO (version-bounds / groups-empty / sigalg-empty)
+  后续 4-5 sub-PR 工作量明确
+
+沿用 + 新方法学:
+  沿用 #47 系列「audit-first」模式 (T191/T192 sm/conf 读 C 源后再决定 port/scope cut)
+  沿用 T192 「cross-coverage pin」(plan doc + 跨文件 pin test)
+  沿用 T194 「sub-PR 系列收官总表」(plan 中预先列 5 sub-PR)
+  
+  新「audit-first multi-file 系列」(新方法学):
+    当 issue 涉及多 C 源文件 + 数百 TC 时
+    先写一个完整 audit doc 列出每 TC family 决策 (port / scope cut / partial)
+    让后续 sub-PR 只需按 audit 执行而非每个 PR 重新决策
+    Audit doc 自身用 cross-pin test 锁住:
+      任何 section heading / sub-PR tag / TODO marker 改动都触发 fail
+  
+  新「Rust 现有覆盖率作为 scope cut 第一标准」:
+    迁移 C 测试前先 grep Rust 单测 + interop 看是否已覆盖等价语义
+    覆盖等价 -> scope cut
+    避免「为迁移而迁移」产生 100+ 重复 round-trip 测试
+  
+  新「C-only API gap 显式列表」:
+    plan doc 维护 out-of-scope C-only API 名单
+      UpRef / TmpDh / ECPointFormats / HelloVerifyReq / QuietShutdown / ClientHelloCb / Cookie / DhAutoSupport
+    pin test 防止列表被静默删除
+    让后人能区分:
+      「Rust 不实现」 (fundamental 决策)
+      vs
+      「Rust 未实现」 (待 follow-up)
+
+Recorded as DEV_LOG Phase T195.
