@@ -93,8 +93,8 @@ sub-PR, README + tests-pin documentation):
 | ✅ 46-A | ✅ T196 | `frame_config_interface` remainder (cipher metadata + reneg round-trip) | 10 (delivered) | merged (PR #276) |
 | ✅ 46-B | ✅ T197 | `frame_cert_interface` + `frame_cert_interface_2` | 11 (delivered) | merged (PR #277) |
 | ✅ 46-C | ✅ T198 | `frame_cm_interface` (largest, 92 fns) | 25 (delivered) | merged (PR #278) |
-| ✅ 46-D | ✅ T199 | `hlt_config_interface` + `hlt_cert_interface` + `hlt_cm_interface` | 10 (delivered) | this PR |
-| **closeout** | T200 | rollup table + #46 close | — | series summary |
+| ✅ 46-D | ✅ T199 | `hlt_config_interface` + `hlt_cert_interface` + `hlt_cm_interface` | 10 (delivered) | merged (PR #279) |
+| ✅ **closeout** | ✅ T200 | rollup table + #46 close | — | this PR |
 
 Per-source-file totals will likely land at **~70 net new tests** across
 4–5 sub-PRs (vs. C's 718 rows). The reduction reflects that the C tests
@@ -132,3 +132,53 @@ explicitly **not** in scope for #46:
 - `HITLS_CFG_SetClientHelloCb` (generic CH callback — deferred)
 - `HITLS_CFG_SetCookieGenCb` / `SetCookieVerifyCb` (internal DTLS path)
 - `HITLS_CFG_SetDhAutoSupport` (related to TmpDh)
+
+## 7. Series rollup (T200 closeout)
+
+The 5-sub-PR series is closed; this section is the final tally so the
+issue closer / future readers can see the whole shape at a glance.
+
+| Sub-PR | Phase | Source family | C scope | Delivered tests | Outcome |
+|--------|-------|---------------|--------:|----------------:|---------|
+| plan + 46-first | T195 | `frame_config_interface` first batch + 5 sub-PR plan | 28 fn / 151 rows | 11 | merged PR #275 |
+| 46-A | T196 | `frame_config_interface` cipher metadata + reneg round-trip | (remaining of 28 fn) | 10 | merged PR #276 |
+| 46-B | T197 | `frame_cert_interface` + `_2` | 25 + 6 fn / 152 rows | 11 (incl. 2 TLCP-gated) | merged PR #277 |
+| 46-C | T198 | `frame_cm_interface` builder set/get + callback install | 92 fn / 364 rows | 25 | merged PR #278 |
+| 46-D | T199 | `hlt_{config,cert,cm}_interface` metadata + accessor pin | 0 fn / 51 rows | 10 | merged PR #279 |
+| closeout | T200 | series rollup + #46 close | — | — | this PR |
+| **Totals** | | **151 fn / 718 rows** | | **67 tests** | **5/5 sub-PRs closed** |
+
+**Net result vs. C input**: 67 net new Rust tests against 151 unique C
+TC families / 718 parameterised .data rows. The reduction reflects the
+plan's core thesis (§2): the C test surface heavily parameterises
+state × version × cipher combinations that Rust's existing
+`test_config_builder_*` (40+ tests) and `tests/interop/tests/tlcp.rs`
+(11 handshake tests) already cover end-to-end. The 67 tests in
+`migrated_interface_tlcp_audit.rs` are the **delta** — semantics the
+C TCs assert that Rust did not previously pin.
+
+**Methodology lineage** (each sub-PR codified one or more patterns
+that the next reused):
+- T195 — audit-first multi-file series + Rust-coverage-as-scope-cut +
+  C-only API gap explicit list
+- T196 — same-file cumulative append + distinct same-name types
+  hidden-trap awareness
+- T197 — feature-gated test must run `--all-features` + Drop trait
+  variant requires `.as_ref()` + tuple vs struct variant grep-first
+- T198 — callback-install pin = None→Some discrete flip +
+  delivered-count-calibrates-plan + single-file batch ceiling
+  ~50-60 tests
+- T199 — function-pointer accessor pin + submodule path grep
+  `pub use` first
+
+**Follow-up TODOs left open** (3, all from T195):
+- `TODO(#46-version-bounds)` — builder should reject min > max
+- `TODO(#46-groups-empty)` — builder should reject empty
+  `supported_groups`
+- `TODO(#46-sigalg-empty)` — builder should reject empty
+  `signature_algorithms`
+
+These are product-side hardening tasks that surfaced during the
+audit; the corresponding tests in `migrated_interface_tlcp_audit.rs`
+pin the **current** lenient behavior so a future hardening lands as
+a deliberate change (test fails, gets updated to the new assertion).

@@ -191,13 +191,29 @@ fn audit_plan_docs_in_sync() {
         "plan doc missing sub-PR split section"
     );
 
-    // Sub-PR rows must remain in the table
-    for tag in &["T195", "46-A", "46-B", "46-C", "46-D"] {
+    // Sub-PR rows must remain in the table (closeout adds T200 + ✅ on all 5)
+    for tag in &[
+        "T195", "T196", "T197", "T198", "T199", "T200", "46-A", "46-B", "46-C", "46-D",
+    ] {
         assert!(
             plan.contains(tag),
             "plan doc missing sub-PR tag `{tag}` from the split table"
         );
     }
+
+    // The closeout rollup section (§7) must exist with the totals row
+    assert!(
+        plan.contains("## 7. Series rollup"),
+        "plan doc must keep §7 closeout rollup section"
+    );
+    assert!(
+        plan.contains("**67 tests**"),
+        "rollup table must report the closeout-time total (67 tests)"
+    );
+    assert!(
+        plan.contains("**5/5 sub-PRs closed**"),
+        "rollup table must report 5/5 sub-PRs closed"
+    );
 
     // Out-of-scope C-only APIs must stay documented
     for api in &[

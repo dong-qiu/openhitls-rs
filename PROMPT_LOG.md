@@ -14365,3 +14365,93 @@ Recorded as DEV_LOG Phase T198.
     T199 撞 E0432 codified
 
 Recorded as DEV_LOG Phase T199.
+
+### T200 — #46 series 收官 (#46 5 sub-PR 第 6 / 最终弹)
+
+> 针对Phase B，依次完成各个issue，每个issue完成并合入远程仓库main后再启动下一个issue。如果issue较大，可以拆成子任务。
+
+承接 T199 #46-D。
+关闭 #46 5-sub-PR 系列:
+  T195 plan + frame_config 首批
+  T196 frame_config 剩余
+  T197 frame_cert + _2
+  T198 frame_cm
+  T199 hlt_*
+
+系列净产:
+  Sub-PR    Phase  Source                                       C scope            Delivered   PR
+  ----------------------------------------------------------------------------------------------
+  plan+首批  T195   frame_config_interface 首批 + 5-sub-PR plan  28 fn / 151 行     11          #275
+  46-A      T196   frame_config_interface cipher metadata        (剩余 28 fn)       10          #276
+  46-B      T197   frame_cert_interface + _2                     31 fn / 152 行     11 (含 TLCP-gated 2)  #277
+  46-C      T198   frame_cm_interface builder + callback         92 fn / 364 行     25          #278
+  46-D      T199   hlt_{config,cert,cm}_interface                0 fn / 51 行       10          #279
+  closeout  T200   rollup + #46 close                            -                  -           本 PR
+  Totals                                                         151 fn / 718 行    67 tests    5/5
+
+67 tests / 151 fn / 718 rows 缩减比例反映 plan §2 论点:
+  C 测面大量参数化 state × version × cipher 矩阵
+  已被 Rust test_config_builder_* (40+) + tlcp.rs (11) 端到端覆盖
+  本系列产出的 67 个 audit pin 是 delta
+  即 C 断言但 Rust 此前未 pin 的语义
+
+改动 — 0 新 product / 0 新 test fn:
+  docs/issue-46-plan.md:
+    新增 §7 series rollup table (5 sub-PR + closeout 各一行)
+    Methodology lineage 列表 (每 sub-PR codified 的方法学一行)
+    3 个 follow-up TODO 锁 (#46-version-bounds / #46-groups-empty / #46-sigalg-empty)
+  audit_plan_docs_in_sync 加 5 个新断言:
+    T196-T200 标签
+    §7 section header
+    「**67 tests**」字面值
+    「**5/5 sub-PRs closed**」字面值
+    plan §4 表 5 行 closeout ✅
+
+为何无新 test fn:
+  类似 T194 #47-F 收官
+  但 #46 收官无新功能
+  -> 全部新断言折入既有 audit_plan_docs_in_sync 单测
+  -> 避免单测号膨胀
+
+累计 (终值):
+  T195 (11) + T196 (10) + T197 (11) + T198 (25) + T199 (10) = 67 tests = 5-sub-PR 总和
+
+验证:
+  cargo test -p hitls-tls --all-features --test migrated_interface_tlcp_audit  67/0
+  cargo test -p hitls-tls --test migrated_interface_tlcp_audit                 65/0
+  cargo test -p hitls-tls --tests                                              1114+65+6/0 零回归
+  cargo fmt --check + cargo clippy --workspace --all-features -D warnings      clean
+
+作用域:
+  plan doc +60 行 (§7 + lineage + TODO)
+  audit_plan_docs_in_sync +20 行 (5 个新断言)
+  0 product code / 0 新 test fn
+
+沿用 + 新方法学:
+  沿用 T195-T199 audit-first / same-file 累计追加 / Rust 现有覆盖率作 scope cut / callback-install pin / function-pointer accessor pin
+
+  新「series rollup 在 plan §7」 (codified):
+    5+ sub-PR 系列收官时在 plan doc 加 §7 rollup table
+    每 sub-PR 一行带 phase / scope / tests / PR# / outcome
+    + Methodology lineage (每 sub-PR codified 的方法学一行)
+    让 follow-up reader 看完整工作量分布与方法学演进
+    audit_plan_docs_in_sync pin 字面值锁住
+    后人删 plan 即 fail
+
+    对比 T194 用 README 表:
+      plan-doc 表更适合「issue-driven」系列 (一个 issue 多 sub-PR)
+      README 表更适合「subcommand-driven」系列 (一个用户面 feature 拆 sub-PR)
+
+  新「sub-PR 收官无新 test fn 折入既有 pin」:
+    避免单测 fn 膨胀
+    T194 单测 fn 4 个加新
+    vs T200 5 个新断言折入既有 audit_plan_docs_in_sync
+    audit pin 已是「cross-file consistency contract」自然承担 closeout 字面值
+
+  新「Methodology lineage 列表」:
+    每 sub-PR codified 的方法学一行写入 plan §7
+    让系列尾声有「方法学传承」可视化
+    后续相同 shape 的 issue 系列直接复用
+    降低重新 audit 成本
+
+Recorded as DEV_LOG Phase T200.
