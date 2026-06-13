@@ -611,3 +611,367 @@ fn crl_verifier_add_crl_then_enable_check() {
     // pin the API surface here.
     let _ = v;
 }
+
+// ===========================================================================
+// T198 / #46-C — frame_cm_interface (92 fn, largest of the series)
+//
+// Per the plan doc, `frame_cm_interface` exercises 92 `HITLS_*` runtime
+// state accessors on a constructed connection. The Rust port deliberately
+// folds most of that surface into `TlsConfig` builder fields (set-time)
+// or omits it (live `HITLS_Ctx` getters like `GetClientVersion`,
+// `GetCurrentCipher`, `GetState/StateString`, `GetRwstate`, `GetReadPending`,
+// `GetRandom`, `GetFinishVerifyData`, `Set/GetEndpoint`, `Set/GetSigalList`
+// at runtime, `UIO`, PSK `SetPskClient`/`SetPskFindSession`/`SetPskUseSession`
+// callbacks, `SetTmpDh`/`SetDhAutoSupport`, `SetEcPointFormats`, etc.) —
+// those are documented out-of-scope in §6 of the plan doc.
+//
+// What remains as **novel-worth-porting** is the substantial set of
+// builder set/get round-trips that are NOT already covered by the
+// `test_config_builder_*` suite in `crates/hitls-tls/src/config/mod.rs`:
+// `cipher_server_preference`, `flight_transmit_enable`, `quiet_shutdown`,
+// `session_id_context`, `security_level` / `security_cb`, `heartbeat_mode`,
+// `middlebox_compat`, `empty_records_limit`, `psk_identity_hint`,
+// and the family of callback installation hooks
+// (`msg_callback`, `info_callback`, `record_padding_callback`,
+// `cookie_gen_callback` + `cookie_verify_callback`, `client_hello_callback`,
+// `dh_tmp_callback`, `ticket_key_cb`). The existing `test_config_builder_*`
+// suite already pins `enable_encrypt_then_mac` / `send_fallback_scsv` /
+// `post_handshake_auth` / `record_size_limit` / `max_fragment_length` /
+// `ticket_key` / `max_early_data_size` / `psk_server_callback`, so those
+// rows are scope-cut here.
+// ===========================================================================
+
+use std::sync::Arc;
+
+use hitls_tls::config::{ClientHelloAction, ClientHelloInfo, TicketKeyResult};
+
+// ---------------------------------------------------------------------------
+// CM_SET_GET_CIPHERSERVERPREFERENCE_FUNC_TC001 — server cipher preference.
+// ---------------------------------------------------------------------------
+
+/// Mirrors C `UT_HITLS_CM_SET_GET_CIPHERSERVERPREFERENCE_FUNC_TC001`
+/// default-read row: the Rust default is `true` (server picks).
+#[test]
+fn cm_cipher_server_preference_default_on() {
+    let cfg = TlsConfig::builder().role(TlsRole::Server).build();
+    assert!(cfg.cipher_server_preference);
+}
+
+/// `cipher_server_preference(false)` round-trips.
+#[test]
+fn cm_cipher_server_preference_off_round_trip() {
+    let cfg = TlsConfig::builder()
+        .role(TlsRole::Server)
+        .cipher_server_preference(false)
+        .build();
+    assert!(!cfg.cipher_server_preference);
+}
+
+// ---------------------------------------------------------------------------
+// CM_SET_GET_FLIGHTTRANSMITSWITCH_FUNC_TC001 — handshake flight batching.
+// ---------------------------------------------------------------------------
+
+/// Mirrors C `UT_HITLS_CM_SET_GET_FLIGHTTRANSMITSWITCH_FUNC_TC001`:
+/// default `true` (flight batching on).
+#[test]
+fn cm_flight_transmit_enable_default_on() {
+    let cfg = TlsConfig::builder().role(TlsRole::Server).build();
+    assert!(cfg.flight_transmit_enable);
+}
+
+#[test]
+fn cm_flight_transmit_enable_off_round_trip() {
+    let cfg = TlsConfig::builder()
+        .role(TlsRole::Server)
+        .flight_transmit_enable(false)
+        .build();
+    assert!(!cfg.flight_transmit_enable);
+}
+
+// ---------------------------------------------------------------------------
+// CM_HITLS_SetQuietShutdown_HITLS_GetQuietShutdown_API_TC001
+// ---------------------------------------------------------------------------
+
+/// Mirrors C `UT_TLS_CM_HITLS_SetQuietShutdown_..._TC001`:
+/// quiet shutdown defaults off.
+#[test]
+fn cm_quiet_shutdown_default_off() {
+    let cfg = TlsConfig::builder().role(TlsRole::Client).build();
+    assert!(!cfg.quiet_shutdown);
+}
+
+#[test]
+fn cm_quiet_shutdown_on_round_trip() {
+    let cfg = TlsConfig::builder()
+        .role(TlsRole::Client)
+        .quiet_shutdown(true)
+        .build();
+    assert!(cfg.quiet_shutdown);
+}
+
+// ---------------------------------------------------------------------------
+// CM_SET_SESSIONIDCTX_API_TC001 — session-id context binding.
+// ---------------------------------------------------------------------------
+
+/// Mirrors C `UT_TLS_CM_SET_SESSIONIDCTX_API_TC001`: default is unset.
+#[test]
+fn cm_session_id_context_default_none() {
+    let cfg = TlsConfig::builder().role(TlsRole::Server).build();
+    assert!(cfg.session_id_context.is_none());
+}
+
+/// `session_id_context(bytes)` round-trips byte-exact.
+#[test]
+fn cm_session_id_context_round_trip() {
+    let ctx = b"openhitls-rs/cm".to_vec();
+    let cfg = TlsConfig::builder()
+        .role(TlsRole::Server)
+        .session_id_context(ctx.clone())
+        .build();
+    assert_eq!(cfg.session_id_context.as_deref(), Some(ctx.as_slice()));
+}
+
+// ---------------------------------------------------------------------------
+// CM_SECURITY_SECURITYLEVEL_API_TC001/002 + SECURITYCB_API_TC001/002.
+// ---------------------------------------------------------------------------
+
+/// Mirrors C `UT_TLS_CM_SECURITY_SECURITYLEVEL_API_TC001`:
+/// the Rust default security level is 1 (matches OpenSSL's level-1
+/// equivalent — RFC 7525 minimum).
+#[test]
+fn cm_security_level_default_is_1() {
+    let cfg = TlsConfig::builder().role(TlsRole::Client).build();
+    assert_eq!(cfg.security_level, 1);
+}
+
+/// `security_level(N)` round-trips.
+#[test]
+fn cm_security_level_round_trip() {
+    let cfg = TlsConfig::builder()
+        .role(TlsRole::Client)
+        .security_level(3)
+        .build();
+    assert_eq!(cfg.security_level, 3);
+}
+
+/// Mirrors C `UT_TLS_CM_SECURITY_SECURITYCB_API_TC001`: a custom
+/// security callback can be installed; the `Some/None` discriminant
+/// flips as advertised.
+#[test]
+fn cm_security_cb_can_be_installed() {
+    let cb: hitls_tls::config::SecurityCallback =
+        Arc::new(|_op: u32, _level: u32, _id: u16| -> bool { true });
+    let cfg = TlsConfig::builder()
+        .role(TlsRole::Client)
+        .security_cb(cb)
+        .build();
+    assert!(cfg.security_cb.is_some());
+}
+
+// ---------------------------------------------------------------------------
+// CM_HEARTBEAT — heartbeat mode (RFC 6520).
+// ---------------------------------------------------------------------------
+
+/// Heartbeat default is 0 (disabled). Rust deliberately stubs the
+/// heartbeat extension; the field is a config-time pin only.
+#[test]
+fn cm_heartbeat_mode_default_off() {
+    let cfg = TlsConfig::builder().role(TlsRole::Client).build();
+    assert_eq!(cfg.heartbeat_mode, 0);
+}
+
+#[test]
+fn cm_heartbeat_mode_round_trip() {
+    let cfg = TlsConfig::builder()
+        .role(TlsRole::Client)
+        .heartbeat_mode(2)
+        .build();
+    assert_eq!(cfg.heartbeat_mode, 2);
+}
+
+// ---------------------------------------------------------------------------
+// CM_MIDDLEBOX_COMPAT — TLS 1.3 middlebox-compatibility mode.
+// ---------------------------------------------------------------------------
+
+/// RFC 8446 §D.4 middlebox-compatibility mode defaults on.
+#[test]
+fn cm_middlebox_compat_default_on() {
+    let cfg = TlsConfig::builder().role(TlsRole::Client).build();
+    assert!(cfg.middlebox_compat);
+}
+
+#[test]
+fn cm_middlebox_compat_off_round_trip() {
+    let cfg = TlsConfig::builder()
+        .role(TlsRole::Client)
+        .middlebox_compat(false)
+        .build();
+    assert!(!cfg.middlebox_compat);
+}
+
+// ---------------------------------------------------------------------------
+// CM_EMPTY_RECORDS_LIMIT — empty-record DoS guard.
+// ---------------------------------------------------------------------------
+
+/// Mirrors C `UT_TLS_CM_EMPTY_RECORDS_LIMIT_FUNC_TC001`:
+/// default cap is 32 consecutive empty records before alerting.
+#[test]
+fn cm_empty_records_limit_default_is_32() {
+    let cfg = TlsConfig::builder().role(TlsRole::Client).build();
+    assert_eq!(cfg.empty_records_limit, 32);
+}
+
+#[test]
+fn cm_empty_records_limit_round_trip() {
+    let cfg = TlsConfig::builder()
+        .role(TlsRole::Client)
+        .empty_records_limit(8)
+        .build();
+    assert_eq!(cfg.empty_records_limit, 8);
+}
+
+// ---------------------------------------------------------------------------
+// CM_SetPskIdentityHint_API_TC001 — server PSK identity hint.
+// ---------------------------------------------------------------------------
+
+/// Mirrors C `UT_TLS_CM_SetPskIdentityHint_API_TC001`: round-trip
+/// the server-advertised identity hint string.
+#[test]
+fn cm_psk_identity_hint_round_trip() {
+    let hint = b"hint-for-client".to_vec();
+    let cfg = TlsConfig::builder()
+        .role(TlsRole::Server)
+        .psk_identity_hint(hint.clone())
+        .build();
+    assert_eq!(cfg.psk_identity_hint.as_deref(), Some(hint.as_slice()));
+}
+
+// ---------------------------------------------------------------------------
+// CM_SetMsgCb_API_TC001 / SetMsgCb_FUNC_TC001 / InfoCb_API_TC001.
+// ---------------------------------------------------------------------------
+
+/// Mirrors C `UT_TLS_CM_SetMsgCb_API_TC001`: the message-callback hook
+/// can be installed. We can't drive a handshake here, so we pin only
+/// the install-time state flip (None → Some).
+#[test]
+fn cm_msg_callback_can_be_installed() {
+    let cb: hitls_tls::config::MsgCallback =
+        Arc::new(|_write: bool, _version: u16, _content_type: u8, _data: &[u8]| {});
+    let cfg = TlsConfig::builder()
+        .role(TlsRole::Client)
+        .msg_callback(cb)
+        .build();
+    assert!(cfg.msg_callback.is_some());
+}
+
+/// Mirrors C `UT_TLS_CM_InfoCb_API_TC001`: the info-callback hook.
+#[test]
+fn cm_info_callback_can_be_installed() {
+    let cb: hitls_tls::config::InfoCallback = Arc::new(|_where: i32, _ret: i32| {});
+    let cfg = TlsConfig::builder()
+        .role(TlsRole::Client)
+        .info_callback(cb)
+        .build();
+    assert!(cfg.info_callback.is_some());
+}
+
+// ---------------------------------------------------------------------------
+// CM_SETRECORDPADDINGCB_API_TC001 — record padding hook.
+// ---------------------------------------------------------------------------
+
+/// Mirrors C `UT_TLS_CM_SETRECORDPADDINGCB_API_TC001`. The Rust
+/// callback signature collapses `RecordPaddingCb` + `RecordPaddingCbArg`
+/// into a single closure (`Fn(u8, usize) -> usize`).
+#[test]
+fn cm_record_padding_callback_can_be_installed() {
+    let cb: hitls_tls::config::RecordPaddingCallback =
+        Arc::new(|_content_type: u8, _len: usize| -> usize { 0 });
+    let cfg = TlsConfig::builder()
+        .role(TlsRole::Server)
+        .record_padding_callback(cb)
+        .build();
+    assert!(cfg.record_padding_callback.is_some());
+}
+
+// ---------------------------------------------------------------------------
+// CM cookie-callback duo — DTLS HelloVerifyRequest path.
+// ---------------------------------------------------------------------------
+
+/// Mirrors C `UT_TLS_CFG_SET_COOKIEGENERATECB_API_TC001` +
+/// `_COOKIEVERIFYCB_API_TC001`: both callbacks plug into the same DTLS
+/// cookie roundtrip and are configured together in practice.
+#[test]
+fn cm_cookie_callbacks_can_be_installed() {
+    let gen: hitls_tls::config::CookieGenCallback =
+        Arc::new(|peer: &[u8]| -> Vec<u8> { peer.to_vec() });
+    let verify: hitls_tls::config::CookieVerifyCallback =
+        Arc::new(|_peer: &[u8], _cookie: &[u8]| -> bool { true });
+    let cfg = TlsConfig::builder()
+        .role(TlsRole::Server)
+        .cookie_gen_callback(gen)
+        .cookie_verify_callback(verify)
+        .build();
+    assert!(cfg.cookie_gen_callback.is_some());
+    assert!(cfg.cookie_verify_callback.is_some());
+}
+
+// ---------------------------------------------------------------------------
+// CM_SET_CLIENTHELLOCB — generic ClientHello observation hook.
+// ---------------------------------------------------------------------------
+
+/// Mirrors C `UT_TLS_CFG_SET_CLIENTHELLOCB_API_TC001`: install a
+/// ClientHello callback that always returns `Success`.
+#[test]
+fn cm_client_hello_callback_can_be_installed() {
+    let cb: hitls_tls::config::ClientHelloCallback =
+        Arc::new(|_info: &ClientHelloInfo| -> ClientHelloAction { ClientHelloAction::Success });
+    let cfg = TlsConfig::builder()
+        .role(TlsRole::Server)
+        .client_hello_callback(cb)
+        .build();
+    assert!(cfg.client_hello_callback.is_some());
+}
+
+// ---------------------------------------------------------------------------
+// CM_HITLS_SetTmpDh_API_TC001 — DH parameter callback (compat surface).
+// ---------------------------------------------------------------------------
+
+/// The Rust port omits static `HITLS_CFG_SetTmpDh` (FFDHE groups only),
+/// but exposes a callback variant for runtime DH parameter selection
+/// (TLS 1.2 DHE suites). Mirrors the install-time half of
+/// `UT_TLS_CM_HITLS_SetTmpDh_API_TC001`.
+#[test]
+fn cm_dh_tmp_callback_can_be_installed() {
+    let cb: hitls_tls::config::DhTmpCallback =
+        Arc::new(|_is_export: bool, _bits: u32| -> Option<Vec<u8>> { None });
+    let cfg = TlsConfig::builder()
+        .role(TlsRole::Server)
+        .dh_tmp_callback(cb)
+        .build();
+    assert!(cfg.dh_tmp_callback.is_some());
+}
+
+// ---------------------------------------------------------------------------
+// CM_GET_SET_SESSIONTICKETKEY_API_TC001 — ticket-key rotation callback.
+// ---------------------------------------------------------------------------
+
+/// Mirrors C `UT_TLS_CM_GET_SET_SESSIONTICKETKEY_API_TC001`. The plain
+/// `ticket_key(...)` setter is already pinned by
+/// `test_config_builder_ticket_key`; this test covers the **callback**
+/// variant used for ticket-key rotation (RFC 5077 §4 key rollover).
+#[test]
+fn cm_ticket_key_cb_can_be_installed() {
+    let cb: hitls_tls::config::TicketKeyCallback =
+        Arc::new(|_name: &[u8], _is_enc: bool| -> Option<TicketKeyResult> {
+            Some(TicketKeyResult {
+                key_name: [0; 16],
+                key: vec![0u8; 32],
+                iv: vec![0u8; 16],
+            })
+        });
+    let cfg = TlsConfig::builder()
+        .role(TlsRole::Server)
+        .ticket_key_cb(cb)
+        .build();
+    assert!(cfg.ticket_key_cb.is_some());
+}
