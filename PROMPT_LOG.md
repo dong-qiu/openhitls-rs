@@ -14229,3 +14229,69 @@ Recorded as DEV_LOG Phase T196.
     codified
 
 Recorded as DEV_LOG Phase T197.
+
+### T198 — #46-C frame_cm_interface 迁移 (#46 5 sub-PR 第 4 弹)
+
+> 针对Phase B，依次完成各个issue，每个issue完成并合入远程仓库main后再启动下一个issue。如果issue较大，可以拆成子任务。
+
+承接 T197 #46-B。
+按 audit doc §4 sub-PR 表执行第 4 弹:
+  frame_cm_interface 92 fn / 364 .data 行 — interface_tlcp 系列单文件最大
+  C 测 HITLS_* runtime accessors on a constructed connection
+  Rust 把 95% 折叠进 TlsConfig builder set-time
+  + 移除 C-only ctx getter (GetClientVersion/CurrentCipher/State/Rwstate/Random 等)
+  + builder field 中 test_config_builder_* 已覆盖 ETM/fallback_scsv/PHA/record_size_limit/MFL/ticket_key/early_data/psk_server_callback
+
+真正缺口: 13 个 builder field 未被现有单测覆盖 -> 25 tests novel migration
+
+改动 — migrated_interface_tlcp_audit.rs 追加 25 tests:
+  cipher_server_preference 默认 on + off (2)
+  flight_transmit_enable 默认 on + off (2)
+  quiet_shutdown 默认 off + on (2)
+  session_id_context 默认 None + bytes (2)
+  security_level 默认 1 + round-trip + security_cb 安装 (3)
+  heartbeat_mode 默认 0 + round-trip (2)
+  middlebox_compat 默认 on (RFC 8446 §D.4) + off (2)
+  empty_records_limit 默认 32 + round-trip (2)
+  psk_identity_hint round-trip (1)
+  回调安装 pin: msg/info/record_padding/cookie_gen+verify/client_hello/dh_tmp/ticket_key_cb (7)
+
+累计:
+  T195 (11) + T196 (10) + T197 (11) + T198 (25) = 57 tests
+  默认 55 + TLCP-gated 2
+
+验证:
+  cargo test -p hitls-tls --all-features --test migrated_interface_tlcp_audit  57/0 (含 TLCP-gated 2)
+  cargo test -p hitls-tls --test migrated_interface_tlcp_audit                 55/0 默认 feature
+  cargo test -p hitls-tls --tests                                              1114+55+6/0 零回归
+  cargo fmt --check                                                            clean
+  cargo clippy --workspace --all-features --all-targets -D warnings            clean
+
+作用域:
+  同文件追加 ~350 行 (25 tests + 1 use 段)
+  docs/issue-46-plan.md §4 表 T198 ✅ + T197 delivered 计数 11
+  0 product code
+
+沿用 + 新方法学:
+  沿用 T195/T196/T197 audit-first / same-file 累计追加 / Rust 现有覆盖率作 scope cut 第一标准 / feature-gated test 必跑 --all-features
+
+  新「callback-install pin = None→Some 离散 flip」 (codified):
+    无法在单测里驱动 handshake 触发 callback 时 (需 TcpStream + 完整握手循环)
+    仅 pin 安装 side 的 Option discriminant
+    后人删 builder fn -> 编译错
+    改 Option 内部 -> 测试仍过但与生产语义无关, 文档化局限性接受
+    比「完全不测 callback 安装」安全, 比「装 + 跑握手验证 callback 是否被调用」成本低
+
+  新「sub-PR 实际 delivered count 校准 plan」:
+    plan 初估 25 实际 25 对齐
+    但 T197 估 9 实际 11
+    提醒 audit 估算时先 grep Rust 现状再列上限
+
+  新「single-file batch 系列累计上限 ~50-60 tests 健康」:
+    T195-T198 在 1 个文件累 57 tests 仍可读
+    (mod doc + 4 个 batch 分段标题清晰)
+    接近 R1 file-split threshold
+    T199 hlt_* 若再 ~10 同文件总 67 仍在阈值内
+    超过则 split 出 migrated_interface_tlcp_hlt.rs
+
+Recorded as DEV_LOG Phase T198.
