@@ -14455,3 +14455,77 @@ Recorded as DEV_LOG Phase T199.
     降低重新 audit 成本
 
 Recorded as DEV_LOG Phase T200.
+
+### T201 — #59 DTLCP consistency 12 TC families 迁移 (single PR)
+
+> 针对Phase B，依次完成各个issue，每个issue完成并合入远程仓库main后再启动下一个issue。如果issue较大，可以拆成子任务。
+
+承接 #46 series 收官 (T200), 转 Phase B 下一 issue: #59 DTLCP consistency。
+C 源 consistency/dtlcp/:
+  12 unique fn + 13 .data + 6 hlt .data 行
+  issue "43 TCs" 计 .c 行未 dedup, 唯一 fn 数 12
+
+核心判断:
+  远比 #46 简单 (12 vs 151 fn) -> 单 PR 而非 audit-first 多 sub-PR
+  模板存在: tests/interop/tests/dtls_resilience.rs (8 个 DTLS 1.2 韧性测试)
+  直接 swap dtls12_handshake_in_memory -> dtlcp_handshake_in_memory
+        make_dtls12_configs -> make_dtlcp_configs(CipherSuite::ECDHE_SM4_GCM_SM3)
+  Rust 现有 DTLCP 覆盖:
+    connection_dtlcp.rs 15 单测 (含 anti_replay)
+    tlcp.rs 5 个 DTLCP interop
+    async_io.rs 3 个 async DTLCP
+
+12 TC family decision matrix — 9 port + 3 scope-cut:
+  APPDATA_TC002 (replay) — scope-cut, test_dtlcp_anti_replay_rejection 已覆盖
+  ECPOINT_TC001 — scope-cut, #46 plan §6 已列 SetECPointFormats out-of-scope (cross-coverage pin)
+  FINISH_TC001 — 折入 handshake_completes_appdata_bidirectional
+
+改动 — 新 tests/interop/tests/dtlcp_consistency.rs (~285 行 / 10 tests + module doc 含 decision matrix table):
+  handshake_completes_appdata_bidirectional         (RFC6347_TC001 + FINISH_TC001)
+  finish_no_cookie_path                              (FINISH_TC002)
+  finish_cookie_path                                 (FINISH_TC003)
+  disorder_out_of_order_within_window                (DISORDER_TC001 mirrors dtls_resilience)
+  disorder_interleaved_bidirectional                 (DISORDER_TC002 mirrors dtls_resilience)
+  appdata_multi_message_byte_exact                   (APPDATA_TC001 — empty/single-byte/1-KiB)
+  client_hello_garbage_post_handshake_rejected       (CLIENT_HELLO_TC001 — 32-byte 垃圾 record AEAD reject)
+  corrupted_ciphertext_post_ccs_rejected             (RECV_ALERT_AFTER_CCS_TC001 — bit-flip + AEAD tag fail)
+  truncated_record_rejected                          (EXTENSION_MISS_TC001 — 5-byte header only)
+  ecpoint_uncompressed_only_documented               (ECPOINT_TC001 cross-coverage pin to #46 plan §6)
+
+踩坑:
+  初版加 #![cfg(feature = "tlcp")] 但 tests/interop Cargo.toml 无该 feature
+  RUSTFLAGS=-D warnings -> unexpected_cfgs
+  fix: 移除 #![cfg] (make_dtlcp_configs 在 integration lib 无 gating, 任何 build 下可用)
+
+验证:
+  cargo test -p hitls-integration-tests --test dtlcp_consistency --all-features  10/0
+  cargo test -p hitls-integration-tests --all-features                           20 测试文件 350+/0 零回归
+  cargo fmt --check + cargo clippy + cargo doc --no-deps --all-features          clean
+
+作用域:
+  1 个新测试文件 285 行
+  0 product code / 0 plan doc / 0 README
+
+沿用 + 新方法学:
+  沿用 #46 series codified:
+    audit-first (用 module-doc 内联决策矩阵代替独立 plan doc)
+    Rust 现有覆盖率作 scope cut 第一标准
+    cross-coverage pin
+
+  新「Rust 现有 DTLS 韧性测试模板复用」 (codified):
+    并行协议韧性测试存在时直接 swap connection + config factory
+    测试体几乎 1:1 复用
+    T201 节省 ~150 行 vs 从零写
+
+  新「test-only feature flag 不存在时不加 #![cfg]」:
+    integration test 文件加 feature gate 前
+    先 grep Cargo.toml [features] 段
+    不存在时移除
+    T201 撞 unexpected_cfgs codified
+
+  新「跨 issue scope-cut 用 cross-coverage pin」:
+    #59 RFC8422_ECPOINT scope-cut 锁 #46 plan doc 列字 (HITLS_CFG_SetECPointFormats)
+    跨 issue 决策一致性自动维护
+    避免「#59 写完 #46 plan 改了 ECPOINT 决策遗忘 #59 跟新」
+
+Recorded as DEV_LOG Phase T201.
