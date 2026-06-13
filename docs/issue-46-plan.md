@@ -90,8 +90,8 @@ sub-PR, README + tests-pin documentation):
 | # | T-phase | Source file | Approx. novel test count | Approach |
 |---|---------|-------------|-------------------------:|----------|
 | ✅ plan | ✅ T195 | (this doc) + 5–8 representative frame_config negatives | 11 (delivered) | merged (PR #275) |
-| ✅ 46-A | ✅ T196 | `frame_config_interface` remainder (cipher metadata + reneg round-trip) | 10 (delivered) | this PR |
-| 46-B | T197 | `frame_cert_interface` + `frame_cert_interface_2` | ~15 | Cert chain negative APIs |
+| ✅ 46-A | ✅ T196 | `frame_config_interface` remainder (cipher metadata + reneg round-trip) | 10 (delivered) | merged (PR #276) |
+| ✅ 46-B | ✅ T197 | `frame_cert_interface` + `frame_cert_interface_2` | 9 (delivered) | this PR |
 | 46-C | T198 | `frame_cm_interface` (largest, 92 fns) | ~25 | Cert manager API negatives |
 | 46-D | T199 | `hlt_config_interface` + `hlt_cert_interface` + `hlt_cm_interface` | ~10 | Handshake-level interop |
 | **closeout** | T200 | rollup table + #46 close | — | series summary |
