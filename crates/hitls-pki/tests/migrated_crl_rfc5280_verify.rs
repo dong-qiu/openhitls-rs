@@ -1184,10 +1184,10 @@ fn tc_tc001_r2_r4_x509_crl_verify_revocation_flag_gating() {
 // ---------------------------------------------------------------------------
 // T202 / #45 close — strict-version + ordering gap pins.
 //
-// Last gap from the #45 acceptance criteria: invalid CRL version + mis-ordered
+// Last gap from the #45 acceptance criteria: invalid CRL version + misordered
 // extensions. RFC 5280 §5.1.1: "When present, version SHALL be v2 (i.e.,
 // INTEGER 1)." Anything else is illegal. RFC 5280 §5.2 does NOT prescribe an
-// extension order, so the "mis-ordered extensions" criterion item collapses
+// extension order, so the "misordered extensions" criterion item collapses
 // to a documentation pin (no parse-time check is required).
 // ---------------------------------------------------------------------------
 

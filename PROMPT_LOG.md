@@ -14537,7 +14537,7 @@ Recorded as DEV_LOG Phase T201.
 承接 T187 #45 部分覆盖 (39/53 ~74%)。
 补 acceptance criteria 中:
   invalid CRL version
-  mis-ordered extensions
+  misordered extensions
 
 核心判断:
   T187 已覆盖 dates + sig-tamper + DN-tamper + AKI gap + flag gating + revocation gating
