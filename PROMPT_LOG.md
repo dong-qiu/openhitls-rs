@@ -14592,3 +14592,63 @@ Recorded as DEV_LOG Phase T201.
     避免日后误加 ordering check
 
 Recorded as DEV_LOG Phase T202.
+
+### T203 — #44 CSR 收官最终弹 (#44 关闭)
+
+> 针对Phase B，依次完成各个issue，每个issue完成并合入远程仓库main后再启动下一个issue。如果issue较大，可以拆成子任务。
+
+承接 T188 #44 部分覆盖 (11 tests)。
+补 acceptance criteria 中:
+  missing-subject
+  bad-attr-OID
+
+核心判断:
+  两类是 RFC 2986 lenient-acceptance pin 而非 parse-rejection
+    missing-subject: RFC 2986 §4.1 + X.501 §9.3 显式允许 empty RDNSequence
+    bad-attr-OID:    RFC 2986 §4.1 attributes [0] IMPLICIT SET OF Attribute 是 extensible, MUST 容忍未知 OID
+
+改动 — migrated_csr_negative_parse.rs 追加 2 tests (+93 行):
+  csr_empty_subject_dn_accepted_pin:
+    build CSR with DistinguishedName { entries: vec![] }
+    parse -> 验 subject.entries.is_empty + signature 仍 verify
+  csr_unknown_extension_oid_accepted_pin:
+    build CSR with add_extension(bogus_oid 1.3.6.1.4.1.99999.42, OCTET STRING "hi!")
+    parse -> 验 attributes 含 bogus_oid 字节级 round-trip + signature 仍 verify
+
+关键设计:
+  两 test 均是 lenient pin = signature verifies + 字段 round-trip
+  非 PkiError 断言
+  后人加 strict mode 拒绝时 测试 fail 提醒 deliberate 改动而非误退化
+
+验证:
+  cargo test -p hitls-pki --test migrated_csr_negative_parse --all-features  13/0 (11 -> 13)
+  cargo test -p hitls-pki --tests                                            458+9+32+13+1073/0 全 pass
+  cargo fmt + cargo clippy + cargo doc --no-deps --all-features              clean
+
+作用域:
+  1 个已有测试文件 +93 行
+  0 product code
+  0 新 TODO (两 case 是 RFC compliant)
+
+沿用 + 新方法学:
+  沿用 T188 「build valid + byte patch」+「mod-doc decision matrix」+「Rust 现有覆盖率作 scope cut 第一标准」
+
+  新「lenient acceptance pin = positive round-trip 而非 negative error」 (codified):
+    当 RFC 显式允许某行为时
+    acceptance category 是 round-trip 一致性 pin 而非错误断言
+    后人加 strict mode 时 fail 自然提醒决策
+
+  新「issue acceptance category 不全是 negative」:
+    #44 issue 文字「bad-sig / missing-subject / bad-attr-OID / unsupported-alg」
+    字面看似全 negative
+    实际 missing-subject + bad-attr-OID 均 RFC compliant lenient
+    解读 issue 前先查 RFC 决定 pin 形式
+    避免「acceptance 字面 negative -> 强行写 expect_err」误判
+
+  新「sub-feature category 后期补齐用 head-section 注释定位」:
+    测试文件加 T203 / #44 close 子标题块
+    mod-doc 决策矩阵 table 不改 (已锁)
+    通过 section banner 自描述新增 batch
+    避免反复 rewrite mod doc
+
+Recorded as DEV_LOG Phase T203.
