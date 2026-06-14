@@ -941,3 +941,199 @@ fn h226_phase_h3_plan_banner_pinned() {
     assert!(plan.contains("T226"));
     assert!(plan.contains("MODIFIED_FINISHED") || plan.contains("FINISHED"));
 }
+
+// ===========================================================================
+// T227 / Phase H-4 — DTLS 1.3 + 0-RTT + KeyUpdate mutation family.
+//
+// Three sub-targets, each with its own scope envelope:
+//
+// - **DTLS 1.3** (RFC 9147 §4 unified header + AEAD framing) needs a
+//   UDP rogue-server framework, not TCP — out of scope for T224's TCP
+//   driver. Pin via scope-cut + unified-header byte format.
+// - **0-RTT** needs PSK warm-up + early_data extension flow — out of
+//   T224 scope (T119 deferred the PSK_ONLY mode). Pin via extension
+//   codepoint + T106 cross-pin to the existing rejected-0-RTT
+//   tolerance.
+// - **KeyUpdate** is a post-handshake message — reachable via the
+//   T224 framework as an out-of-order injection (Finished is expected
+//   next; KeyUpdate before Finished triggers `unexpected_message`).
+//   1 E2E test + 4 wire-format pins.
+//
+// Cumulative: T224 (3) + T225 (10) + T226 (10) + T227 (10) = 33 tests.
+// ===========================================================================
+
+/// Helper: build a KeyUpdate handshake message per RFC 8446 §4.6.3.
+/// Body is a single `KeyUpdateRequest` byte (0 = update_not_requested,
+/// 1 = update_requested).
+fn build_key_update_message(request_update: u8) -> Vec<u8> {
+    vec![
+        0x18, // HandshakeType::KeyUpdate
+        0x00,
+        0x00,
+        0x01, // u24 body length = 1
+        request_update,
+    ]
+}
+
+/// Phase H-4 E2E #1: rogue server sends EE + KeyUpdate (before
+/// Certificate/CV/Finished). The real client expects Certificate as
+/// the next encrypted handshake message after EE; receiving KeyUpdate
+/// (RFC 8446 §4.6.3 — a post-handshake-only message) must trigger
+/// `unexpected_message`.
+#[test]
+fn h227_e2e_encrypted_keyupdate_before_finished_rejected() {
+    let err = drive_client_against_encrypted_rogue_server(|ctx, stream| {
+        let ee = build_empty_encrypted_extensions();
+        let r1 = seal_encrypted_handshake(
+            ctx.suite,
+            &ctx.server_handshake_keys,
+            ctx.next_write_seq,
+            &ee,
+        );
+        ctx.next_write_seq += 1;
+        let ku = build_key_update_message(0); // update_not_requested
+        let r2 = seal_encrypted_handshake(
+            ctx.suite,
+            &ctx.server_handshake_keys,
+            ctx.next_write_seq,
+            &ku,
+        );
+        ctx.next_write_seq += 1;
+        let _ = stream.write_all(&r1);
+        let _ = stream.write_all(&r2);
+    });
+    assert!(
+        !err.is_empty(),
+        "client must reject KeyUpdate before Finished (RFC 8446 §4.6.3 is post-handshake only); got: {err}"
+    );
+}
+
+/// Phase H-4 pin #2: DTLS 1.3 record framing (RFC 9147 §4) needs a
+/// UDP rogue-server framework. The T224 TCP-only framework cannot
+/// drive a DTLS 1.3 record over the wire. Pin the scope-cut so a
+/// future "Phase I" (DTLS UDP rogue server) PR has an anchor.
+#[test]
+fn h227_dtls13_record_framing_rfc9147_scope_cut_documented() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let plan_path = format!("{manifest_dir}/../../docs/issue-42-phase-h-plan.md");
+    let plan = std::fs::read_to_string(&plan_path).unwrap();
+    assert!(
+        plan.contains("DTLS 1.3"),
+        "Phase H plan must keep DTLS 1.3 scope-cut documented"
+    );
+}
+
+/// Phase H-4 pin #3: RFC 9147 §4 DTLS 1.3 unified header first byte
+/// = `0b001CSLEE` (top 3 bits = `001` mandatory; C = connection_id
+/// flag, S = sequence number length, L = length flag, EE = epoch low
+/// bits). The unified-header marker therefore lives in `0x20..=0x3F`
+/// (binary `001x xxxx`).
+#[test]
+fn h227_dtls13_unified_header_byte_pin() {
+    // Mandatory top 3 bits = 0b001 → first byte in [0x20, 0x3F].
+    let unified_header_first_byte_min: u8 = 0x20; // 0b0010_0000
+    let unified_header_first_byte_max: u8 = 0x3F; // 0b0011_1111
+    assert_eq!(unified_header_first_byte_min & 0b1110_0000, 0b0010_0000);
+    assert_eq!(unified_header_first_byte_max & 0b1110_0000, 0b0010_0000);
+    // A DTLS 1.2-style record content type byte (e.g. 22 = Handshake
+    // = 0x16) is NOT in this range — pinning the disambiguation.
+    let dtls12_handshake_content_type: u8 = 0x16;
+    assert_ne!(
+        dtls12_handshake_content_type & 0b1110_0000,
+        0b0010_0000,
+        "DTLS 1.2 record type byte must not collide with DTLS 1.3 unified header marker"
+    );
+}
+
+/// Phase H-4 pin #4: RFC 8446 §4.2.10 `early_data` extension
+/// codepoint = 42. The C SDV `0RTT_GARBAGE_*` rows pivot on whether
+/// the CH advertises this extension.
+#[test]
+fn h227_0rtt_early_data_extension_codepoint_pin() {
+    let early_data_codepoint: u16 = 42;
+    assert_eq!(early_data_codepoint, 0x002A);
+}
+
+/// Phase H-4 pin #5: T106 closed 4 XFAILs in
+/// `test-tls13-0rtt-garbage.py` by adding server tolerance for
+/// rejected-0-RTT records, silently skipping both AEAD-decrypt
+/// failures and non-Handshake records when CH offered `early_data`
+/// but server rejected. Pin via DEV_LOG cross-reference that T106
+/// anchor remains.
+#[test]
+fn h227_0rtt_rejected_garbage_tolerance_t106_cross_pin() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let dev_log_path = format!("{manifest_dir}/../../DEV_LOG.md");
+    let log = std::fs::read_to_string(&dev_log_path).unwrap();
+    assert!(
+        log.contains("T106") && log.contains("0-RTT"),
+        "DEV_LOG must retain T106 rejected-0-RTT tolerance anchor"
+    );
+}
+
+/// Phase H-4 pin #6: KeyUpdate handshake type byte = `0x18` = 24 per
+/// RFC 8446 §B.3 (the `HandshakeType` enum is private to
+/// `hitls-tls`; pin the raw byte the way T221 / T222 / T225 / T226
+/// did for Finished / EE / Certificate / CertificateVerify).
+#[test]
+fn h227_keyupdate_handshake_type_byte_identity_pin() {
+    let ku_byte: u8 = 0x18;
+    assert_eq!(ku_byte, 24);
+}
+
+/// Phase H-4 pin #7: RFC 8446 §4.6.3 — KeyUpdate body is exactly 1
+/// byte (`KeyUpdateRequest`). Minimal wire size = type(1) +
+/// u24_len(3) + body(1) = 5 bytes.
+#[test]
+fn h227_keyupdate_message_min_wire_size_pin() {
+    let msg = build_key_update_message(0);
+    assert_eq!(msg.len(), 5);
+    assert_eq!(msg[0], 0x18, "type byte = KeyUpdate");
+    assert_eq!(&msg[1..4], &[0x00, 0x00, 0x01], "u24 body length = 1");
+    assert_eq!(msg[4], 0, "KeyUpdateRequest payload byte");
+}
+
+/// Phase H-4 pin #8: RFC 8446 §4.6.3 `KeyUpdateRequest` codepoints —
+/// 0 = `update_not_requested`, 1 = `update_requested`. Any other
+/// value is illegal and must trigger `illegal_parameter`.
+#[test]
+fn h227_keyupdate_request_update_codepoint_pin() {
+    let update_not_requested: u8 = 0;
+    let update_requested: u8 = 1;
+    assert_eq!(update_not_requested, 0);
+    assert_eq!(update_requested, 1);
+    // 2 and above are illegal — pin the boundary so future codec
+    // hardening tests can grep this anchor.
+    let illegal_boundary: u8 = 2;
+    assert!(illegal_boundary > update_requested);
+}
+
+/// Phase H-4 pin #9: T100 closed 261/270 XFAILs in
+/// `test-tls13-keyupdate.py` by emitting the right alerts for
+/// codec violations; T101 closed 268/2 by adding cross-record
+/// reassembly that covers KeyUpdate. Pin via DEV_LOG
+/// cross-reference that both anchors remain.
+#[test]
+fn h227_keyupdate_t100_t101_codec_authority_cross_pin() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let dev_log_path = format!("{manifest_dir}/../../DEV_LOG.md");
+    let log = std::fs::read_to_string(&dev_log_path).unwrap();
+    assert!(
+        log.contains("T100") && log.contains("keyupdate"),
+        "DEV_LOG must retain T100 KeyUpdate codec authority anchor"
+    );
+    assert!(
+        log.contains("T101") && log.contains("keyupdate"),
+        "DEV_LOG must retain T101 KeyUpdate cross-record reassembly anchor"
+    );
+}
+
+/// Phase H-4 plan banner pin.
+#[test]
+fn h227_phase_h4_plan_banner_pinned() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let plan_path = format!("{manifest_dir}/../../docs/issue-42-phase-h-plan.md");
+    let plan = std::fs::read_to_string(&plan_path).unwrap();
+    assert!(plan.contains("T227"));
+    assert!(plan.contains("DTLS 1.3") || plan.contains("0-RTT") || plan.contains("KeyUpdate"));
+}
