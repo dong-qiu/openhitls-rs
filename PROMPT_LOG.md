@@ -15031,3 +15031,91 @@ Phase C 总成果:
     减少重新 audit 成本
 
 Recorded as DEV_LOG Phase T208.
+
+### T209 — Phase F-1 tlcp/consistency 首批 (Phase F 5 sub-PR 第 1 弹)
+
+> 先做Phase F：我希望你能连续工作，依次完成T209~T213, 每完成1项任务按照定义的提交工作流提交，每项任务的代码确认合入主干后自动开始下一项任务
+
+承接 Phase C 收官 (T208)。
+转 Phase F TLCP + DTLS 1.2 consistency 系列。
+
+Phase F 全景 audit:
+  C 源 tls/consistency/{tlcp,dtls12}/
+  TLCP 3 frame + 1 hlt = 69 fn / 282 rows
+  DTLS 1.2 1 frame + 1 callback + 1 hlt = 54 fn / 229 rows
+  共 123 fn / 511 rows
+
+5 sub-PR 拆分:
+  plan + F-1 T209 (本 PR tlcp_1)
+  F-2 T210 tlcp_2 + _3
+  F-3 T211 dtls12 首批
+  F-4 T212 dtls12 剩余
+  closeout T213
+  估 ~48 tests
+
+改动:
+  新 docs/issue-42-phase-f-plan.md (~110 行)
+  新 tests/interop/tests/tlcp_consistency.rs (~280 行 / 12 tests + decision matrix mod-doc + plan-doc 跨文件 pin)
+
+12 tests:
+  happy-path baseline (2):
+    handshake_completes_appdata_bidirectional (ECDHE-SM4-GCM)
+    handshake_completes_appdata_ecc_cbc (ECC-SM4-CBC)
+  CIPHERTEXT_TOOLONG gap pin (1):
+    trailing_bytes_after_record_silently_ignored_gap + TODO(#42-phase-f)
+  MSGLENGTH_TOOLONG (2):
+    msglength_too_long_rejected (高字节 0xFF)
+    msglength_low_byte_too_small_rejected (length=1 < payload)
+  NONZERO_MESSAGELEN (1):
+    zero_length_appdata_round_trip
+  SEQ_NUM (2):
+    seq_num_in_order_both_open
+    seq_num_out_of_order_rejected (AEAD nonce sequence-bound)
+  UNEXPECT_HANDSHAKEMSG / RECORDTYPE (2):
+    unexpected_handshake_record_post_handshake_rejected
+    unknown_record_type_rejected (0xFF ContentType)
+  AEAD integrity (1):
+    tampered_ciphertext_rejected (末字节 bit-flip)
+  plan pin (1):
+    audit_plan_docs_in_sync
+
+踩坑:
+  初版 trailing_bytes_after_record 期望 reject
+  实际 Rust open_app_data 仅读取 declared length 第一 record, 静默忽略 trailing bytes
+  fix: 改 gap pin (Ok(...) 断言) + TODO(#42-phase-f) 锁 strict-mode follow-up
+  沿用 T206「unsupported-algorithm gap pin」+ T204「fixture-driven」模式
+
+验证:
+  cargo test -p hitls-integration-tests --test tlcp_consistency --all-features  12/0
+  cargo test -p hitls-integration-tests --all-features                          全 20+ 测试文件 360+/0 零回归
+  cargo fmt + cargo clippy --workspace --all-features -D warnings               clean
+
+作用域:
+  1 个新 plan doc (~110 行)
+  1 个新测试文件 (~280 行 / 12 tests)
+  0 product code
+  1 个 TODO(#42-phase-f)
+
+沿用 + 新方法学:
+  沿用 T201 dtlcp_consistency 模板 +「fixture-driven」+「audit_plan_docs_in_sync 跨文件 pin」+「audit-first multi-file 系列」
+
+  新「Phase F 模板复用 T201 dtlcp_consistency」 (codified):
+    swap connection_dtlcp -> connection_tlcp
+    + make_dtlcp_configs -> make_tlcp_configs
+    + remove cookie 参数
+    测试体几乎 1:1 复用
+    T209 节省 ~120 行 vs 从零写
+
+  新「TCP-over reliable transport seq-num pin」:
+    TLCP/TLS 在 reliable transport 上 in-order
+    seq gap → AEAD nonce sequence mismatch → 必拒
+    测试体直接构造 rec1 然后 try rec2 验证 fail
+    不同 DTLCP UDP 容忍 out-of-order
+
+  新「record-layer single-record-at-a-time 是 lenient default」:
+    Rust open_app_data 按 declared length 读单 record
+    trailing 字节静默忽略
+    不同 C 全 buffer 校验
+    pin gap + TODO 防退化为 strict 后误报
+
+Recorded as DEV_LOG Phase T209.
