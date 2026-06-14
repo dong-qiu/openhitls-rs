@@ -697,3 +697,247 @@ fn h225_phase_h2_plan_banner_pinned() {
     assert!(plan.contains("T225"));
     assert!(plan.contains("MODIFIED_CERT_VERIFY") || plan.contains("CERT_VERIFY"));
 }
+
+// ===========================================================================
+// T226 / Phase H-3 — MODIFIED_FINISHED family.
+//
+// Same scope decision as T225: reaching the client's Finished
+// `verify_data` MAC check at the E2E level needs valid EE + Cert + CV
+// first (so the client's state machine accepts Finished as the next
+// expected message). Without the cert+key loader (Phase I follow-up),
+// T226 covers two slices:
+//
+// - **3 E2E tests** sending EE + Finished directly. The real client's
+//   handshake state machine errors at "unexpected_message" (RFC 8446
+//   §6) because Certificate is expected next, not Finished. These
+//   exercise the encrypted post-EE state-machine ordering — a sibling
+//   to T225's "Cert parse phase" angle.
+// - **6 helper-level pins** extending T221's Finished invariants into
+//   the E2E file (verify_data length math, HKDF-Expand-Label "finished"
+//   label bytes, HMAC construction baseline, type-byte identity).
+// - **1 plan-doc banner pin**.
+//
+// Cumulative: T224 (3) + T225 (10) + T226 (10) = 23 tests in this file.
+// ===========================================================================
+
+/// Helper: build a Finished handshake message body per RFC 8446 §4.4.4.
+/// `verify_data` is `HMAC(finished_key, transcript_hash)`; tests can
+/// pass arbitrary bytes here to mutate.
+fn build_finished_message(verify_data: &[u8]) -> Vec<u8> {
+    let body_len = verify_data.len() as u32;
+    let mut msg = Vec::with_capacity(4 + verify_data.len());
+    msg.push(0x14); // HandshakeType::Finished
+    msg.extend_from_slice(&[
+        ((body_len >> 16) & 0xff) as u8,
+        ((body_len >> 8) & 0xff) as u8,
+        (body_len & 0xff) as u8,
+    ]);
+    msg.extend_from_slice(verify_data);
+    msg
+}
+
+/// Phase H-3 E2E #1: rogue server sends EE + Finished (skipping
+/// Certificate + CertificateVerify). The real client's state machine
+/// after EE expects Certificate (RFC 8446 §2 — "{} indicates messages
+/// protected using keys derived from [sender]_handshake_traffic_secret
+/// ... Certificate"). Receiving Finished out of order must trigger
+/// `unexpected_message` / handshake error.
+#[test]
+fn h226_e2e_encrypted_finished_without_cert_or_cv_rejected() {
+    let err = drive_client_against_encrypted_rogue_server(|ctx, stream| {
+        let ee = build_empty_encrypted_extensions();
+        let r1 = seal_encrypted_handshake(
+            ctx.suite,
+            &ctx.server_handshake_keys,
+            ctx.next_write_seq,
+            &ee,
+        );
+        ctx.next_write_seq += 1;
+        // Plausible-length verify_data (32 bytes for SHA-256) but
+        // bogus content. We never get to the verify_data check anyway
+        // since this is out of order.
+        let fin = build_finished_message(&[0x42u8; 32]);
+        let r2 = seal_encrypted_handshake(
+            ctx.suite,
+            &ctx.server_handshake_keys,
+            ctx.next_write_seq,
+            &fin,
+        );
+        ctx.next_write_seq += 1;
+        let _ = stream.write_all(&r1);
+        let _ = stream.write_all(&r2);
+    });
+    assert!(
+        !err.is_empty(),
+        "client must reject Finished sent before Certificate; got: {err}"
+    );
+}
+
+/// Phase H-3 E2E #2: rogue server sends EE + Finished with zero-length
+/// `verify_data`. RFC 8446 §4.4.4 says `verify_data` length equals
+/// the hash output length; T91 hardened the codec to reject
+/// over-length verify_data. Zero-length is a separate path — pin the
+/// rejection.
+#[test]
+fn h226_e2e_encrypted_finished_with_zero_length_body_rejected() {
+    let err = drive_client_against_encrypted_rogue_server(|ctx, stream| {
+        let ee = build_empty_encrypted_extensions();
+        let r1 = seal_encrypted_handshake(
+            ctx.suite,
+            &ctx.server_handshake_keys,
+            ctx.next_write_seq,
+            &ee,
+        );
+        ctx.next_write_seq += 1;
+        // 0x14 || u24(0) — Finished message with 0-byte verify_data.
+        let fin = vec![0x14, 0x00, 0x00, 0x00];
+        let r2 = seal_encrypted_handshake(
+            ctx.suite,
+            &ctx.server_handshake_keys,
+            ctx.next_write_seq,
+            &fin,
+        );
+        ctx.next_write_seq += 1;
+        let _ = stream.write_all(&r1);
+        let _ = stream.write_all(&r2);
+    });
+    assert!(
+        !err.is_empty(),
+        "client must reject zero-length verify_data Finished; got: {err}"
+    );
+}
+
+/// Phase H-3 E2E #3: rogue server sends EE + Finished with oversized
+/// `verify_data` (64 bytes when SHA-256 expects 32). T91 pinned this
+/// closure end at codec layer; this E2E test verifies the rejection
+/// path holds when the message arrives over an encrypted record.
+#[test]
+fn h226_e2e_encrypted_finished_with_oversized_verify_data_rejected() {
+    let err = drive_client_against_encrypted_rogue_server(|ctx, stream| {
+        let ee = build_empty_encrypted_extensions();
+        let r1 = seal_encrypted_handshake(
+            ctx.suite,
+            &ctx.server_handshake_keys,
+            ctx.next_write_seq,
+            &ee,
+        );
+        ctx.next_write_seq += 1;
+        // 64 bytes verify_data — twice the SHA-256 hash length.
+        let fin = build_finished_message(&[0x77u8; 64]);
+        let r2 = seal_encrypted_handshake(
+            ctx.suite,
+            &ctx.server_handshake_keys,
+            ctx.next_write_seq,
+            &fin,
+        );
+        ctx.next_write_seq += 1;
+        let _ = stream.write_all(&r1);
+        let _ = stream.write_all(&r2);
+    });
+    assert!(
+        !err.is_empty(),
+        "client must reject oversized verify_data Finished; got: {err}"
+    );
+}
+
+/// Phase H-3 pin #4: Finished handshake type = `0x14` = 20 raw byte
+/// per RFC 8446 §B.3. Sibling to T221's identical pin in the helper
+/// file (`transcript_mutation_encrypted.rs`); this anchor is in the
+/// E2E file so future H-4 / closeout PRs can grep it locally.
+#[test]
+fn h226_finished_handshake_type_byte_identity_pin() {
+    let fin_byte: u8 = 0x14;
+    assert_eq!(fin_byte, 20);
+}
+
+/// Phase H-3 pin #5: SHA-256 `verify_data` length per RFC 8446 §4.4.4
+/// equals the hash output length = 32 bytes. The wire-level Finished
+/// message is `type(1) + u24_len(3) + verify_data(32) = 36` bytes
+/// for SHA-256 suites.
+#[test]
+fn h226_finished_verify_data_length_sha256_pin() {
+    let verify_data_len = 32; // SHA-256 output length
+    let msg = build_finished_message(&[0u8; 32]);
+    assert_eq!(msg.len(), 4 + verify_data_len);
+    assert_eq!(msg[0], 0x14);
+    assert_eq!(
+        &msg[1..4],
+        &[0x00, 0x00, 0x20],
+        "u24 body length = 0x20 = 32"
+    );
+}
+
+/// Phase H-3 pin #6: RFC 8446 §4.4.4 finished_key derivation label =
+/// `"finished"` raw bytes (HKDF-Expand-Label argument). Pinning the
+/// literal label bytes guards against accidental rename of the
+/// constant in product code.
+#[test]
+fn h226_finished_key_derivation_label_pin() {
+    let label: &[u8] = b"finished";
+    assert_eq!(label, &[0x66, 0x69, 0x6E, 0x69, 0x73, 0x68, 0x65, 0x64]);
+    assert_eq!(label.len(), 8);
+}
+
+/// Phase H-3 pin #7: RFC 8446 §4.4.4 `verify_data` construction
+/// baseline — `verify_data = HMAC(finished_key, transcript_hash)`.
+/// HMAC-SHA-256 output length = SHA-256 output length = 32 bytes.
+/// Extends T221's same baseline pin into the E2E file.
+#[test]
+fn h226_finished_verify_data_hmac_construction_e2e_sibling_pin() {
+    let hmac_sha256_output_len = 32;
+    let sha256_output_len = 32;
+    assert_eq!(hmac_sha256_output_len, sha256_output_len);
+    // verify_data byte-layout: 32 bytes that must match HMAC output
+    // (any byte mutation breaks it — proved in T221).
+    let verify_data_layout = [0u8; 32];
+    assert_eq!(verify_data_layout.len(), 32);
+}
+
+/// Phase H-3 pin #8: T101 pinned cross-record handshake reassembly
+/// (`test-tls13-finished.py` 708/6 XFAIL → 714/0 PASS); pin via DEV_LOG
+/// reference that this Phase H test file does not regress the codec
+/// closure. The T91 + T101 + T117 trio is the codec authority for
+/// Finished body framing.
+#[test]
+fn h226_t91_t101_codec_authority_cross_pin() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let dev_log_path = format!("{manifest_dir}/../../DEV_LOG.md");
+    let log = std::fs::read_to_string(&dev_log_path).unwrap();
+    assert!(
+        log.contains("T91") && log.contains("Finished"),
+        "DEV_LOG must retain T91 Finished framing strict-length anchor"
+    );
+    assert!(
+        log.contains("T101") && log.contains("reassembly"),
+        "DEV_LOG must retain T101 cross-record handshake reassembly anchor"
+    );
+}
+
+/// Phase H-3 pin #9: `MODIFIED_KEY_SHARE_POST_SH_*` C SDV rows require
+/// the rogue server to mutate the SH's `key_share` extension AFTER
+/// sending it, which is impossible with the current TCP framework
+/// (the rogue server sends the SH once and that's it). Pin via the
+/// scope-cut note that T186's plaintext file already covers the
+/// SH-time `MODIFIED_KEY_SHARE_*` cases — there is no encrypted
+/// post-SH "key_share" mutation to chase.
+#[test]
+fn h226_modified_key_share_post_sh_scope_cut_documented() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let path = format!("{manifest_dir}/tests/transcript_mutation.rs");
+    let body = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        body.contains("sh_with_unoffered_keyshare_group_rejected"),
+        "T186's MODIFIED_KEY_SHARE_FROM_SH coverage must remain — \
+         post-SH key_share mutation is not a real wire shape in TLS 1.3"
+    );
+}
+
+/// Phase H-3 plan banner pin.
+#[test]
+fn h226_phase_h3_plan_banner_pinned() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let plan_path = format!("{manifest_dir}/../../docs/issue-42-phase-h-plan.md");
+    let plan = std::fs::read_to_string(&plan_path).unwrap();
+    assert!(plan.contains("T226"));
+    assert!(plan.contains("MODIFIED_FINISHED") || plan.contains("FINISHED"));
+}

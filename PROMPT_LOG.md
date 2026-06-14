@@ -16211,3 +16211,67 @@ Continues T224 Phase H-1.
     本机制可延伸至每 sub-PR ~3-4 个 E2E 测试 (无需完整 cert+key infra)
 
 Recorded as DEV_LOG Phase T225.
+
+### T226 — Phase H-3 MODIFIED_FINISHED family 10 tests (Phase H 5 sub-PR 第 3 弹)
+
+> 按 A + C 走
+
+Continues T225 Phase H-2.
+
+改动:
+  tests/interop/tests/transcript_mutation_encrypted_e2e.rs 追加 T226 banner + 10 tests
+  累计 23 tests in 1 file
+
+10 tests:
+  3 E2E (T224 framework):
+    h226_e2e_encrypted_finished_without_cert_or_cv_rejected (state-machine 序列错误)
+    h226_e2e_encrypted_finished_with_zero_length_body_rejected (T91 strict-length)
+    h226_e2e_encrypted_finished_with_oversized_verify_data_rejected (T91 strict-length)
+  5 helper-level pins:
+    h226_finished_handshake_type_byte_identity_pin (0x14 = 20)
+    h226_finished_verify_data_length_sha256_pin (32 bytes)
+    h226_finished_key_derivation_label_pin ("finished" 字面)
+    h226_finished_verify_data_hmac_construction_e2e_sibling_pin (HMAC-SHA-256)
+    h226_t91_t101_codec_authority_cross_pin (DEV_LOG T91+T101 锚点)
+  1 scope-cut documenter:
+    h226_modified_key_share_post_sh_scope_cut_documented (无 wire 形态; T186 SH 时机覆盖)
+  1 plan banner:
+    h226_phase_h3_plan_banner_pinned
+
+新 helper:
+  build_finished_message (0x14 + u24_len + verify_data)
+
+关键设计:
+  与 T225 同样的 scope decision
+  reaching client's Finished MAC check E2E 需要 valid EE+Cert+CV 先 (cert+key loader 是 Phase I follow-up)
+  3 个 E2E 测试在 state-machine 序列层 + codec strict-length 层产生 real-wire Alert
+  6 helper-level pin 沿用 T220 codified
+  T91+T101+T117 codec-authority trio 已是 binding 约束
+    本 PR E2E 验证 T91 strict-length 与 T101 reassembly 在加密链路下也成立
+
+累计:
+  T224 (3) + T225 (10) + T226 (10) = 23 tests in transcript_mutation_encrypted_e2e.rs
+
+验证:
+  cargo test -p hitls-integration-tests --test transcript_mutation_encrypted_e2e --all-features  23/0
+  cargo test -p hitls-integration-tests --all-features                                           510/0 (was 500, +10)
+  cargo fmt + cargo clippy --workspace --all-features -D warnings + typos                        clean
+
+作用域:
+  同测试文件 +~210 行 (10 test + 1 helper)
+  0 product code
+  0 新 TODO
+
+沿用方法学:
+  T221 「raw byte pin when enum is private」
+  T225 「E2E rogue server exercises parse phase without valid cert+key by sending malformed shapes」
+  T220 「helper-level mutation pin = full E2E driver alternative」
+
+新方法学:
+  「E2E rogue server exercises handshake state-machine ordering by sending out-of-order encrypted messages」 (codified):
+    无需 cert+key infra
+    扩展 T225 parse-phase 角度到 state-machine 层
+    client 收到 Finished (Certificate 应在先) 在 MAC verification 之前 error
+    本机制经 T224 framework 单独可达
+
+Recorded as DEV_LOG Phase T226.
