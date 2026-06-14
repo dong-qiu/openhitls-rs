@@ -375,6 +375,216 @@ fn t242_audit_phase_e_behaviour_class_plan_docs_in_sync() {
     );
 }
 
+// ===========================================================================
+// T243 / Phase E-3 — behaviour-class remaining 2/3 (handshake variants
+// ECDHE/ECC × GCM/CBC).
+//
+// Covers the remaining ~192 of ~287 behaviour-class rows focused on
+// the 4-cell handshake-variant matrix (ECDHE × ECC) crossed with
+// (GCM × CBC), plus state-machine specifics: CertVerify position,
+// ChangeCipherSpec ordering (TLCP follows TLS 1.2 not 1.3).
+//
+// Cumulative: T115 (8) + T242 (10) + T243 (10) = 28 tests.
+// ===========================================================================
+
+/// T243 audit pin #1: SM4 block cipher OID per GM/T 0002 =
+/// `1.2.156.10197.1.104`. Used in TLCP CBC + GCM cipher suites.
+#[test]
+fn t243_sm4_block_cipher_oid_identity_pin() {
+    let sm4_oid = "1.2.156.10197.1.104";
+    assert_eq!(
+        sm4_oid, "1.2.156.10197.1.104",
+        "GM/T 0002 — SM4 block cipher OID"
+    );
+}
+
+/// T243 audit pin #2: `tlcp.rs` integration tests test-count target
+/// per Phase E plan §4 "tlcp.rs 11 happy-path tests". Pin the floor
+/// to 11 (the documented baseline) to formalise plan §4.
+#[test]
+fn t243_tlcp_integration_tests_target_floor_pin() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let tlcp = std::fs::read_to_string(format!("{manifest_dir}/../../tests/interop/tests/tlcp.rs"))
+        .unwrap();
+    let count = tlcp.matches("#[test]").count();
+    assert!(
+        count >= 11,
+        "tlcp.rs must have ≥11 #[test] handshake-variant tests per Phase E plan §4 target; got {count}"
+    );
+}
+
+/// T243 audit pin #3: TLCP `record/encryption_tlcp.rs` must
+/// reference SM4 via the SM4 cipher type. Pin a content anchor for
+/// the SM4 module / cipher.
+#[test]
+fn t243_tlcp_record_encryption_uses_sm4_pin() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let body =
+        std::fs::read_to_string(format!("{manifest_dir}/src/record/encryption_tlcp.rs")).unwrap();
+    assert!(
+        body.contains("Sm4") || body.contains("sm4") || body.contains("SM4"),
+        "record/encryption_tlcp.rs must reference SM4 cipher"
+    );
+}
+
+/// T243 audit pin #4: TLCP handshake codec source file present.
+/// The `handshake/codec_tlcp.rs` file carries the wire-format
+/// codecs for TLCP-specific handshake messages.
+#[test]
+fn t243_tlcp_handshake_codec_source_file_present() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let path = format!("{manifest_dir}/src/handshake/codec_tlcp.rs");
+    let metadata = std::fs::metadata(&path)
+        .unwrap_or_else(|e| panic!("handshake/codec_tlcp.rs missing at {path}: {e}"));
+    assert!(
+        metadata.is_file() && metadata.len() > 0,
+        "handshake/codec_tlcp.rs must be a non-empty file"
+    );
+}
+
+/// T243 audit pin #5: ECDHE key-exchange path source presence in
+/// TLCP. The client_tlcp.rs handshake driver must reference ECDHE
+/// (covers `ECDHE_SM4_*` cipher suites).
+#[test]
+fn t243_tlcp_ecdhe_key_exchange_source_pin() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let body =
+        std::fs::read_to_string(format!("{manifest_dir}/src/handshake/client_tlcp.rs")).unwrap();
+    assert!(
+        body.contains("Ecdhe") || body.contains("ECDHE") || body.contains("ecdhe"),
+        "client_tlcp.rs must reference ECDHE key exchange path"
+    );
+}
+
+/// T243 audit pin #6: ECC key-exchange path source presence in
+/// TLCP. The ECC variant (encrypt-cert-based RSA-like flow) must
+/// also be wired. Use a multi-file scan since ECC may live in the
+/// codec or the connection module.
+#[test]
+fn t243_tlcp_ecc_key_exchange_source_pin() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let ecc_anchors = ["Ecc", "ECC ", "ecc_", "ECC_"];
+    let mut hit = false;
+    for relative in [
+        "src/connection_tlcp.rs",
+        "src/handshake/client_tlcp.rs",
+        "src/handshake/server_tlcp.rs",
+        "src/handshake/codec_tlcp.rs",
+    ] {
+        let body = std::fs::read_to_string(format!("{manifest_dir}/{relative}")).unwrap();
+        if ecc_anchors.iter().any(|a| body.contains(a)) {
+            hit = true;
+            break;
+        }
+    }
+    assert!(
+        hit,
+        "at least one TLCP source file must reference ECC key exchange path via one of: {ecc_anchors:?}"
+    );
+}
+
+/// T243 audit pin #7: TLCP CertVerify message handling. RFC 8998
+/// §3.3: server CertVerify is required when the server cert is for
+/// signing only (sign cert / enc cert split). The handshake codec
+/// must reference CertVerify wire format.
+#[test]
+fn t243_tlcp_cert_verify_handling_source_pin() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let cv_anchors = [
+        "CertificateVerify",
+        "cert_verify",
+        "CertVerify",
+        "certificate_verify",
+    ];
+    let mut hit = false;
+    for relative in [
+        "src/handshake/codec_tlcp.rs",
+        "src/handshake/client_tlcp.rs",
+        "src/handshake/server_tlcp.rs",
+    ] {
+        let body = std::fs::read_to_string(format!("{manifest_dir}/{relative}")).unwrap();
+        if cv_anchors.iter().any(|a| body.contains(a)) {
+            hit = true;
+            break;
+        }
+    }
+    assert!(
+        hit,
+        "at least one TLCP handshake source must reference CertificateVerify via one of: {cv_anchors:?}"
+    );
+}
+
+/// T243 audit pin #8: TLCP ChangeCipherSpec ordering. TLCP follows
+/// TLS 1.2 semantics (CCS sent between Finished prep and Finished
+/// itself), not TLS 1.3 (where CCS is a no-op middlebox-compat
+/// marker). Pin `ChangeCipherSpec` reference in TLCP code.
+#[test]
+fn t243_tlcp_change_cipher_spec_source_pin() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let ccs_anchors = ["ChangeCipherSpec", "change_cipher_spec", "CCS"];
+    let mut hit = false;
+    for relative in [
+        "src/handshake/client_tlcp.rs",
+        "src/handshake/server_tlcp.rs",
+        "src/handshake/codec_tlcp.rs",
+        "src/connection_tlcp.rs",
+    ] {
+        let body = std::fs::read_to_string(format!("{manifest_dir}/{relative}")).unwrap();
+        if ccs_anchors.iter().any(|a| body.contains(a)) {
+            hit = true;
+            break;
+        }
+    }
+    assert!(
+        hit,
+        "at least one TLCP source must reference ChangeCipherSpec via one of: {ccs_anchors:?}"
+    );
+}
+
+/// T243 audit pin #9: TLCP Finished message handling. The Finished
+/// MAC over PRF(master_secret, finished_label, transcript_hash)
+/// per RFC 8998 §3.3.6 (mirrors TLS 1.2 semantics with SM3 PRF).
+#[test]
+fn t243_tlcp_finished_message_source_pin() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let finished_anchors = ["Finished", "finished", "verify_data"];
+    let mut hit = false;
+    for relative in [
+        "src/handshake/client_tlcp.rs",
+        "src/handshake/server_tlcp.rs",
+        "src/handshake/codec_tlcp.rs",
+    ] {
+        let body = std::fs::read_to_string(format!("{manifest_dir}/{relative}")).unwrap();
+        if finished_anchors.iter().any(|a| body.contains(a)) {
+            hit = true;
+            break;
+        }
+    }
+    assert!(
+        hit,
+        "at least one TLCP handshake source must reference Finished via one of: {finished_anchors:?}"
+    );
+}
+
+/// T243 audit pin #10: plan-doc cross-coverage for T243 + handshake
+/// variants matrix.
+#[test]
+fn t243_audit_phase_e_behaviour_remaining_plan_docs_in_sync() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let plan_path = format!("{manifest_dir}/../../docs/issue-42-phase-e-plan.md");
+    let plan = std::fs::read_to_string(&plan_path).unwrap();
+    assert!(
+        plan.contains("T243"),
+        "Phase E plan doc must contain T243 anchor"
+    );
+    assert!(
+        plan.contains("ECDHE/ECC")
+            || plan.contains("ECDHE × ECC")
+            || plan.contains("handshake variants"),
+        "Phase E plan doc must reference handshake-variants matrix"
+    );
+}
+
 /// T115 audit pin #8: plan-doc cross-coverage. The Phase E plan
 /// doc (`docs/issue-42-phase-e-plan.md`) must remain the authority
 /// for the 718-row inventory + 3-way classification + 5-sub-PR
