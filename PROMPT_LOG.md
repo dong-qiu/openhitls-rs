@@ -15254,3 +15254,65 @@ Phase F 累计:
     同 namespace 不同 attack-surface 避免一文件膨胀
 
 Recorded as DEV_LOG Phase T211.
+
+### T212 — Phase F-4 dtls12/consistency 剩余 10 tests (Phase F 5 sub-PR 第 4 弹)
+
+> 先做Phase F：我希望你能连续工作，依次完成T209~T213, 每完成1项任务按照定义的提交工作流提交，每项任务的代码确认合入主干后自动开始下一项任务
+
+承接 T211 Phase F-3。
+
+改动:
+  tests/interop/tests/dtls12_consistency.rs 追加 T212 banner + 10 tests
+  累计 23 tests in 1 file
+  沿用 T196 「same-file 累计追加」codified
+
+10 tests (覆盖 RFC6347 + RFC8422 + RFC5246 剩余家族):
+  RFC6347_APPDATA (2):
+    appdata_multi_message_empty_single_1kib_byte_exact (三连测)
+    appdata_4kib_pair_bidirectional
+  RFC6347_FINISH (2):
+    finish_completes_appdata_works (no-cookie)
+    finish_completes_with_cookie_path_appdata_works (cookie 路径)
+  RFC6347_CLIENT_HELLO_TC001 (1):
+    client_hello_garbage_post_handshake_rejected (32 字节 0x16 garbage AEAD reject; 沿用 T201 DTLCP 平行)
+  RFC6347_HELLO_VERIFY_REQ (1):
+    cookie_path_long_payload_round_trip (cookie + 2 KiB)
+  RFC8422_EXTENSION_MISS_TC001 (1):
+    truncated_record_rejected (header-only 5 字节; T201 DTLCP 平行)
+  RFC8422_ECPOINT_TC001 (1):
+    ecpoint_uncompressed_only_documented_cross_coverage (跨 issue cross-coverage to #46 plan §6 锁 HITLS_CFG_SetECPointFormats)
+  RFC5246_VERSION_TC001 (1):
+    version_negotiated_dtls12_only (strict-eq Some(TlsVersion::Dtls12))
+  RFC5246_UNEXPETED_REORD_TYPE_TC001 (1):
+    unknown_record_type_rejected (verbatim C typo allow-listed)
+
+typos C 源 typo allowlist 累积:
+  新增 UNEXPETED + REORD
+  沿用 T204 VERISON / T209 UNEXPECT + CERTFICATE codified
+
+Phase F 累计:
+  T209 (12) + T210 (10) + T211 (13) + T212 (10) = 45 tests in 2 files
+
+验证:
+  cargo test -p hitls-integration-tests --test dtls12_consistency --all-features  23/0 (T211 13 + T212 10)
+  cargo test -p hitls-integration-tests --all-features                            380+/0 零回归
+  cargo fmt + cargo clippy --workspace --all-features -D warnings + typos         clean
+
+作用域:
+  1 个已有测试文件 +~165 行
+  typos.toml +2 行
+  0 product code
+  0 新 TODO
+
+沿用 + 新方法学:
+  沿用 T201「跨 issue cross-coverage scope-cut」(#46 plan-doc 锁 ECPointFormats)
+  + T196「same-file 累计追加」
+  + T210/T211 Phase F template
+  + T209「strict-eq accessor pin」+「fixture-driven」
+
+  新「verbatim-C-typo allowlist 累积」 (codified):
+    C 源 typo (UNKOWN T189 / VERISON T204 / UNEXPECT + CERTFICATE T209 / UNEXPETED + REORD T212) 必 verbatim 引用
+    typos.toml 累积 allowlist 5 个 typo pattern
+    形成「C-quirk vocabulary」防 strict spell-check 阻塞 PR
+
+Recorded as DEV_LOG Phase T212.
