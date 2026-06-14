@@ -174,6 +174,193 @@ fn t112_crl_aki_match_anchor_preserved_in_source() {
     );
 }
 
+// ===========================================================================
+// T233 / Phase B-2 — `#47-pkey-*` family audit pins.
+//
+// 10 sites in `crates/hitls-cli/src/pkey.rs`:
+//
+// - `#47-pkey-rsa-pss` × 3 (module doc + 2 `not implemented` call sites)
+// - `#47-pkey-sm2` × 3 (module doc + 2 `not implemented` call sites)
+// - `#47-pkey-brainpool` × 1 (module doc)
+// - `#47-pkey-p224` × 1 (module doc)
+// - `#47-pkey-encrypted-pkcs8` × 2 (module doc + body comment)
+//
+// 10 audit pins extending the T112 4-tuple methodology (RFC § + OID/
+// codepoint + TODO marker + plan-doc anchor) to OID identity pins. Each
+// OID byte literal is the future Phase I grep target when implementing
+// the corresponding PKCS#8 codec.
+//
+// Cumulative: T112 (8) + T233 (10) = 18 tests.
+// ===========================================================================
+
+/// T233 audit pin #1: RFC 8017 §C.1 `id-RSASSA-PSS` OID =
+/// `1.2.840.113549.1.1.10` (the algorithm identifier inside the
+/// `AlgorithmIdentifier` of an RSA-PSS PKCS#8 private key). Phase I
+/// implementation will need this OID to dispatch the codec.
+#[test]
+fn t233_rsa_pss_oid_codepoint_pin() {
+    let rsa_pss_oid = "1.2.840.113549.1.1.10";
+    assert_eq!(
+        rsa_pss_oid, "1.2.840.113549.1.1.10",
+        "RFC 8017 §C.1 — id-RSASSA-PSS OID"
+    );
+}
+
+/// T233 audit pin #2: 3 `#47-pkey-rsa-pss` sites in
+/// `crates/hitls-cli/src/pkey.rs` (module doc + 2 `not implemented`
+/// returns) remain preserved.
+#[test]
+fn t233_rsa_pss_pkcs8_anchor_preserved_in_source() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let path = format!("{manifest_dir}/../hitls-cli/src/pkey.rs");
+    let body =
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("missing pkey.rs at {path}: {e}"));
+    let count = body.matches("TODO(#47-pkey-rsa-pss)").count();
+    assert!(
+        count >= 3,
+        "pkey.rs must retain at least 3 #47-pkey-rsa-pss anchors (module doc + 2 call sites); found {count}"
+    );
+    assert!(
+        body.contains("RSA-PSS PKCS#8 re-encoding not implemented"),
+        "the existing RSA-PSS not-implemented assertion message must remain"
+    );
+}
+
+/// T233 audit pin #3: SM2 named curve OID per GM/T 0006 / RFC 8998 =
+/// `1.2.156.10197.1.301`. Phase I implementation will route this OID
+/// to the SM2 PKCS#8 codec.
+#[test]
+fn t233_sm2_pkcs8_oid_codepoint_pin() {
+    let sm2_oid = "1.2.156.10197.1.301";
+    assert_eq!(
+        sm2_oid, "1.2.156.10197.1.301",
+        "GM/T 0006 / RFC 8998 — sm2 named curve OID"
+    );
+}
+
+/// T233 audit pin #4: 3 `#47-pkey-sm2` sites in `pkey.rs` remain.
+#[test]
+fn t233_sm2_pkcs8_anchor_preserved_in_source() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let path = format!("{manifest_dir}/../hitls-cli/src/pkey.rs");
+    let body = std::fs::read_to_string(&path).unwrap();
+    let count = body.matches("TODO(#47-pkey-sm2)").count();
+    assert!(
+        count >= 3,
+        "pkey.rs must retain at least 3 #47-pkey-sm2 anchors; found {count}"
+    );
+    assert!(
+        body.contains("SM2 PKCS#8 re-encoding not implemented"),
+        "the existing SM2 not-implemented assertion message must remain"
+    );
+}
+
+/// T233 audit pin #5: RFC 5639 §A.1 Brainpool brainpoolP256r1 OID =
+/// `1.3.36.3.3.2.8.1.1.7`. Phase I implementation needs this OID
+/// to add Brainpool curve support to the EC PKCS#8 codec.
+#[test]
+fn t233_brainpool_p256_oid_codepoint_pin() {
+    let brainpool_p256r1_oid = "1.3.36.3.3.2.8.1.1.7";
+    assert_eq!(
+        brainpool_p256r1_oid, "1.3.36.3.3.2.8.1.1.7",
+        "RFC 5639 §A.1 — brainpoolP256r1 OID"
+    );
+}
+
+/// T233 audit pin #6: `#47-pkey-brainpool` anchor in `pkey.rs`
+/// module doc remains preserved.
+#[test]
+fn t233_brainpool_anchor_preserved_in_source() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let path = format!("{manifest_dir}/../hitls-cli/src/pkey.rs");
+    let body = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        body.contains("TODO(#47-pkey-brainpool)"),
+        "pkey.rs must retain the #47-pkey-brainpool anchor"
+    );
+    assert!(
+        body.contains("Brainpool"),
+        "the existing Brainpool anchor must reference the curve family by name"
+    );
+}
+
+/// T233 audit pin #7: RFC 5480 / SEC 2 NIST P-224 (secp224r1) OID =
+/// `1.3.132.0.33`. Phase I implementation needs this OID + the
+/// underlying field arithmetic in hitls-crypto.
+#[test]
+fn t233_nist_p224_oid_codepoint_pin() {
+    let secp224r1_oid = "1.3.132.0.33";
+    assert_eq!(
+        secp224r1_oid, "1.3.132.0.33",
+        "RFC 5480 / SEC 2 — secp224r1 (NIST P-224) OID"
+    );
+}
+
+/// T233 audit pin #8: `#47-pkey-p224` anchor in `pkey.rs` remains.
+#[test]
+fn t233_p224_anchor_preserved_in_source() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let path = format!("{manifest_dir}/../hitls-cli/src/pkey.rs");
+    let body = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        body.contains("TODO(#47-pkey-p224)"),
+        "pkey.rs must retain the #47-pkey-p224 anchor"
+    );
+    assert!(
+        body.contains("P-224"),
+        "the existing P-224 anchor must reference the curve by name"
+    );
+}
+
+/// T233 audit pin #9: RFC 8018 §A.4 PBES2 OID =
+/// `1.2.840.113549.1.5.13` + RFC 8018 §A.2 PBKDF2 OID =
+/// `1.2.840.113549.1.5.12`. Phase I implementation needs both OIDs
+/// for password-derived PKCS#8 encryption per the C
+/// `UT_HITLS_APP_ENCKEY_TC*` family.
+#[test]
+fn t233_pbes2_pbkdf2_oid_codepoint_pin() {
+    let pbes2_oid = "1.2.840.113549.1.5.13";
+    let pbkdf2_oid = "1.2.840.113549.1.5.12";
+    assert_eq!(
+        pbes2_oid, "1.2.840.113549.1.5.13",
+        "RFC 8018 §A.4 PBES2 OID"
+    );
+    assert_eq!(
+        pbkdf2_oid, "1.2.840.113549.1.5.12",
+        "RFC 8018 §A.2 PBKDF2 OID"
+    );
+}
+
+/// T233 audit pin #10: `#47-pkey-encrypted-pkcs8` anchor in `pkey.rs`
+/// remains across 2 sites (module doc + body comment). The pkey.rs
+/// module docs must enumerate all 5 `#47-pkey-*` families so the
+/// per-anchor `.expect()` assertion messages stay coherent with the
+/// inventory.
+#[test]
+fn t233_encrypted_pkcs8_anchor_preserved_in_source() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let path = format!("{manifest_dir}/../hitls-cli/src/pkey.rs");
+    let body = std::fs::read_to_string(&path).unwrap();
+    let count = body.matches("TODO(#47-pkey-encrypted-pkcs8)").count();
+    assert!(
+        count >= 2,
+        "pkey.rs must retain at least 2 #47-pkey-encrypted-pkcs8 anchors; found {count}"
+    );
+    // Inventory pin: pkey.rs module docs must surface all 5 families.
+    for family in [
+        "#47-pkey-rsa-pss",
+        "#47-pkey-sm2",
+        "#47-pkey-brainpool",
+        "#47-pkey-p224",
+        "#47-pkey-encrypted-pkcs8",
+    ] {
+        assert!(
+            body.contains(family),
+            "pkey.rs module doc must enumerate `{family}` for inventory coherence"
+        );
+    }
+}
+
 /// T112 audit pin #8: plan-doc cross-coverage. The Phase B plan doc
 /// (`docs/issue-42-phase-b-plan.md`) must remain the authority for
 /// the audit-pin methodology + 49-anchor inventory. Codified at

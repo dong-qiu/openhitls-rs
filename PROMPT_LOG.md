@@ -16481,3 +16481,56 @@ Pitfalls (codified):
     future Phase I PR 有明确 grep + 行为测试 target
 
 Recorded as DEV_LOG Phase T112.
+
+### T233 — Phase B-2 #47-pkey-* family 10 audit pins (Phase B 5 sub-PR 第 2 弹)
+
+> 按 B 走
+
+承接 T112 Phase B-1。
+
+改动:
+  crates/hitls-pki/tests/migrated_phase_b_audit_pins.rs 追加 T233 banner + 10 audit pins
+  累计 18 tests in 1 file
+
+10 audit pins 覆盖 pkey.rs 的 10 个 #47-pkey-* 站点:
+  t233_rsa_pss_oid_codepoint_pin (RFC 8017 §C.1 id-RSASSA-PSS OID 1.2.840.113549.1.1.10)
+  t233_rsa_pss_pkcs8_anchor_preserved_in_source (≥ 3 个 #47-pkey-rsa-pss + 'RSA-PSS PKCS#8 re-encoding not implemented' message)
+  t233_sm2_pkcs8_oid_codepoint_pin (GM/T 0006 + RFC 8998 sm2 OID 1.2.156.10197.1.301)
+  t233_sm2_pkcs8_anchor_preserved_in_source (≥ 3 个 #47-pkey-sm2 + 'SM2 PKCS#8 re-encoding not implemented')
+  t233_brainpool_p256_oid_codepoint_pin (RFC 5639 §A.1 brainpoolP256r1 OID 1.3.36.3.3.2.8.1.1.7)
+  t233_brainpool_anchor_preserved_in_source (#47-pkey-brainpool + 'Brainpool' family 名)
+  t233_nist_p224_oid_codepoint_pin (RFC 5480 / SEC 2 secp224r1 OID 1.3.132.0.33)
+  t233_p224_anchor_preserved_in_source (#47-pkey-p224 + 'P-224' 曲线名)
+  t233_pbes2_pbkdf2_oid_codepoint_pin (RFC 8018 §A.4 PBES2 OID 1.2.840.113549.1.5.13 + §A.2 PBKDF2 OID 1.2.840.113549.1.5.12)
+  t233_encrypted_pkcs8_anchor_preserved_in_source (≥ 2 个 #47-pkey-encrypted-pkcs8 + 5-家族清单 pin — pkey.rs 必须枚举全部 5 个 #47-pkey-* 家族)
+
+关键设计:
+  扩展 T112 4-tuple 方法学 (RFC § + codepoint byte + TODO 锚点 + plan-doc anchor)
+    把 byte codepoint 换成 OID dotted-decimal 字符串
+    每个 OID 字面量 = future Phase I 在 PKCS#8 parser 中 codec dispatch 的 grep target
+  pin #10 的 5-家族清单要求 pkey.rs 模块 doc 持续枚举全部 5 个 #47-pkey-* 家族
+    防止 partial gap closure 破坏文档一致性
+
+累计:
+  T112 (8) + T233 (10) = 18 tests in migrated_phase_b_audit_pins.rs
+
+验证:
+  cargo test -p hitls-pki --test migrated_phase_b_audit_pins --all-features  18/0
+  cargo test -p hitls-pki --all-features                                     1650/0 零回归 (was 1640, +10)
+  cargo fmt + cargo clippy --workspace --all-features -D warnings + typos    clean
+
+作用域:
+  同测试文件 +~140 行 (10 pins + banner)
+  0 product code
+  0 新 TODO
+
+沿用方法学:
+  T112 4-tuple 方法学 (RFC § + codepoint byte + TODO marker preservation + plan-doc anchor)
+  T222 「family inventory pin」 for sub-family coherence
+
+新方法学:
+  「OID identity pin via dotted-decimal string literal」 (codified):
+    泛化 T112 codepoint-byte pin 到 multi-byte OID 标识符
+    每个 dotted-decimal literal 是 future Phase I PKCS#8 codec dispatch 的 target
+
+Recorded as DEV_LOG Phase T233.
