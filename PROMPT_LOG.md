@@ -16534,3 +16534,65 @@ Recorded as DEV_LOG Phase T112.
     每个 dotted-decimal literal 是 future Phase I PKCS#8 codec dispatch 的 target
 
 Recorded as DEV_LOG Phase T233.
+
+### T234 — Phase B-3 #47-genrsa/rsa-codec/conf/sm/keymgmt family 10 audit pins (Phase B 5 sub-PR 第 3 弹)
+
+> 按 B 走
+
+承接 T233 Phase B-2。
+
+改动:
+  migrated_phase_b_audit_pins.rs 追加 T234 banner + 10 audit pins
+  累计 28 tests in 1 file
+
+覆盖 17 个 workspace-wide 站点:
+  README.md × 5 + sm_defer.rs × 3 + keymgmt_defer.rs × 3 + rsa_cmd.rs × 2 + genrsa.rs × 2 + main.rs × 1 + conf_util.rs × 1
+
+10 audit pins:
+  t234_genrsa_encryption_anchor_preserved_in_source (≥ 2 #47-genrsa-encryption in genrsa.rs)
+  t234_genrsa_pem_label_constant_pin (RFC 7468 §10 'RSA PRIVATE KEY' + 'ENCRYPTED PRIVATE KEY' PEM 标签)
+  t234_rsa_codec_extract_anchor_preserved_in_source (≥ 2 #47-rsa-codec-extract in rsa_cmd.rs)
+  t234_rsa_pkcs1_oid_codepoint_pin (RFC 8017 rsaEncryption OID 1.2.840.113549.1.1.1)
+  t234_conf_cnf_anchor_preserved_in_source (#47-conf-cnf in conf_util.rs)
+  t234_conf_cnf_section_syntax_pin ('[section]' 括号语法字面量)
+  t234_sm_defer_anchor_preserved_in_source (≥ 3 #47-sm-defer in sm_defer.rs)
+  t234_keymgmt_defer_anchor_preserved_in_source (≥ 2 #47-keymgmt-defer + cross-ref to #47-sm-defer)
+  t234_cli_readme_inventory_pin (4 个 README-surfaced 家族: rsa-codec-extract / conf-cnf / sm-defer / keymgmt-defer; #47-genrsa-encryption 设计为 genrsa.rs-only)
+  t234_audit_phase_b3_plan_docs_in_sync (plan doc + T234 + 5 TODO family 锚点)
+
+关键设计:
+  扩展 T233 OID/codepoint 方法学到 stub-file 家族 pin
+  README inventory pin 只枚举 README 实际 surface 的 4 家族
+  内联说明 5th 家族 (genrsa-encryption) 为 inline-only 的原因 → 防止 future refactor 静默丢失 inline 锚点
+  pin #2 PEM label 字面量 = Phase I 把 -cipher flag 接到加密时的 grep target
+  pin #4 rsaEncryption OID = Phase I 提取 RSA PKCS#1 codec 的 dispatch target
+
+累计:
+  T112 (8) + T233 (10) + T234 (10) = 28 tests
+
+验证:
+  cargo test -p hitls-pki --test migrated_phase_b_audit_pins --all-features  28/0
+  cargo test -p hitls-pki --all-features                                     1660/0 零回归 (was 1650, +10)
+  cargo fmt + cargo clippy --workspace --all-features -D warnings + typos    clean
+
+Pitfall (codified):
+  README inventory check 在 #47-genrsa-encryption 上失败 (该锚点仅 inline 存在 genrsa.rs)
+  修复: 文档化例外 (5th 家族 by-design 是 genrsa.rs-only) + 减少 README inventory pin 到 4 家族
+  规则: 「README inventory pin 必须反映实际 README inventory; 源文件 anchor 数 ≠ README anchor 数 是头等 documentation gap 而非测试 bug」
+
+作用域:
+  同测试文件 +~170 行 (10 pins + banner)
+  0 product code
+  0 新 TODO
+
+沿用方法学:
+  T112 4-tuple + T233 OID identity pin + T222 family inventory pin
+
+新方法学:
+  「inline-only anchor exception documented in inventory pin」 (codified):
+    TODO 家族故意 inline-only (不 surface 到 README) 时
+    inventory pin 必须显式 skip 该家族
+    pin doc 必须内联文档化 rationale
+    否则 future README 清理可能在 inventory check 通过的情况下静默丢失 inline 锚点
+
+Recorded as DEV_LOG Phase T234.
