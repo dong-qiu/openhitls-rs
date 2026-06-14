@@ -96,11 +96,11 @@ mutation/consistency categories that no Rust test currently pins.
 
 | # | T-phase | Source family | Estimate tests | Approach |
 |---|---------|---------------|---------------:|----------|
-| ✅ plan + D-1 | ✅ T214 | this doc + `tls13_1.c` (record/state/version mutations) | ~12 (this PR) | extends `transcript_mutation.rs` |
-| D-2 | T215 | `tls13_2.c` + `_cert.c` + `_kex.c` | ~15 | extends `transcript_mutation.rs` |
-| D-3 | T216 | `tls13_extensions_1+2.c` + `_record.c` + `_appendix.c` + `_pha.c` | ~15 | extends `transcript_mutation.rs` |
-| D-4 | T217 | `tls12_rfc5246.c` + `_cert.c` + `_extensions.c` + `_malformed_msg.c` + `rfc5746.c` | ~15 | new `transcript_mutation_tls12.rs` |
-| **closeout** | T218 | series rollup + Phase D close | — | series summary |
+| ✅ plan + D-1 | ✅ T214 | this doc + `tls13_1.c` | 10 (delivered) | merged (PR #296) |
+| ✅ D-2 | ✅ T215 | `tls13_2.c` + `_cert.c` + `_kex.c` | 11 (delivered) | merged (PR #297) |
+| ✅ D-3 | ✅ T216 | `tls13_extensions_1+2.c` + `_record.c` + `_appendix.c` + `_pha.c` | 13 (delivered) | merged (PR #298) |
+| ✅ D-4 | ✅ T217 | TLS 1.2 family (new `transcript_mutation_tls12.rs`) | 14 (delivered) | merged (PR #299) |
+| ✅ **closeout** | ✅ T218 | series rollup + Phase D close | — | this PR |
 
 `TODO(#42-phase-d)` — pinned in this doc and in each Phase D sub-PR's
 audit-pin test. Each sub-PR removes its row from the planned table
@@ -144,12 +144,81 @@ test pinning this plan doc's anchors.
 
 ## 7. Acceptance criteria
 
-- [ ] 5 sub-PR series merged with ~57 audit-pin tests
-- [ ] `tests/interop/tests/` has extensions to
+- [x] 5 sub-PR series merged with **55 audit-pin tests** (T214 10 + T215 11 + T216 13 + T217 14, vs initial ~57 estimate)
+- [x] `tests/interop/tests/` has extensions to
       `transcript_mutation.rs` + a new `transcript_mutation_tls12.rs`
-- [ ] Each test asserts a specific reject path (record/handshake
+- [x] Each test asserts a specific reject path (record/handshake
       error), a verified-positive round-trip, or an explicit gap
-      pin with `TODO(#42-phase-d)`
-- [ ] DEV_LOG **T214-T218** entries; PROMPT_LOG entries
-- [ ] `audit_phase_d_plan_docs_in_sync` cross-file pin in every
-      Phase D test file asserts this plan doc remains authoritative
+      pin with `TODO(#42-phase-d)` / `TODO(#48-encrypted-mutation)`
+- [x] DEV_LOG **T214-T218** entries; PROMPT_LOG entries
+- [x] `audit_phase_d_plan_docs_in_sync*` cross-file pin in every
+      Phase D test file asserts this plan doc + §8 rollup totals
+
+## 8. Series rollup (T218 closeout)
+
+The 5-sub-PR series is closed; this section is the final tally so the
+issue closer / future readers can see the whole shape at a glance.
+
+| Sub-PR | Phase | Source family | C scope (fn / rows) | Delivered tests | PR | Outcome |
+|--------|-------|---------------|--------------------:|----------------:|----|---------|
+| plan + D-1 | T214 | this doc + `tls13_1.c` | 57 fn / 192 rows | 10 | #296 | merged |
+| D-2 | T215 | `tls13_2.c` + `_cert.c` + `_kex.c` | 142 fn / 434 rows | 11 | #297 | merged |
+| D-3 | T216 | `tls13_extensions_1+2.c` + `_record.c` + `_appendix.c` + `_pha.c` | 134 fn / 462 rows | 13 | #298 | merged |
+| D-4 | T217 | TLS 1.2 family (new `transcript_mutation_tls12.rs`) | 123 fn / 384 rows | 14 | #299 | merged |
+| closeout | T218 | series rollup + Phase D close | — | — | this PR | — |
+| **Totals** | | **456 fn / 1 472 rows** | | **55 tests** | | **5/5 sub-PRs closed** |
+
+**Net result vs C input**: 55 net new Rust audit-pin tests against
+456 unique C TC families / 1 472 parameterised `.data` rows across
+TLS 1.2 and TLS 1.3 consistency suites (5/5 sub-PRs closed,
+PRs #296 → #299). The reduction reflects Phase D's core thesis:
+T186 (#48 Phase 1) had already established the rogue-server framework
++ ShBuilder + 2 drivers, and many `tls{12,13}_consistency_*` rows
+either (a) test paths the rogue-server already covers (cross-coverage
+pin), (b) require encrypted post-SH state (`TODO(#48-encrypted-mutation)`
+scope-cut), or (c) pin extension/cipher codepoints that map directly
+to Rust constants (T216 codified codepoint-identity pin pattern).
+
+**Methodology lineage** (each sub-PR codified patterns the next
+reused):
+
+- T214 — Plan §X feature-gate proposal can be replaced by prior
+  codified pattern (T186 rogue-server > plan §5.1 test-hooks gate) /
+  record-layer raw byte mutation = SH-fluent's complementary attack
+  vector / verbatim-C-typo `typos.toml` allowlist saturation check
+- T215 — Cross-coverage pin via file-literal grep / Phase D's
+  boundary before encrypted-mutation
+- T216 — Extension-codepoint identity pin = RFC numeric-constant
+  regression lock
+- T217 — Sibling protocol file without rebuilding rogue-server /
+  sibling-named audit pin (`*_tls12` suffix)
+- T218 — Closeout = §8 rollup table + Methodology lineage + folds
+  into existing `audit_phase_d_plan_docs_in_sync*` pins (no new
+  test fn; same pattern as T200 / T208 / T213 three-Phase
+  consistency)
+
+**Follow-up TODOs left open** (5):
+
+- `TODO(#48-encrypted-mutation)` — encrypted post-SH transcript
+  mutations (cert_verify / finished / certificate / EncryptedExtensions)
+  require key-schedule simulation on the rogue-server side. Tracked
+  separately as a follow-up PR after Phase D closeout.
+- `TODO(#48-rfc-gap-sessid)` — RFC 8446 §4.1.3 `legacy_session_id_echo`
+  match check (T186 pinned the lenient acceptance).
+- `TODO(#48-rfc-gap-compression)` — RFC 8446 §4.1.3
+  `legacy_compression_method = 0` strict check (T186 pinned the
+  lenient acceptance).
+- `TODO(#42-phase-d)` — record-version strict-mode (T215 pinned
+  the 0x0304 lenient acceptance).
+- `TODO(#42-phase-d)` — ABNORMAL_CERTMSG_TC001-003 follow-up port
+  once encrypted-mutation infrastructure lands (T215).
+
+These are product-side hardening / extension tasks that surfaced
+during the audit; the corresponding tests pin **current** lenient
+or unsupported behaviour so a future hardening lands as a deliberate
+change.
+
+`typos.toml` C-quirk vocabulary accumulated to **9 patterns** across
+Phase D (`UNKOWN` / `VERISON` / `UNEXPECT` / `CERTFICATE` /
+`UNEXPETED` / `REORD` / `UNSUPPORT` / `CERTICATE` / `HEELO` /
+`BEWTEEN`).

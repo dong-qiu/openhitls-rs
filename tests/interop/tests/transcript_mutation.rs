@@ -696,6 +696,9 @@ fn audit_phase_d_plan_docs_in_sync() {
         "tls12_consistency_rfc5246.c",
         "TODO(#42-phase-d)",
         "rogue-server framework",
+        "## 8. Series rollup",
+        "**55 tests**",
+        "**5/5 sub-PRs closed**",
     ] {
         assert!(
             plan.contains(anchor),

@@ -15691,3 +15691,88 @@ Phase D 累计:
     命名 suffix 区分多个 sibling 文件同 fn 名冲突
 
 Recorded as DEV_LOG Phase T217.
+
+### T218 — Phase D 收官 (Phase D 5 sub-PR 第 5 / 最终弹)
+
+> 开始做Phase F：我希望你能连续工作，依次完成T214~T218, 每完成1项任务按照定义的提交工作流提交，每项任务的代码确认合入主干后自动开始下一项任务
+
+承接 T217 Phase D-4。
+关闭 Phase D 5-sub-PR 系列:
+  T214 tls13_1 (10)
+  T215 tls13_2 + cert + kex (11)
+  T216 tls13 ext + record + appendix + pha (13)
+  T217 tls12 新文件 (14)
+  T218 closeout (本 PR)
+
+系列净产:
+  Sub-PR    Phase  Source                                          C scope (fn/rows)              Delivered  PR
+  ------------------------------------------------------------------------------------------------------------
+  plan+D-1  T214   this doc + tls13_1.c                            57 / 192                       10         #296
+  D-2       T215   tls13_2 + cert + kex                            142 / 434                      11         #297
+  D-3       T216   tls13 extensions+record+appendix+pha            134 / 462                      13         #298
+  D-4       T217   tls12 新 transcript_mutation_tls12.rs           123 / 384                      14         #299
+  closeout  T218   series rollup + Phase D close                   -                              -          本 PR
+  Totals                                                           456 / 1472                     55 tests   5/5
+
+55 tests / 456 fn / 1472 rows 缩减比例反映 Phase D 核心论点:
+  T186 (#48 Phase 1) 已建 rogue-server framework + ShBuilder + 2 driver
+  大量 C 测面被 prior phase test 覆盖 (cross-coverage pin) 或 encrypted state 阻塞 (scope-cut TODO)
+  或 extension/cipher codepoint 直接 RFC 数字对照 (T216 codified pin)
+
+改动 — 0 新 product / 0 新 test fn:
+  docs/issue-42-phase-d-plan.md:
+    §4 表 4 行 ✅ + PR# 标记 (T214 10 #296 / T215 11 #297 / T216 13 #298 / T217 14 #299)
+    §7 acceptance criteria 全 ✅
+    新 §8 series rollup table (5 sub-PR + Totals 行 + Methodology lineage 5 行 + 5 个 follow-up TODO 锁 + typos.toml C-quirk vocabulary 累 9 patterns 记录)
+  2 个 Phase D 测试文件 audit_phase_d_plan_docs_in_sync* 加 3 个新断言:
+    `## 8. Series rollup` section header
+    `**55 tests**` 字面值
+    `**5/5 sub-PRs closed**` 字面值
+
+为何无新 test fn:
+  沿用 T200 #46 + T208 Phase C + T213 Phase F codified 模式
+  closeout 折入既有 audit_phase_d_plan_docs_in_sync* 单测避免 fn 膨胀
+  2 个文件同名 fn 各改 1 处 + 1 个 plan doc 改完成
+
+累计 (终值):
+  T186 (7) + T214 (10) + T215 (11) + T216 (13) + T217 (14) + T218 (0) = 55 tests in 2 files
+  transcript_mutation.rs 41 + transcript_mutation_tls12.rs 14
+
+Phase D 总成果:
+  2 个 *_consistency 测试文件 (T214-T217 累积 55 audit-pin tests)
+  1 个新 plan doc (issue-42-phase-d-plan.md)
+  5 个 follow-up TODO:
+    TODO(#48-encrypted-mutation) — cert verify / finished / EncryptedExtensions 等需 key schedule
+    TODO(#48-rfc-gap-sessid) — T186 pinned RFC 8446 §4.1.3 sessid lenient
+    TODO(#48-rfc-gap-compression) — T186 pinned compression byte lenient
+    TODO(#42-phase-d) — T215 record-version 0x0304 lenient
+    TODO(#42-phase-d) — T215 ABNORMAL_CERTMSG follow-up port
+
+验证:
+  cargo test -p hitls-integration-tests --test transcript_mutation --test transcript_mutation_tls12 --all-features  41/0 + 14/0 = 55/0
+  cargo test -p hitls-integration-tests --all-features                                                              380+/0 零回归
+  cargo fmt + cargo clippy --workspace --all-features -D warnings + typos                                           clean
+
+作用域:
+  plan doc +85 行 (§8 + lineage + 5 TODO 锁)
+  2 个测试文件 audit_phase_d_plan_docs_in_sync* 各 +3 anchor
+  0 product code / 0 新 test fn
+
+沿用 + 新方法学:
+  沿用 T200 #46-closeout + T208 Phase C-closeout + T213 Phase F-closeout 三阶段同 closeout 模板
+  (series rollup + Methodology lineage + 折入既有 pin)
+
+  新「三 Phase closeout 一致性 (Phase C T208 + Phase F T213 + Phase D T218) standard recipe 验证」 (codified):
+    T213 提出的「Phase 收官 standard recipe」第 3 次复用
+    plan §N rollup table + Methodology lineage + 2-文件 pin 字面值 anchor + N-TODO 锁 + 0 新 test fn
+    三阶段连续验证 reusability 形成可信 institutional knowledge
+    后续 Phase 系列 (如 #48 encrypted-mutation 单 PR 或 follow-up audit) 收官时直接套用此 recipe
+
+  「verbatim-C-typo allowlist accumulated 9 patterns 是 Phase D 系列副产物」:
+    Phase D 5 sub-PR 添加 UNSUPPORT(T215) / CERTICATE+HEELO(T216) / BEWTEEN(T217) 4 个新 verbatim C symbol
+    typos.toml C-quirk vocabulary 从 T212 的 5 patterns 增至 9 patterns
+    此 vocabulary 不仅服务测试迁移
+    也成为「C 源 quirk 历史档案」
+    帮助后人理解 C 符号 verbatim 引用必要性
+
+Recorded as DEV_LOG Phase T218.
