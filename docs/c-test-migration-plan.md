@@ -481,7 +481,7 @@ Phase A 末段连续三次 na-list 对未解决条目的根因假设错误，提
 | 阶段 | 状态 | 备注 |
 |---|---|---|
 | **B** 完全缺失 6 大类 | **Phase B 准备阶段：弱断言精度化 (#55) 100% 关闭** (T163–T169，2026-06-06)；剩余 issue (#43/#44/#47/#48/#51/#58/#59/#60/#61) 仍 open。部分由 Phase A 期间间接覆盖（CSR/CRL 通过 I155 + T-X509，custom-extension 通过 TLS 测试扩展）；待统一回顾确认 |
-| **C** PKI malformed fixtures | T113 进行中 | 6 480 → 6 494 的 +14 来自 T161 McEliece，但实际工作集中于 PKI fixture 镜像 + 加载器，相关 issue 仍 open |
+| **C** PKI malformed fixtures | **closed at T204-T208** (5 sub-PRs, 46 audit-pin tests via `docs/issue-42-phase-c-plan.md`) | 原计划 ~2800 fixture target 经 Phase C plan §3 audit 重新作用域为 audit-pin sampled approach；`migrated_x509_parse.rs` (1 076 fns) + CRL (41) + CSR (13) + T204-T208 (46) ≈ 1176 tests 总覆盖；fixture 镜像 + MANIFEST.sha256 落盘在 `tests/vectors/c-asn1-fixtures/`；deeper "1:1 fixture port" 扩展暂未启动（与 Phase D/G audit-pin 方法学一致） |
 | **D** TLS transcript-mutation | T114 reserved | tlsfuzzer 路径已部分替代（T88–T119 + T141 全量 sweep）；剩 MODIFIED_*_TC 二进制 mutation 待 transcript-hook 设计 |
 | **E** `interface_tlcp` trait 化 | T115 reserved | 未启动 |
 | **F** tlcp/dtls 残余 + 全面回归 | T116 reserved | 未启动 |
