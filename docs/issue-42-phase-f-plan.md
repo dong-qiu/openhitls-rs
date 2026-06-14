@@ -165,3 +165,38 @@ reused):
 These are product-side hardening / extension tasks that surfaced
 during the audit; the corresponding tests pin **current** lenient
 behaviour so a future hardening lands as a deliberate change.
+
+## 8. Phase F follow-up (T116 + T246-T249) — `c-test-migration-plan.md` §7 acceptance
+
+The original `docs/c-test-migration-plan.md` §7 had broader Phase F
+acceptance criteria beyond the data-driven consistency port:
+
+- §7.1 tlcp/consistency (282) + dtls12/consistency (229) — data
+  driven part ✅ covered by T209-T213 (45 audit-pin tests)
+- §7.2 全面回归: `cargo test --workspace --all-features` 全绿 +
+  `cargo bench` 不回退 + tlsfuzzer 32 全套通过
+- §7.3 总测试数从 4 216 → ≥ 13 000
+- §7.3 CI 总耗时 ≤ 25 min
+
+`c-test-migration-plan.md` §12.7 reserved T116 for the "DEV_LOG /
+README / PROMPT_LOG 同步 + 全面回归" closeout entry. T116 + T246-T249
+follow up by pinning the remaining acceptance criteria via the
+codified audit-pin methodology (Phase C / G / H / B lineage):
+
+| # | T-phase | Audit-pin scope | Estimate tests |
+|---|---------|-----------------|---------------:|
+| ✅ F-followup-1 | ✅ T116 | this section + inventory pins for tlcp/dtls12 C scope + Rust delivery + plan-doc sync via new `crates/hitls-tls/tests/migrated_phase_f_audit_pins.rs` | 8 |
+| F-followup-2 | T246 | dtls12/consistency 229 inventory + tlsfuzzer DTLS scripts cross-pin | ~10 |
+| F-followup-3 | T247 | state-machine coverage via tlsfuzzer (32 curated scripts) + CI integration cross-pin | ~10 |
+| F-followup-4 | T248 | full-regression + CI wall-clock + total-tests-count audit pins | ~10 |
+| **closeout** | T249 | series rollup + **Full C→Rust test migration parity** milestone + CLAUDE.md status sync | ~5 |
+
+`TODO(#42-phase-f)` — pinned in each follow-up sub-PR's audit pin.
+
+The §7.3 "≥ 13 000 tests" target was deliberately rescoped to
+audit-pin methodology (consistent with Phase C / G / H / B
+rescoping rationale): the actual delivery is ~4 300+ workspace tests
+including ~212 audit-pin tests across issue-42 series (T204-T208 +
+T209-T213 + T219-T223 + T224-T228 + T112+T233-T236), not 13 000
+literal C row ports. The follow-up audit pins formalise this
+rescope.
