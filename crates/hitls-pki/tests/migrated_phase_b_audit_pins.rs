@@ -772,3 +772,133 @@ fn t112_audit_phase_b_plan_docs_in_sync() {
         );
     }
 }
+
+// ===========================================================================
+// T236 / Phase B closeout — series rollup + Phase I roadmap emission +
+// methodology lineage.
+//
+// Sibling to T200 / T208 / T213 / T218 / T223 / T228 closeout phases. The
+// recipe is: §N rollup in the plan doc + methodology lineage table + N
+// closeout pin tests + emit a standalone roadmap doc for the deferred
+// deeper work (new pattern codified at T236).
+//
+// Cumulative: T112 (8) + T233 (10) + T234 (10) + T235 (10) + T236 (5) =
+// **43 tests** in this file.
+//
+// Phase B closeout outcome: 49 `#43-#61` TODO anchors all surveyed,
+// behaviour-pinned, and cross-referenced into the new
+// `docs/issue-42-phase-i-roadmap.md` with explicit "what-to-close"
+// pointers for each anchor.
+// ===========================================================================
+
+/// T236 closeout — pin the cumulative test count in this file matches
+/// the Phase B rollup. Counts via fn-prefix matching to avoid the
+/// T223-codified `#[test]` literal self-count pitfall.
+#[test]
+fn t236_phase_b_cumulative_count_pin() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let path = format!("{manifest_dir}/tests/migrated_phase_b_audit_pins.rs");
+    let body = std::fs::read_to_string(&path).unwrap();
+    let test_fn_count = body
+        .lines()
+        .filter(|l| {
+            l.starts_with("fn t112_")
+                || l.starts_with("fn t233_")
+                || l.starts_with("fn t234_")
+                || l.starts_with("fn t235_")
+                || l.starts_with("fn t236_")
+        })
+        .count();
+    assert_eq!(
+        test_fn_count, 43,
+        "Phase B + T236 closeout cumulative count: 8 (T112) + 10 (T233) + \
+         10 (T234) + 10 (T235) + 5 (T236) = 43 in this file"
+    );
+}
+
+/// T236 closeout — pin the §7 methodology lineage table in the Phase B
+/// plan doc. The lineage spans 5 codified Phase B anchors.
+#[test]
+fn t236_phase_b_methodology_lineage_pinned() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let plan_path = format!("{manifest_dir}/../../docs/issue-42-phase-b-plan.md");
+    let plan = std::fs::read_to_string(&plan_path).unwrap();
+    assert!(plan.contains("Methodology lineage"));
+    for anchor in ["T112", "T233", "T234", "T235", "T236"] {
+        assert!(
+            plan.contains(anchor),
+            "methodology lineage table must reference codified anchor `{anchor}`"
+        );
+    }
+}
+
+/// T236 closeout — pin all 5 Phase B sub-PRs are marked closed in the
+/// plan doc §4 table.
+#[test]
+fn t236_phase_b_plan_doc_all_subprs_closed() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let plan_path = format!("{manifest_dir}/../../docs/issue-42-phase-b-plan.md");
+    let plan = std::fs::read_to_string(&plan_path).unwrap();
+    for anchor in ["✅ T112", "✅ T233", "✅ T234", "✅ T235", "✅ T236"] {
+        assert!(
+            plan.contains(anchor),
+            "plan doc must mark `{anchor}` as closed"
+        );
+    }
+}
+
+/// T236 closeout — pin that `docs/issue-42-phase-i-roadmap.md` was
+/// emitted and covers all 5 Phase B TODO families with per-anchor
+/// "what-to-close" pointers.
+#[test]
+fn t236_phase_i_roadmap_emitted() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let roadmap_path = format!("{manifest_dir}/../../docs/issue-42-phase-i-roadmap.md");
+    let roadmap = std::fs::read_to_string(&roadmap_path)
+        .unwrap_or_else(|e| panic!("Phase I roadmap doc missing at {roadmap_path}: {e}"));
+    // 18 Phase B TODO family anchors must all appear in Phase I
+    // roadmap (matched as bare anchor names without the `TODO()`
+    // wrapper since the roadmap uses backticks like `#44-...` in
+    // section headings).
+    for family in [
+        "#44-strict-version",
+        "#45-strict-version",
+        "#45-aki-match",
+        "#47-pkey-rsa-pss",
+        "#47-pkey-sm2",
+        "#47-pkey-brainpool",
+        "#47-pkey-p224",
+        "#47-pkey-encrypted-pkcs8",
+        "#47-genrsa-encryption",
+        "#47-rsa-codec-extract",
+        "#47-conf-cnf",
+        "#47-sm-defer",
+        "#47-keymgmt-defer",
+        "#46-version-bounds",
+        "#58-dup-check",
+        "#58-context-gap",
+        "#61-codec-gap",
+        "#61-design",
+    ] {
+        assert!(
+            roadmap.contains(family),
+            "Phase I roadmap must reference TODO family `{family}`"
+        );
+    }
+    assert!(
+        roadmap.contains("what-to-close"),
+        "Phase I roadmap must use the canonical `what-to-close` per-anchor pointer header"
+    );
+}
+
+/// T236 closeout — series rollup banner pin. The 43-tests + Phase I
+/// roadmap arithmetic + cross-pin to the Phase B plan doc's §7 rollup.
+#[test]
+fn t236_phase_b_closeout_banner_pinned() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let plan_path = format!("{manifest_dir}/../../docs/issue-42-phase-b-plan.md");
+    let plan = std::fs::read_to_string(&plan_path).unwrap();
+    assert!(plan.contains("**43 tests**"));
+    assert!(plan.contains("issue-42-phase-i-roadmap.md"));
+    assert!(plan.contains("not silently deferred"));
+}

@@ -1,6 +1,6 @@
 # Phase B — Audit-pin closure of remaining `#43-#61` TODO anchors
 
-**Status**: Planning + first batch (T112).
+**Status**: ✅ Complete (T112 + T233-T236 all merged) — 5/5 sub-PRs closed; 43 audit-pin tests delivered + Phase I roadmap doc emitted covering all 49 anchors.
 **Tracking issue**: [#42](https://github.com/dong-qiu/openhitls-rs/issues/42)
 **Migration plan**: `docs/c-test-migration-plan.md` §3 Phase B.
 **Methodology**: Phase G/H-codified audit-pin sample (T220 + T225 +
@@ -71,11 +71,11 @@ These ARE the existing audit pins. What Phase B adds:
 
 | # | T-phase | Source family | Estimate tests | Approach |
 |---|---------|---------------|---------------:|----------|
-| ✅ plan + B-1 | ✅ T112 | this doc + 8 audit pins for `#44/#45` strict-version + aki-match | 8 (this PR) | new `crates/hitls-pki/tests/migrated_phase_b_audit_pins.rs` |
-| B-2 | T233 | `#47-pkey-*` family (RSA-PSS / SM2 / Brainpool / P-224 / encrypted-PKCS#8) | ~10 | extends `migrated_phase_b_audit_pins.rs` |
-| B-3 | T234 | `#47-genrsa / rsa-codec / conf / sm / keymgmt` family | ~10 | extends `migrated_phase_b_audit_pins.rs` |
-| B-4 | T235 | `#46-plan / #58-context / #61-codec` family | ~10 | extends `migrated_phase_b_audit_pins.rs` |
-| **closeout** | T236 | series rollup + Phase I roadmap doc + methodology lineage | ~5 | series summary |
+| ✅ plan + B-1 | ✅ T112 | this doc + 8 audit pins for `#44/#45` strict-version + aki-match | 8 (delivered) | new `crates/hitls-pki/tests/migrated_phase_b_audit_pins.rs` |
+| ✅ B-2 | ✅ T233 | `#47-pkey-*` family (RSA-PSS / SM2 / Brainpool / P-224 / encrypted-PKCS#8) | 10 (delivered) | extends `migrated_phase_b_audit_pins.rs` |
+| ✅ B-3 | ✅ T234 | `#47-genrsa / rsa-codec / conf / sm / keymgmt` family | 10 (delivered) | extends `migrated_phase_b_audit_pins.rs` |
+| ✅ B-4 | ✅ T235 | `#46-plan / #58-context / #61-codec` family | 10 (delivered) | extends `migrated_phase_b_audit_pins.rs` |
+| ✅ **closeout** | ✅ T236 | series rollup + Phase I roadmap doc + methodology lineage | 5 (delivered) | series summary + `docs/issue-42-phase-i-roadmap.md` |
 
 `TODO(#42-phase-b)` — pinned in this doc and each Phase B sub-PR.
 
@@ -111,10 +111,35 @@ Lands `crates/hitls-pki/tests/migrated_phase_b_audit_pins.rs` with:
 
 ## 6. Acceptance criteria
 
-- [ ] 5 sub-PR series merged with ~40-45 audit-pin tests
-- [ ] `crates/hitls-pki/tests/` has new `migrated_phase_b_audit_pins.rs`
-- [ ] T236 closeout emits `docs/issue-42-phase-i-roadmap.md` covering
-      all 49 Phase B anchors + their "what-to-close" pointers
-- [ ] DEV_LOG **T112 / T233-T236** entries; PROMPT_LOG entries
-- [ ] `audit_phase_b_plan_docs_in_sync` cross-file pin in every Phase
+- [x] 5 sub-PR series merged with ~40-45 audit-pin tests — delivered **43** (8+10+10+10+5)
+- [x] `crates/hitls-pki/tests/` has new `migrated_phase_b_audit_pins.rs` — 43 tests
+- [x] T236 closeout emits `docs/issue-42-phase-i-roadmap.md` covering all 49 Phase B anchors + their "what-to-close" pointers
+- [x] DEV_LOG **T112 / T233-T236** entries; PROMPT_LOG entries — all 5 logged
+- [x] `audit_phase_b_plan_docs_in_sync` cross-file pin in every Phase
       B test addition asserts this plan doc remains authoritative
+
+## 7. Series rollup (T236 closeout)
+
+**Cumulative across the Phase B audit-pin family** (this file):
+T112 (8) + T233 (10) + T234 (10) + T235 (10) + T236 (5) = **43 tests**
+in `crates/hitls-pki/tests/migrated_phase_b_audit_pins.rs`.
+
+**Methodology lineage** (each codified pattern stacked on the
+previous; ordered chronologically across Phase B):
+
+| Codified at | Pattern |
+|-------------|---------|
+| T112 | Phase B audit pin = (RFC § + codepoint byte + TODO marker preservation + plan-doc cross-coverage) 4-tuple |
+| T233 | OID identity pin via dotted-decimal string literal (multi-byte identifier generalisation of T112) |
+| T234 | Inline-only anchor exception documented in inventory pin (when a family is intentionally not in README, skip + document rationale) |
+| T235 | Cross-crate source file inventory pin (manifest-dir relative paths cross hitls-pki → hitls-tls + tests/interop) |
+| T236 | Phase I roadmap doc emission as substantive closeout (deferred deeper work captured per-anchor in standalone doc, not buried in plan §8) |
+
+**Outcome**: 49 Phase B `#43-#61` TODO anchors all surveyed,
+behaviour-pinned, and cross-referenced into the new
+`docs/issue-42-phase-i-roadmap.md` with explicit "what-to-close"
+pointers for each anchor. The deeper crypto-implementation work
+(RSA-PSS PKCS#8 codec, SM2 PKCS#8, Brainpool, NIST P-224, conf
+`.cnf` parser, PBES2 password-derived PKCS#8 encryption, custom
+extension context generalisation, SNI strict-codec hardening) is
+now in **Phase I scope** — not silently deferred.
