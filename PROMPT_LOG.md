@@ -16275,3 +16275,71 @@ Continues T225 Phase H-2.
     本机制经 T224 framework 单独可达
 
 Recorded as DEV_LOG Phase T226.
+
+### T227 — Phase H-4 DTLS 1.3 + 0-RTT + KeyUpdate family 10 tests (Phase H 5 sub-PR 第 4 弹)
+
+> 按 A + C 走
+
+Continues T226 Phase H-3.
+
+改动:
+  tests/interop/tests/transcript_mutation_encrypted_e2e.rs 追加 T227 banner + 10 tests
+  累计 33 tests in 1 file
+  新 helper: build_key_update_message
+
+10 tests:
+  1 E2E (T224 framework):
+    h227_e2e_encrypted_keyupdate_before_finished_rejected (post-handshake-only KeyUpdate 序列错误)
+  2 DTLS 1.3 pins:
+    h227_dtls13_record_framing_rfc9147_scope_cut_documented (UDP framework gap)
+    h227_dtls13_unified_header_byte_pin (RFC 9147 §4 top 3 bits 0b001, 与 DTLS 1.2 type byte 0x16 互斥)
+  2 0-RTT pins:
+    h227_0rtt_early_data_extension_codepoint_pin (RFC 8446 §4.2.10 codepoint=42)
+    h227_0rtt_rejected_garbage_tolerance_t106_cross_pin (DEV_LOG T106 锚点)
+  4 KeyUpdate pins:
+    h227_keyupdate_handshake_type_byte_identity_pin (0x18=24)
+    h227_keyupdate_message_min_wire_size_pin (5 bytes)
+    h227_keyupdate_request_update_codepoint_pin (0/1 + 边界)
+    h227_keyupdate_t100_t101_codec_authority_cross_pin (DEV_LOG T100+T101 锚点)
+  1 plan banner:
+    h227_phase_h4_plan_banner_pinned
+
+关键设计:
+  3 sub-target 各自的 envelope:
+    DTLS 1.3 — UDP rogue server 框架 (T224 是 TCP); scope-cut + 字节格式 pin
+    0-RTT — PSK warm-up + early_data 流程 (T119 PSK_ONLY 已 deferred); 扩展 codepoint pin + T106 cross-pin
+    KeyUpdate — post-handshake 消息, 经 T224 框架以 out-of-order 注入可达; E2E test 产生 real-wire Alert
+  T100+T101+T117 codec-authority trio 仍是 binding 约束
+  本 PR 为 KeyUpdate 路径 cross-pin 该 trio
+
+累计:
+  T224 (3) + T225 (10) + T226 (10) + T227 (10) = 33 tests in transcript_mutation_encrypted_e2e.rs
+
+Pitfall (codified):
+  clippy::doc_lazy_continuation 拒绝 doc 中 '+ non-Handshake records' 续行 (read as list item)
+  同 T217 / T220 pitfall
+  修复: 重写为 continuous prose, 去掉 '+' bullet-like 标记
+
+验证:
+  cargo test -p hitls-integration-tests --test transcript_mutation_encrypted_e2e --all-features  33/0
+  cargo test -p hitls-integration-tests --all-features                                           520/0 (was 510, +10)
+  cargo fmt + cargo clippy --workspace --all-features -D warnings + typos                        clean
+
+作用域:
+  同测试文件 +~200 行 (10 test + 1 helper)
+  0 product code
+  0 新 TODO
+
+沿用方法学:
+  T220 「helper-level mutation pin = full E2E driver alternative」
+  T225/T226 「E2E rogue server exercises parse / state-machine layers without cert+key infra」
+  T217/T220 「clippy::doc_lazy_continuation pitfall: 续行起首 + 或 - 读作 list item」
+
+新方法学:
+  「Phase H sub-PR 按 sub-target envelope 进一步细分」 (codified):
+    每个 MODIFIED_* C family 若有不同 infra 前置 (UDP / PSK warm-up / post-handshake state)
+      → 自己的 scope-cut documenter + 自己的 wire-format pin 集 + 框架可达时的 opportunistic E2E
+    通则: T225 parse-phase + T226 state-machine-ordering 之外
+      为「sub-target 框架部分覆盖」给出第 3 种 'opportunistic E2E + scope-cut documenter' 模式
+
+Recorded as DEV_LOG Phase T227.
