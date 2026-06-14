@@ -190,7 +190,15 @@ fn audit_plan_docs_in_sync() {
         assert!(plan.contains(tag), "plan doc missing sub-PR tag `{tag}`");
     }
 
-    for anchor in &["pkcs12.c", "pkcs12_util.c", "PKCS#12", "TODO(#42-phase-c)"] {
+    for anchor in &[
+        "pkcs12.c",
+        "pkcs12_util.c",
+        "PKCS#12",
+        "TODO(#42-phase-c)",
+        "## 8. Series rollup",
+        "**46 tests**",
+        "**5/5 sub-PRs closed**",
+    ] {
         assert!(
             plan.contains(anchor),
             "plan doc must keep anchor `{anchor}`"

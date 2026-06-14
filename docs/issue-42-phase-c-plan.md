@@ -60,11 +60,11 @@ unique categories C asserts that no Rust test currently pins.
 
 | # | T-phase | Source family | Estimate tests | Approach |
 |---|---------|---------------|---------------:|----------|
-| ✅ plan + C-1 | ✅ T204 | this doc + `cms.c` + `cms_sign.c` first batch | 12 (this PR) | merged (this PR) |
-| C-2 | T205 | `pkcs12.c` + `pkcs12_util.c` | ~12 | PKCS#12 parse/decrypt round-trips |
-| C-3 | T206 | `x509_crl.c` non-RFC5280 | ~10 | extension parsing + IDP/DCI |
-| C-4 | T207 | `x509_check.c` + `x509_vfy.c` | ~18 | chain-check + verify gap rows |
-| **closeout** | T208 | series rollup + Phase C close | — | series summary |
+| ✅ plan + C-1 | ✅ T204 | this doc + `cms.c` + `cms_sign.c` first batch | 11 (delivered) | merged (PR #286) |
+| ✅ C-2 | ✅ T205 | `pkcs12.c` + `pkcs12_util.c` | 10 (delivered) | merged (PR #287) |
+| ✅ C-3 | ✅ T206 | `x509_crl.c` non-RFC5280 | 10 (delivered) | merged (PR #288) |
+| ✅ C-4 | ✅ T207 | `x509_check.c` + `x509_vfy.c` | 15 (delivered) | merged (PR #289) |
+| ✅ **closeout** | ✅ T208 | series rollup + Phase C close | — | this PR |
 
 `TODO(#42-phase-c)` — pinned in this doc and in each Phase C sub-PR's
 `migrated_*.rs` audit pin. Each sub-PR removes its row from the planned
@@ -95,12 +95,66 @@ doc's anchors (same pattern as the #46 series).
 
 ## 7. Acceptance criteria
 
-- [ ] 5 sub-PR series merged with ~52 audit-pin tests
-- [ ] `crates/hitls-pki/tests/` has new `migrated_cms_*` /
-      `migrated_pkcs12_*` / `migrated_x509_crl_extensions_*` /
-      `migrated_x509_check_*` files
-- [ ] Each test asserts a specific `PkiError::*` variant or a
-      verified-positive round-trip
-- [ ] DEV_LOG **T204-T208** entries; CLAUDE.md status line bump
-- [ ] `audit_plan_docs_in_sync` pin asserts this plan doc remains
-      authoritative
+- [x] 5 sub-PR series merged with **46 audit-pin tests** (T204 11 + T205 10 + T206 10 + T207 15)
+- [x] `crates/hitls-pki/tests/` has new `migrated_cms_negative_parse.rs` +
+      `migrated_pkcs12_negative_parse.rs` +
+      `migrated_x509_crl_extensions.rs` + `migrated_x509_check_vfy.rs`
+- [x] Each test asserts a specific `PkiError::*` variant, a
+      verified-positive round-trip, or an explicit gap pin with
+      `TODO(#42-phase-c)`
+- [x] DEV_LOG **T204-T208** entries; PROMPT_LOG entries
+- [x] `audit_plan_docs_in_sync` cross-file pin in every Phase C test
+      file asserts this plan doc + §8 rollup totals
+
+## 8. Series rollup (T208 closeout)
+
+The 5-sub-PR series is closed; this section is the final tally so the
+issue closer / future readers can see the whole shape at a glance.
+
+| Sub-PR | Phase | Source family | C scope (fn / rows) | Delivered tests | PR | Outcome |
+|--------|-------|---------------|--------------------:|----------------:|----|---------|
+| plan + C-1 | T204 | this doc + `cms.c` + `cms_sign.c` | 40 fn / 418 rows | 11 | #286 | merged |
+| C-2 | T205 | `pkcs12.c` + `pkcs12_util.c` | 52 fn / 242 rows | 10 | #287 | merged |
+| C-3 | T206 | `x509_crl.c` non-RFC5280 | 45 fn / 448 rows | 10 | #288 | merged |
+| C-4 | T207 | `x509_check.c` + `x509_vfy.c` | 123 fn / 731 rows | 15 | #289 | merged |
+| closeout | T208 | series rollup + Phase C close | — | — | this PR | — |
+| **Totals** | | **260 fn / 1 839 rows** | | **46 tests** | | **5/5 sub-PRs closed** |
+
+**Net result vs C input**: 46 net new Rust tests against 260 unique C
+TC families / 1 839 parameterised `.data` rows in the 5 source files
+this series targets. The reduction reflects Phase C's core thesis
+(plan §2 + §3): much of the C surface is parameterised cipher × cert
+× chain matrices that `migrated_x509_parse.rs` (1 076 fns) and the
+existing interop chain tests already cover. The 46 audit-pin tests
+are the **delta** — semantics C asserts that no Rust test currently
+pins.
+
+**Methodology lineage** (each sub-PR codified patterns the next
+reused):
+
+- T204 — fixture-driven (not mutation-driven) / per-algorithm-family
+  enumeration / sub-PR series opener = plan doc + first batch +
+  cross-file pin
+- T205 — per-fixture password binding / `.data` row quoted-string
+  byte counting / fixture-without-TC-row → drop
+- T206 — unsupported-algorithm gap pin / algorithm-matrix fixture
+  reuse / extension parse = tolerated pin (negative claim)
+- T207 — struct field name grep beats intuition / PQC try-parse vs
+  `expect_err` / fixture-presence audit pin
+- T208 — closeout = §8 rollup table + Methodology lineage + 0 new
+  test fns (fold into existing `audit_plan_docs_in_sync`)
+
+**Follow-up TODOs left open** (3, all `TODO(#42-phase-c)`):
+
+- CMS SignedData strict-version (T204) — reject unknown version
+  values per RFC 5652 §5.1 / §11.1
+- CRL DSA-SHA-256 dispatch (T206) — add OID `2.16.840.1.101.3.4.3.2`
+  to the CRL signature-algorithm dispatch if DSA verification
+  becomes a target
+- PQC cert chain (T207) — ML-DSA / SLH-DSA SubjectPublicKeyInfo
+  decode + cert chain build paths
+
+These are product-side hardening / extension tasks that surfaced
+during the audit; the corresponding tests pin **current** lenient or
+unsupported behaviour so a future hardening lands as a deliberate
+change (test fails, gets updated to the new assertion).
