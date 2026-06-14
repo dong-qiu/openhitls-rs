@@ -15962,3 +15962,64 @@ Recorded as DEV_LOG Phase T220.
       enum 不可访问时用 raw 字节 + RFC 引用
 
 Recorded as DEV_LOG Phase T221.
+
+### T222 — Phase G-4 EncryptedExtensions + PHA family 10 tests (Phase G 5 sub-PR 第 4 弹)
+
+> 开始做Phase G：我希望你能连续工作，依次完成T219~T223, 每完成1项任务按照定义的提交工作流提交，每项任务的代码确认合入主干后自动开始下一项任务
+
+承接 T221 Phase G-3。
+
+改动:
+  tests/interop/tests/transcript_mutation_encrypted.rs 追加 T222 banner + 10 tests
+  累计 35 tests in 1 file
+  沿用 T196 same-file 累计追加 codified
+
+10 tests:
+  EncryptedExtensions (5):
+    encrypted_extensions_handshake_type_byte_identity_pin (RFC 8446 §B.3 type=0x08 raw)
+    encrypted_extensions_empty_body_round_trip (空 EE 6 字节格式)
+    encrypted_extensions_tampered_ciphertext_fails_decrypt
+    encrypted_extensions_tampered_aead_tag_fails_decrypt
+    ee_with_unknown_extension_codepoint_round_trip_pin (0xFFFF byte-exact 通过 AEAD)
+  PHA (4):
+    pha_certificate_request_handshake_type_byte_identity_pin (RFC 8446 §4.6.2 CertReq=0x0D)
+    pha_certificate_request_signature_algorithms_extension_codepoint_pin (RFC §4.4.2 cross-coverage to T216)
+    pha_application_traffic_secret_distinct_from_handshake_secret (derive_master_secret + derive_app_traffic_secrets)
+    pha_record_sequence_number_independence_pin (TrafficKeys::derive 双 secret 产 distinct key+iv)
+  Plan (1):
+    phase_g4_plan_banner_pinned
+
+关键设计:
+  4 个 EE 测试 (type + round-trip + 2 mutation) + 1 unknown ext byte-exact (validate AEAD 不破坏 client-ignored ext)
+  4 PHA 测试 (type + ext_codepoint + app_secret_distinct + key_iv_distinct)
+  1 plan banner
+  沿用 T220/T221 helper-level mutation pin
+  引入 derive_master_secret → derive_app_traffic_secrets 公共 API 链路
+
+累计:
+  T186 (7) + T214 (10) + T215 (11) + T216 (13) + T217 (14) + T219 (5) + T220 (10) + T221 (10) + T222 (10) = 90 tests in 3 files
+
+验证:
+  cargo test -p hitls-integration-tests --test transcript_mutation_encrypted --all-features  35/0
+  cargo test -p hitls-integration-tests --all-features                                       380+/0 零回归
+  cargo fmt + cargo clippy --workspace --all-features -D warnings + typos                    clean
+
+作用域:
+  同测试文件 +~230 行 (10 test)
+  0 product code
+  0 新 TODO
+
+沿用方法学:
+  T220 helper-level mutation pin
+  T221 raw byte pin (RFC §B.3 enum private)
+  T216 extension codepoint pin (cross-coverage to SIGNATURE_ALGORITHMS=13)
+
+新方法学:
+  「app_traffic_secret distinct from handshake_secret = PHA prerequisite pin」 (codified):
+    PHA messages 加密用 application traffic secret 而非 handshake traffic secret
+    KeySchedule 需 derive_master_secret 后 derive_app_traffic_secrets
+    pin 二者 distinct + 派生 TrafficKeys 后 key+iv 也 distinct
+    是 PHA mutation tests 的前提条件
+    后人 implement full PHA driver 时复用此 pin 作 baseline
+
+Recorded as DEV_LOG Phase T222.

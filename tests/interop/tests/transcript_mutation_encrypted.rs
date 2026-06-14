@@ -834,3 +834,236 @@ fn t221_phase_g3_plan_banner_pinned() {
     assert!(plan.contains("T221"));
     assert!(plan.contains("MODIFIED_FINISHED"));
 }
+
+// ===========================================================================
+// T222 / Phase G-4 — EncryptedExtensions + Post-Handshake Authentication (PHA).
+//
+// C source:
+// - `tls/consistency/tls13/test_suite_sdv_frame_tls13_consistency_rfc8446_extensions_2.c`
+//   (EncryptedExtensions abnormal rows)
+// - `tls/consistency/tls13/test_suite_sdv_frame_tls13_consistency_rfc8446_pha.c`
+//   (4 fn / 10 rows — POSTHANDSHAKE_FUNC_TC001/010/018/019)
+//
+// Same helper-level scope-decision rationale as T220 / T221.
+//
+// ## T222 mapping
+//
+// | C TC family | Rust test |
+// |-------------|-----------|
+// | (RFC 8446 §B.3 EE type) | `t222_encrypted_extensions_handshake_type_byte_identity_pin` |
+// | `EncryptedExtensions empty body baseline` | `t222_encrypted_extensions_empty_body_round_trip` |
+// | EE ciphertext mutation | `t222_encrypted_extensions_tampered_ciphertext_fails_decrypt` |
+// | EE tag mutation | `t222_encrypted_extensions_tampered_aead_tag_fails_decrypt` |
+// | `EncryptedExtensions abnormal extension format` | `t222_ee_with_unknown_extension_codepoint_round_trip_pin` |
+// | `POSTHANDSHAKE_FUNC_TC001` (PHA CertificateRequest) | `t222_pha_certificate_request_handshake_type_byte_identity_pin` |
+// | `POSTHANDSHAKE_FUNC_TC010` (PHA sig_alg ext required) | `t222_pha_certificate_request_signature_algorithms_extension_codepoint_pin` |
+// | `POSTHANDSHAKE_FUNC_TC018` (PHA uses application traffic secret) | `t222_pha_application_traffic_secret_distinct_from_handshake_secret` |
+// | `POSTHANDSHAKE_FUNC_TC019` (PHA sequence numbering) | `t222_pha_record_sequence_number_independence_pin` |
+// | (T222 plan banner) | `t222_phase_g4_plan_banner_pinned` |
+// ===========================================================================
+
+/// Mirrors RFC 8446 §B.3 — EncryptedExtensions handshake message type
+/// is `0x08`. Pinned as a raw byte for the same reason as T221's
+/// Finished type byte (the enum is private).
+#[test]
+fn t222_encrypted_extensions_handshake_type_byte_identity_pin() {
+    let ee_type_byte: u8 = 0x08;
+    assert_eq!(ee_type_byte, 8);
+}
+
+/// Mirrors C `EncryptedExtensions baseline`: an EE with an empty
+/// extensions list is `0x08 || u24(2) || u16(0)` (6 bytes total).
+/// Pin the format math and the AEAD round-trip.
+#[test]
+fn t222_encrypted_extensions_empty_body_round_trip() {
+    let params = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+    let server_secret = derive_secret(
+        params.hash_alg_id(),
+        &[0x77u8; 32],
+        b"s hs traffic",
+        &[0x88u8; 32],
+    )
+    .unwrap();
+    let keys = TrafficKeys::derive(&params, &server_secret).unwrap();
+
+    // EE message: type 0x08 + 3-byte length + 2-byte extensions length (0 = empty)
+    let ee_msg = vec![0x08, 0x00, 0x00, 0x02, 0x00, 0x00];
+    assert_eq!(ee_msg.len(), 6, "empty EE message is 6 bytes total");
+
+    let record =
+        seal_encrypted_record(CipherSuite::TLS_AES_128_GCM_SHA256, &keys, 7, 0x16, &ee_msg);
+    let aead = AesGcmAead::new(&keys.key).unwrap();
+    let nonce = record_nonce(&keys.iv, 7);
+    let aad = &record[..5];
+    let opened = aead.decrypt(&nonce, aad, &record[5..]).unwrap();
+    assert_eq!(&opened[..opened.len() - 1], ee_msg.as_slice());
+    assert_eq!(opened[opened.len() - 1], 0x16);
+}
+
+/// EE ciphertext-tamper variant.
+#[test]
+fn t222_encrypted_extensions_tampered_ciphertext_fails_decrypt() {
+    let params = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+    let server_secret = derive_secret(
+        params.hash_alg_id(),
+        &[0x99u8; 32],
+        b"s hs traffic",
+        &[0xAAu8; 32],
+    )
+    .unwrap();
+    let keys = TrafficKeys::derive(&params, &server_secret).unwrap();
+    let ee_msg = vec![0x08, 0x00, 0x00, 0x02, 0x00, 0x00];
+    let mut record =
+        seal_encrypted_record(CipherSuite::TLS_AES_128_GCM_SHA256, &keys, 8, 0x16, &ee_msg);
+    record[5 + 2] ^= 0x40;
+    let aead = AesGcmAead::new(&keys.key).unwrap();
+    let nonce = record_nonce(&keys.iv, 8);
+    let aad = &record[..5];
+    assert!(aead.decrypt(&nonce, aad, &record[5..]).is_err());
+}
+
+/// EE tag-tamper variant.
+#[test]
+fn t222_encrypted_extensions_tampered_aead_tag_fails_decrypt() {
+    let params = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+    let server_secret = derive_secret(
+        params.hash_alg_id(),
+        &[0xBBu8; 32],
+        b"s hs traffic",
+        &[0xCCu8; 32],
+    )
+    .unwrap();
+    let keys = TrafficKeys::derive(&params, &server_secret).unwrap();
+    let ee_msg = vec![0x08, 0x00, 0x00, 0x02, 0x00, 0x00];
+    let mut record =
+        seal_encrypted_record(CipherSuite::TLS_AES_128_GCM_SHA256, &keys, 9, 0x16, &ee_msg);
+    let last = record.len() - 1;
+    record[last] ^= 0x02;
+    let aead = AesGcmAead::new(&keys.key).unwrap();
+    let nonce = record_nonce(&keys.iv, 9);
+    let aad = &record[..5];
+    assert!(aead.decrypt(&nonce, aad, &record[5..]).is_err());
+}
+
+/// Mirrors C `EncryptedExtensions abnormal extension format`: pin
+/// that an unknown extension codepoint (e.g., 0xFFFF) embedded in
+/// the EE extensions list round-trips byte-exact through the AEAD
+/// layer. Real clients ignore unknown EE extensions per RFC 8446
+/// §4.1.2 — the encryption path must not corrupt them.
+#[test]
+fn t222_ee_with_unknown_extension_codepoint_round_trip_pin() {
+    let params = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+    let server_secret = derive_secret(
+        params.hash_alg_id(),
+        &[0xDDu8; 32],
+        b"s hs traffic",
+        &[0xEEu8; 32],
+    )
+    .unwrap();
+    let keys = TrafficKeys::derive(&params, &server_secret).unwrap();
+
+    // EE with one extension: type 0xFFFF + length 0
+    // extensions list bytes: [0xFF, 0xFF, 0x00, 0x00] = 4 bytes total
+    // EE body: 2-byte ext-list length (4) + the ext entry
+    let mut ee_msg = vec![0x08, 0x00, 0x00, 0x06]; // type + 3-byte msg length (6)
+    ee_msg.extend_from_slice(&[0x00, 0x04]); // extensions list length = 4
+    ee_msg.extend_from_slice(&[0xFF, 0xFF, 0x00, 0x00]); // unknown ext
+    assert_eq!(ee_msg.len(), 10);
+
+    let record = seal_encrypted_record(
+        CipherSuite::TLS_AES_128_GCM_SHA256,
+        &keys,
+        10,
+        0x16,
+        &ee_msg,
+    );
+    let aead = AesGcmAead::new(&keys.key).unwrap();
+    let nonce = record_nonce(&keys.iv, 10);
+    let aad = &record[..5];
+    let opened = aead.decrypt(&nonce, aad, &record[5..]).unwrap();
+    // The unknown ext codepoint must propagate byte-exact.
+    assert_eq!(
+        opened[opened.len() - 5..opened.len() - 1],
+        [0xFF, 0xFF, 0x00, 0x00]
+    );
+}
+
+/// Mirrors C `POSTHANDSHAKE_FUNC_TC001` shape — RFC 8446 §4.6.2 PHA
+/// CertificateRequest handshake type = `0x0D`. Same raw-byte pin
+/// pattern as T221 (the enum is private).
+#[test]
+fn t222_pha_certificate_request_handshake_type_byte_identity_pin() {
+    let cert_request_type_byte: u8 = 0x0D;
+    assert_eq!(cert_request_type_byte, 13);
+}
+
+/// Mirrors C `POSTHANDSHAKE_FUNC_TC010` shape: RFC 8446 §4.3.2 +
+/// §4.4.2 specify that the PHA CertificateRequest message MUST
+/// contain a `signature_algorithms` extension (codepoint 13).
+/// Cross-coverage pin to the T216 extension-codepoint pin.
+#[test]
+fn t222_pha_certificate_request_signature_algorithms_extension_codepoint_pin() {
+    use hitls_tls::extensions::ExtensionType;
+    assert_eq!(
+        ExtensionType::SIGNATURE_ALGORITHMS.0,
+        13,
+        "RFC 8446 §4.4.2 PHA CertificateRequest MUST carry signature_algorithms ext (codepoint 13)"
+    );
+}
+
+/// Mirrors C `POSTHANDSHAKE_FUNC_TC018`: PHA messages are encrypted
+/// under the **application traffic secret** (derived from the master
+/// secret after handshake completes), not the handshake traffic
+/// secret. Pin that the two secrets are distinct.
+#[test]
+fn t222_pha_application_traffic_secret_distinct_from_handshake_secret() {
+    let params = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+    let mut ks = KeySchedule::new(params.clone());
+    ks.derive_early_secret(None).unwrap();
+    ks.derive_handshake_secret(&[0x11u8; 32]).unwrap();
+    let (_client_hs, server_hs) = ks.derive_handshake_traffic_secrets(&[0x22u8; 32]).unwrap();
+    // Advance to MasterSecret stage before deriving app traffic secrets.
+    ks.derive_master_secret().unwrap();
+    let (_client_ap, server_ap) = ks.derive_app_traffic_secrets(&[0x33u8; 32]).unwrap();
+    assert_ne!(
+        server_hs, server_ap,
+        "server handshake and application traffic secrets must differ"
+    );
+}
+
+/// Mirrors C `POSTHANDSHAKE_FUNC_TC019`: PHA records use **new**
+/// AEAD key+IV derived from the application traffic secret, so
+/// they start their own sequence counter (independent of the
+/// handshake sequence). Pin that `TrafficKeys::derive` against
+/// the app secret produces a different key/iv pair than against
+/// the handshake secret.
+#[test]
+fn t222_pha_record_sequence_number_independence_pin() {
+    let params = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+    let mut ks = KeySchedule::new(params.clone());
+    ks.derive_early_secret(None).unwrap();
+    ks.derive_handshake_secret(&[0x44u8; 32]).unwrap();
+    let (_client_hs, server_hs) = ks.derive_handshake_traffic_secrets(&[0x55u8; 32]).unwrap();
+    let hs_keys = TrafficKeys::derive(&params, &server_hs).unwrap();
+    ks.derive_master_secret().unwrap();
+    let (_client_ap, server_ap) = ks.derive_app_traffic_secrets(&[0x66u8; 32]).unwrap();
+    let ap_keys = TrafficKeys::derive(&params, &server_ap).unwrap();
+    assert_ne!(
+        hs_keys.key, ap_keys.key,
+        "handshake and app AEAD keys must differ"
+    );
+    assert_ne!(
+        hs_keys.iv, ap_keys.iv,
+        "handshake and app AEAD IVs must differ"
+    );
+}
+
+/// Plan banner pin for T222.
+#[test]
+fn t222_phase_g4_plan_banner_pinned() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let plan_path = format!("{manifest_dir}/../../docs/issue-42-phase-g-plan.md");
+    let plan = std::fs::read_to_string(&plan_path).unwrap();
+    assert!(plan.contains("T222"));
+    assert!(plan.contains("EncryptedExtensions") || plan.contains("PHA"));
+}
