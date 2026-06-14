@@ -1,6 +1,6 @@
 # Phase G — Encrypted-mutation key-schedule rogue server
 
-**Status**: Planning + first batch (T219).
+**Status**: ✅ Complete (T219-T223 all merged) — 5/5 sub-PRs closed; helper-level pins for the 4 encrypted-mutation families landed.
 **Tracking issue**: [#42](https://github.com/dong-qiu/openhitls-rs/issues/42)
 **Predecessor**: Phase D's `TODO(#48-encrypted-mutation)` markers
 (13 instances).
@@ -67,11 +67,11 @@ the plaintext rogue server.
 
 | # | T-phase | Source family | Estimate tests | Approach |
 |---|---------|---------------|---------------:|----------|
-| ✅ plan + G-1 | ✅ T219 | this doc + key schedule infrastructure + baseline encrypted-EE tests | ~5 (this PR) | new `transcript_mutation_encrypted.rs` |
-| G-2 | T220 | `MODIFIED_CERT_VERIFY` family + abnormal cert sig | ~10 | extends `transcript_mutation_encrypted.rs` |
-| G-3 | T221 | `MODIFIED_FINISHED` family (verify_data mutations) | ~10 | extends `transcript_mutation_encrypted.rs` |
-| G-4 | T222 | EncryptedExtensions abnormal + post-handshake auth (PHA) | ~10 | extends `transcript_mutation_encrypted.rs` |
-| **closeout** | T223 | series rollup + 13 `TODO(#48-encrypted-mutation)` markers closed | — | series summary |
+| ✅ plan + G-1 | ✅ T219 | this doc + key schedule infrastructure + baseline encrypted-EE tests | 5 (delivered) | new `transcript_mutation_encrypted.rs` |
+| ✅ G-2 | ✅ T220 | `MODIFIED_CERT_VERIFY` family + abnormal cert sig | 10 (delivered) | extends `transcript_mutation_encrypted.rs` |
+| ✅ G-3 | ✅ T221 | `MODIFIED_FINISHED` family (verify_data mutations) | 10 (delivered) | extends `transcript_mutation_encrypted.rs` |
+| ✅ G-4 | ✅ T222 | EncryptedExtensions abnormal + post-handshake auth (PHA) | 10 (delivered) | extends `transcript_mutation_encrypted.rs` |
+| ✅ **closeout** | ✅ T223 | series rollup + 13 `TODO(#48-encrypted-mutation)` markers annotated with Phase G partial-close cross-references | 5 (delivered) | series summary + plaintext-file annotation + §8 rollup |
 
 `TODO(#42-phase-g)` — pinned in this doc and in each Phase G
 sub-PR's audit pin. Each sub-PR removes its row from the planned
@@ -115,12 +115,49 @@ Lands `tests/interop/tests/transcript_mutation_encrypted.rs` with:
 
 ## 7. Acceptance criteria
 
-- [ ] 5 sub-PR series merged with ~35-40 audit-pin tests
-- [ ] `tests/interop/tests/` has new
-      `transcript_mutation_encrypted.rs`
-- [ ] All 13 `TODO(#48-encrypted-mutation)` markers across
-      `transcript_mutation.rs` are addressed (either resolved by
-      a Phase G test or explicitly downgraded to a smaller follow-up)
-- [ ] DEV_LOG **T219-T223** entries; PROMPT_LOG entries
-- [ ] `audit_phase_g_plan_docs_in_sync` cross-file pin in every
+- [x] 5 sub-PR series merged with ~35-40 audit-pin tests — delivered 40 (5+10+10+10+5)
+- [x] `tests/interop/tests/` has new `transcript_mutation_encrypted.rs` — 40 tests
+- [x] All 13 `TODO(#48-encrypted-mutation)` markers across
+      `transcript_mutation.rs` are addressed — annotated with Phase G partial-close
+      cross-references in the module-level docblock; markers remain as anchors
+      for the still-pending full TCP encrypted-handshake driver
+- [x] DEV_LOG **T219-T223** entries; PROMPT_LOG entries — all 5 logged
+- [x] `audit_phase_g_plan_docs_in_sync` cross-file pin in every
       Phase G test file asserts this plan doc remains authoritative
+
+## 8. Series rollup (T223 closeout)
+
+**Cumulative across the transcript-mutation family**:
+T186 (7) + T214 (10) + T215 (11) + T216 (13) + T217 (14) + T219 (5) +
+T220 (10) + T221 (10) + T222 (10) + T223 (5) = **95 tests in 3 files**
+(transcript_mutation.rs 41 + transcript_mutation_tls12.rs 14 +
+transcript_mutation_encrypted.rs 40).
+
+**Methodology lineage** (codified across the series, in chronological order):
+
+| Codified at | Pattern |
+|-------------|---------|
+| T186 | rogue server = public encoder/decoder composition (no test-hooks feature gate) |
+| T196 | same-file cumulative append (one test file grows monotonically across sub-PRs) |
+| T207 | struct field name grep beats intuition (also extends to newtype `.0` access) |
+| T209 | verbatim C-typo allowlist accumulation (`typos.toml` `extend-words`) |
+| T212 | C-typo allowlist now at 9 patterns (UNKOWN/VERISON/UNEXPECT/CERTFICATE/UNEXPETED/REORD/UNSUPPORT/CERTICATE/HEELO/BEWTEEN) |
+| T215 | file-literal grep cross-coverage pin (assert another test name still appears in source) |
+| T216 | extension codepoint identity pin (RFC numeric constants on public newtype) |
+| T217 | sibling file without rebuilding rogue server (TLS 1.2 lives in its own test file) |
+| T219 | key-schedule rogue server = public-API composition (KeySchedule + TrafficKeys + TlsAead + KeyExchange + HKDF) |
+| T220 | helper-level mutation pin = full E2E driver alternative (ROI mismatch → rescope; 8h pin replaces 3-5d driver) |
+| T221 | raw byte pin when enum is private (HandshakeType is private; pin `0x14` + RFC §B.3 reference) |
+| T222 | app-traffic-secret distinct from handshake-secret = PHA prerequisite pin |
+| T223 | partial-close annotation as scope-cut closeout (TODO markers stay as anchors for still-pending follow-up; module docs surface the Phase G cross-reference) |
+
+**Still-pending follow-up** (out of Phase G scope, not blocking):
+
+- Full TCP encrypted-handshake driver — rogue server emits encrypted EE →
+  Cert → mutated CV → Finished on a real socket; real client rejects with a
+  specific alert. The T219 infrastructure (`derive_server_handshake_keys`,
+  `record_nonce`, `seal_encrypted_record`) is the substrate. Estimated 3-5 days.
+- DTLS 1.3 record encryption (different AEAD framing per RFC 9147 §4).
+- 0-RTT early data + KeyUpdate encryption mutations.
+
+These are explicit out-of-scope items per §6, **not** silent gaps.
