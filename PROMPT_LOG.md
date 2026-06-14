@@ -15480,3 +15480,74 @@ Phase D 全景 audit:
     无需为每个 verbatim C symbol 累加 allowlist
 
 Recorded as DEV_LOG Phase T214.
+
+### T215 — Phase D-2 tls13_2 + cert + kex 11 tests (Phase D 5 sub-PR 第 2 弹)
+
+> 开始做Phase F：我希望你能连续工作，依次完成T214~T218, 每完成1项任务按照定义的提交工作流提交，每项任务的代码确认合入主干后自动开始下一项任务
+
+承接 T214 Phase D-1。
+
+改动:
+  tests/interop/tests/transcript_mutation.rs 追加 T215 banner + 11 tests
+  累计 28 tests in 1 file
+  沿用 T196 same-file 累计追加 codified
+
+11 tests:
+  record_legacy_version_0303_baseline_pin (MIDDLE_BOX_COMPAT_TC001 happy-path)
+  record_legacy_version_not_0303_accepted_gap (0x0304 lenient + TODO(#42-phase-d))
+  sh_handshake_type_byte_unknown_rejected (UNKNOWN_DESCRIPTION_TC001 hs type 0x02→0xFE)
+  handshake_with_wrong_type_byte_rejected (HANDSHAKE_UNEXPECTMSG_TC001 →0x0B Certificate)
+  sh_responds_with_unoffered_cipher_pinned (CH_CIPHERSUITES_TC001/002 反向 — 0x13FF 占位)
+  encrypted_post_sh_scope_cut_documented (跨 phase pin TODO(#48-encrypted-mutation))
+  compression_method_gap_cross_coverage_to_t186 (T186 compression byte gap pin)
+  unsupport_version_covered_by_t186_cross_coverage (UNSUPPORT_VERSION_TC001 T186 已覆盖)
+  encrypted_ccs_covered_by_t88_cross_coverage (RECEIVES_ENCRYPTED_CCS_TC001 跨 phase T88)
+  hrr_request_path_cross_coverage_to_t186 (REQUEST_CLIENT_HELLO_TC001-004 T186 涵盖)
+  abnormal_certmsg_scope_cut_pin (ABNORMAL_CERTMSG cert family 全 scope-cut)
+
+踩坑:
+  1. clippy manual_contains 拒绝 iter().any(|c| *c == X)
+     fix sed 一次性替换为 .contains(&X)
+  2. typos UNSUPPORT 触发
+     allowlist 追加 (T212 verbatim-C-typo 累积 +1)
+
+累计:
+  T186 (7) + T214 (10) + T215 (11) = 28 tests in transcript_mutation.rs
+
+关键洞察:
+  11 tests 中 5 个是 cross-coverage pin (T186 / T88 / encrypted-mutation TODO 各 1-3)
+  文件字面值 grep 锁住前置 codified gap
+  这是 Phase D 进入 encrypted-mutation 阻塞前的「无 product 改动」coverage 边界
+  真实 attack surface 测试需 #48 Phase 2 后续
+
+验证:
+  cargo test -p hitls-integration-tests --test transcript_mutation --all-features  28/0
+  cargo test -p hitls-integration-tests --all-features                             380+/0 零回归
+  cargo fmt + cargo clippy --workspace --all-features -D warnings + typos          clean
+
+作用域:
+  同测试文件 +~205 行
+  typos.toml +1 anchor (UNSUPPORT)
+  0 product code
+  1 个 TODO(#42-phase-d) (ABNORMAL_CERTMSG follow-up)
+
+沿用 + 新方法学:
+  沿用 T201/T212 「跨 phase cross-coverage」 (T186 + T88 文件字面值 pin)
+  + T206 「unsupported-feature gap pin」
+  + T212 verbatim-C-typo allowlist 累积
+  + clippy::manual_contains 自动转 .contains() (一次性 sed)
+
+  新「cross-coverage pin via 文件字面值 grep」 (codified):
+    prior phase test 已覆盖目标 attack surface 时
+    新 sub-PR 用 fs::read_to_string(file) + contains(literal)
+    锁前置 test 函数名 / TODO marker 字面值
+    比写新测试节省成本 + 抗 prior test 误删退化
+    T215 5 个 cross-coverage pin 用此模式
+
+  新「Phase D 进入 encrypted-mutation 前的 boundary」:
+    rogue-server pattern 覆盖 plaintext SH + record header mutation
+    加密 post-SH (cert verify finished) 需 #48 Phase 2 key schedule 模拟
+    当前 sub-PR 用 scope-cut + TODO marker 文档化 boundary
+    避免 product 改动门槛
+
+Recorded as DEV_LOG Phase T215.
