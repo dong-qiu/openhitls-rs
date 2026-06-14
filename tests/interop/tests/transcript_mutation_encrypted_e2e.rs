@@ -1137,3 +1137,130 @@ fn h227_phase_h4_plan_banner_pinned() {
     assert!(plan.contains("T227"));
     assert!(plan.contains("DTLS 1.3") || plan.contains("0-RTT") || plan.contains("KeyUpdate"));
 }
+
+// ===========================================================================
+// T228 / Phase H closeout — series rollup + plaintext-file escalation
+// annotation + §8 methodology lineage.
+//
+// Sibling to T200 / T208 / T213 / T218 / T223 closeout phases. The recipe
+// is: §N rollup in the plan doc + module-level escalation annotation in
+// the sibling Phase D plaintext file (was "partially closes" in T223 → now
+// "H-RESOLVED" in T228) + cross-coverage pin in this E2E file + methodology
+// lineage table in the plan doc + DEV_LOG + PROMPT_LOG.
+//
+// The 13 `TODO(#48-encrypted-mutation)` markers in
+// `transcript_mutation.rs` are **escalated, not removed** — they stay as
+// historical grep anchors representing the original scope-cut decisions.
+// The new `H-RESOLVED(#48-encrypted-mutation)` annotation in the same
+// docblock surfaces the Phase H closure pointing readers to
+// `transcript_mutation_encrypted_e2e.rs`.
+//
+// ## Cumulative across the encrypted-handshake E2E family (this file)
+//
+// T224 (3) + T225 (10) + T226 (10) + T227 (10) + T228 (5) = **38 tests**.
+//
+// ## Cumulative across the entire transcript-mutation series (4 files)
+//
+// T186 (7) + T214 (10) + T215 (11) + T216 (13) + T217 (14) + T219 (5) +
+// T220 (10) + T221 (10) + T222 (10) + T223 (5) + T224 (3) + T225 (10) +
+// T226 (10) + T227 (10) + T228 (5) = **133 tests in 4 files**
+// (transcript_mutation.rs 41 + transcript_mutation_tls12.rs 14 +
+// transcript_mutation_encrypted.rs 40 +
+// transcript_mutation_encrypted_e2e.rs 38).
+// ===========================================================================
+
+/// T228 closeout — pin the cumulative test count in this file matches
+/// the Phase H rollup. Counts via fn-prefix matching (`fn h22`) rather
+/// than the `#[test]` literal to avoid the T223 self-count pitfall
+/// (the `body.matches("#[test]")` call would also match itself).
+#[test]
+fn t228_phase_h_cumulative_count_pin() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let path = format!("{manifest_dir}/tests/transcript_mutation_encrypted_e2e.rs");
+    let body = std::fs::read_to_string(&path).unwrap();
+    let test_fn_count = body
+        .lines()
+        .filter(|l| l.starts_with("fn h22") || l.starts_with("fn t228_"))
+        .count();
+    assert_eq!(
+        test_fn_count, 38,
+        "Phase H + T228 closeout cumulative count: 3 (T224) + 10 (T225) + \
+         10 (T226) + 10 (T227) + 5 (T228) = 38 in this file"
+    );
+}
+
+/// T228 closeout — pin the §8 methodology lineage table in the Phase H
+/// plan doc. The lineage spans 17 codified anchors from T186 to T228.
+#[test]
+fn t228_phase_h_methodology_lineage_pinned() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let plan_path = format!("{manifest_dir}/../../docs/issue-42-phase-h-plan.md");
+    let plan = std::fs::read_to_string(&plan_path).unwrap();
+    assert!(plan.contains("Methodology lineage"));
+    for anchor in [
+        "T186", "T196", "T207", "T209", "T215", "T216", "T217", "T219", "T220", "T221", "T222",
+        "T223", "T224", "T225", "T226", "T227", "T228",
+    ] {
+        assert!(
+            plan.contains(anchor),
+            "methodology lineage table must reference codified anchor `{anchor}`"
+        );
+    }
+}
+
+/// T228 closeout — pin that the sibling `transcript_mutation.rs`
+/// module docblock now surfaces the Phase H **H-RESOLVED** escalation
+/// (upgrade from T223's "partially closes" annotation). The 13 literal
+/// `TODO(#48-encrypted-mutation)` markers stay as historical grep
+/// anchors so git archaeology still resolves them.
+#[test]
+fn t228_phase_h_plaintext_file_substantive_close_annotation_pin() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let path = format!("{manifest_dir}/tests/transcript_mutation.rs");
+    let body = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        body.contains("H-RESOLVED(#48-encrypted-mutation) by Phase H (T224-T228)"),
+        "transcript_mutation.rs docblock must surface H-RESOLVED escalation"
+    );
+    assert!(body.contains("transcript_mutation_encrypted_e2e.rs"));
+    assert!(body.contains("issue-42-phase-h-plan.md"));
+    assert!(
+        body.contains("TODO(#48-encrypted-mutation)"),
+        "13 TODO anchors must remain as historical grep targets"
+    );
+}
+
+/// T228 closeout — pin all 5 Phase H sub-PRs are marked closed in the
+/// plan doc §4 table.
+#[test]
+fn t228_phase_h_plan_doc_all_subprs_closed() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let plan_path = format!("{manifest_dir}/../../docs/issue-42-phase-h-plan.md");
+    let plan = std::fs::read_to_string(&plan_path).unwrap();
+    for anchor in [
+        "✅ T224",
+        "✅ T225",
+        "✅ T226",
+        "✅ T227",
+        "✅ T228",
+        "5/5 sub-PRs closed",
+    ] {
+        assert!(
+            plan.contains(anchor),
+            "plan doc must mark `{anchor}` as closed"
+        );
+    }
+}
+
+/// T228 closeout — series rollup banner pin. The 38-tests-in-this-file
+/// + 133-tests-across-4-files arithmetic is the audit trail.
+#[test]
+fn t228_phase_h_closeout_banner_pinned() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let plan_path = format!("{manifest_dir}/../../docs/issue-42-phase-h-plan.md");
+    let plan = std::fs::read_to_string(&plan_path).unwrap();
+    assert!(plan.contains("**38 tests**"));
+    assert!(plan.contains("**133 tests in 4 files**"));
+    assert!(plan.contains("Still-pending follow-up"));
+    assert!(plan.contains("Full server cert + private key loader"));
+}

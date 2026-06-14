@@ -16343,3 +16343,75 @@ Pitfall (codified):
       为「sub-target 框架部分覆盖」给出第 3 种 'opportunistic E2E + scope-cut documenter' 模式
 
 Recorded as DEV_LOG Phase T227.
+
+### T228 — Phase H closeout: T224-T227 series rollup + plaintext-file H-RESOLVED escalation annotation + methodology lineage (Phase H 5 sub-PR 终弹)
+
+> 按 A + C 走
+
+Closes T224-T227 Phase H series.
+
+改动:
+  tests/interop/tests/transcript_mutation_encrypted_e2e.rs 追加 T228 banner + 5 closeout pin tests
+    累计 38 tests in 1 file
+  tests/interop/tests/transcript_mutation.rs 模块级 docblock 从 T223 'Phase G partially closes' 升级到 T228 'H-RESOLVED(#48-encrypted-mutation) by Phase H'
+    13 TODO 锚点保留 (作 grep target)
+    交叉引用 transcript_mutation_encrypted_e2e.rs + docs/issue-42-phase-h-plan.md
+    T223 历史短语「Phase G (T219-T223) partially closes this」+「issue-42-phase-g-plan.md」保留(让 T223 closeout pin 仍通过)
+  docs/issue-42-phase-h-plan.md
+    §1 Status: ✅ Complete (T224-T228 all merged)
+    §4 表格 5/5 关闭
+    §7 验收项全勾
+    §8 series rollup (38-tests this-file + 133-tests across-4-files 累计 + 17-anchor 方法学血脉表 T186→T228 + still-pending follow-up 显式 out-of-scope)
+
+5 tests:
+  t228_phase_h_cumulative_count_pin (this-file 38; fn-prefix 计数避开 T223 #[test] 自计数 pitfall)
+  t228_phase_h_methodology_lineage_pinned (plan §8 17 个锚点 T186/T196/T207/T209/T215/T216/T217/T219/T220/T221/T222/T223/T224/T225/T226/T227/T228 必含)
+  t228_phase_h_plaintext_file_substantive_close_annotation_pin (plaintext file docblock 含 H-RESOLVED Phase H + cross-refs + 13 TODO 锚点保留)
+  t228_phase_h_plan_doc_all_subprs_closed (§4 ✅ T224..T228 + 5/5 sub-PRs closed)
+  t228_phase_h_closeout_banner_pinned (38-tests + 133-tests + still-pending + Full server cert + private key loader)
+
+关键设计:
+  TODO 锚点 escalate 不删除
+  13 'TODO(#48-encrypted-mutation)' 保留作 historical grep target
+  module docblock 现在 T223 'partially closes' 叠在 T228 H-RESOLVED 之上
+    两个短语都保留 (T223 closeout pin tests 继续通过, T228 H-RESOLVED 也被 surface)
+  分层注释 (layered annotation) 捕捉迁移弧的逐步决策
+
+累计:
+  T186 (7) + T214 (10) + T215 (11) + T216 (13) + T217 (14) + T219 (5) + T220 (10) + T221 (10) + T222 (10) + T223 (5) + T224 (3) + T225 (10) + T226 (10) + T227 (10) + T228 (5) = 133 tests in 4 files
+
+验证:
+  cargo test -p hitls-integration-tests --test transcript_mutation_encrypted_e2e --all-features  38/0
+  cargo test -p hitls-integration-tests --test transcript_mutation --all-features                41/0
+  cargo test -p hitls-integration-tests --test transcript_mutation_encrypted --all-features      40/0
+  cargo test -p hitls-integration-tests --all-features                                           525/0 (was 520, +5)
+  cargo fmt + cargo clippy --workspace --all-features -D warnings + typos                        clean
+
+作用域:
+  encrypted_e2e file +~140 行 (5 test + §8 banner)
+  plaintext file +12 行 docblock 升级
+  plan doc §1+§4+§7+§8 (~95 行 §8 rollup, 含 17-anchor lineage + still-pending)
+  0 product code
+  13 TODO 锚点不动
+
+Pitfalls (codified):
+  T223 closeout pin 要求历史短语 ('Phase G (T219-T223) partially closes this' + 'issue-42-phase-g-plan.md') 在 docblock 仍为字面量
+    escalation 必须 STACK on top of 前一次 closeout annotation, 不能 replace
+    layered annotation 模式是 canonical fix
+  clippy::doc_lazy_continuation 拒绝 docblock 内 '* T224' bullet 列表 (同 T217 / T220 / T227 pitfall)
+    修复: 重写为 continuous prose
+
+沿用方法学:
+  T223 closeout 标准配方 (§N rollup + Methodology lineage + 2-file pins + N TODO marks)
+  T223 fn-prefix 计数避开 #[test] 字面量自计数 pitfall
+
+新方法学:
+  「escalation annotation as substantive closeout」 (codified):
+    follow-up phase 实质性关闭 scope-cut 时升级 T223 'partial-close annotation' 模式
+    literal TODO 锚点保留
+    前一次 partial-close annotation 短语保留 (让其 closeout pin 继续通过)
+    新 H-RESOLVED 标记叠加于上
+    layered docblock 捕捉迁移弧逐步决策
+    后续 closeout pin 每一层独立通过
+
+Recorded as DEV_LOG Phase T228.

@@ -48,17 +48,28 @@
 //!   discards. Pinned by `sh_with_nonzero_legacy_compression_NOT_rejected_gap`.
 //! - `TODO(#48-encrypted-mutation)`: encrypted post-SH transcript mutations
 //!   (cert_verify, finished, certificate) require key-schedule simulation on
-//!   the rogue-server side. **Phase G (T219-T223) partially closes this**:
-//!   T219 ships the key-schedule + AEAD infrastructure as `#[allow(dead_code)]`
-//!   helpers (`derive_server_handshake_keys` / `record_nonce` /
-//!   `seal_encrypted_record`); T220 ports `MODIFIED_CERT_VERIFY`; T221 ports
-//!   `MODIFIED_FINISHED`; T222 ports `EncryptedExtensions` + PHA — all at
-//!   helper-level pin granularity. A full TCP encrypted-handshake driver
-//!   (rogue server emitting encrypted EE → Cert → mutated CV → Finished on
-//!   the wire to a real client) remains future work; the 13 TODO markers
-//!   below stay as anchors. See `transcript_mutation_encrypted.rs` for the
-//!   helper-level pins and `docs/issue-42-phase-g-plan.md` §8 for the
-//!   methodology lineage.
+//!   the rogue-server side.
+//!   **Phase G (T219-T223) partially closes this** at the helper-level
+//!   (key-schedule + AEAD + byte-exact signing buffer pins in
+//!   `transcript_mutation_encrypted.rs`).
+//!   **H-RESOLVED(#48-encrypted-mutation) by Phase H (T224-T228)**:
+//!   T224-T228 added the full TCP encrypted-handshake driver in
+//!   `transcript_mutation_encrypted_e2e.rs`. The 13 literal
+//!   `TODO(#48-encrypted-mutation)` markers below are **preserved as
+//!   historical grep anchors** — they represent the original scope-cut
+//!   decisions and remain visible to git-blame / archaeology.
+//!   Phase G methodology lineage is in `docs/issue-42-phase-g-plan.md`
+//!   §8. Phase H coverage breakdown: T224 ships the TCP rogue-server
+//!   framework (`drive_client_against_encrypted_rogue_server`) + 3
+//!   baseline E2E; T225 adds Certificate parse-phase E2E + 6
+//!   CertVerify helper-level pins; T226 adds Finished
+//!   state-machine-ordering E2E + 5 Finished helper-level pins; T227
+//!   adds KeyUpdate out-of-order E2E + DTLS 1.3 / 0-RTT / KeyUpdate
+//!   wire-format pins; T228 closes the series. Out-of-scope items
+//!   now explicitly documented in `docs/issue-42-phase-h-plan.md` §8
+//!   "Still-pending follow-up": full cert+key loader in rogue server
+//!   (Phase I candidate), DTLS 1.3 UDP framework (Phase I candidate),
+//!   0-RTT PSK warm-up E2E, custom-Alert wire-level capture.
 
 use hitls_tls::config::TlsConfig;
 use hitls_tls::connection::TlsClientConnection;
