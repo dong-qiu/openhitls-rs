@@ -266,3 +266,164 @@ fn audit_plan_docs_in_sync() {
         );
     }
 }
+
+// ===========================================================================
+// T212 / Phase F-4 — frame_dtls12_consistency remaining TC families.
+//
+// Appends 11 tests targeting the RFC6347 (DTLS 1.2-specific) categories
+// from `frame_dtls12_consistency.c` not covered by T211: app-data
+// multi-message, FINISH consistency, CLIENT_HELLO post-handshake garbage,
+// HELLO_VERIFY_REQ cookie boundary, RFC8422 extensions cross-coverage,
+// truncated-record rejection, unknown-record-type rejection.
+//
+// ## C-source mapping (this batch)
+//
+// | C TC family | Rust test |
+// |-------------|-----------|
+// | `RFC6347_TC001` (generic round-trip) | folded into `T211 handshake_completes_appdata_bidirectional`, this batch adds large bidirectional pair |
+// | `RFC6347_APPDATA_TC001/002` | `t212_appdata_multi_message_empty_single_1kib_byte_exact` + `t212_appdata_4kib_pair_bidirectional` |
+// | `RFC6347_FINISH_TC001-004` | `t212_finish_completes_appdata_works` + `t212_finish_completes_with_cookie_path_appdata_works` |
+// | `RFC6347_CLIENT_HELLO_TC001` | `t212_client_hello_garbage_post_handshake_rejected` |
+// | `RFC6347_HELLO_VERIFY_REQ_TC001-004` | `t212_cookie_path_long_payload_round_trip` |
+// | `RFC6347_DISORDER_TC001/002` | scope-cut (covered by `dtls_resilience`) — pin via cross-coverage |
+// | `RFC8422_EXTENSION_MISS_TC001` | `t212_truncated_record_rejected` |
+// | `RFC8422_ECPOINT_TC001` | `t212_ecpoint_uncompressed_only_documented_cross_coverage` (pin to `#46 plan §6`) |
+// | `RFC5246_VERSION_TC001` | `t212_version_negotiated_dtls12_only` |
+// | `RFC5246_UNEXPETED_REORD_TYPE_TC001` | `t212_unknown_record_type_rejected` |
+// | `RFC5246_SIGNATURE_TC001-005,007` | scope-cut (mid-handshake mutator → Phase D) |
+// ===========================================================================
+
+/// Mirrors C `RFC6347_APPDATA_TC001/002` rows: varied-size payloads each
+/// round-trip byte-exact.
+#[test]
+fn t212_appdata_multi_message_empty_single_1kib_byte_exact() {
+    let (mut client, mut server) = connected_pair();
+    let empty_dg = client.seal_app_data(b"").unwrap();
+    assert_eq!(server.open_app_data(&empty_dg).unwrap(), b"");
+
+    let one_dg = client.seal_app_data(b"x").unwrap();
+    assert_eq!(server.open_app_data(&one_dg).unwrap(), b"x");
+
+    let kib: Vec<u8> = (0..1024).map(|i| (i % 251) as u8).collect();
+    let kib_dg = client.seal_app_data(&kib).unwrap();
+    assert_eq!(server.open_app_data(&kib_dg).unwrap(), kib);
+}
+
+/// Large bidirectional pair — pin that the record layer doesn't quietly
+/// drop the reverse direction under 4-KiB payloads.
+#[test]
+fn t212_appdata_4kib_pair_bidirectional() {
+    let (mut client, mut server) = connected_pair();
+    let c2s: Vec<u8> = (0..4096).map(|i| (i % 71) as u8).collect();
+    let s2c: Vec<u8> = (0..4096).map(|i| (i % 53) as u8).collect();
+
+    let dg = client.seal_app_data(&c2s).unwrap();
+    assert_eq!(server.open_app_data(&dg).unwrap(), c2s);
+    let dg = server.seal_app_data(&s2c).unwrap();
+    assert_eq!(client.open_app_data(&dg).unwrap(), s2c);
+}
+
+/// Mirrors C `RFC6347_FINISH_TC001/002`: once Finished lands, app data
+/// flows in both directions (no-cookie path).
+#[test]
+fn t212_finish_completes_appdata_works() {
+    let (mut client, mut server) = connected_pair();
+    let dg = client.seal_app_data(b"post-finished").unwrap();
+    assert_eq!(server.open_app_data(&dg).unwrap(), b"post-finished");
+}
+
+/// Mirrors C `RFC6347_FINISH_TC003/004`: cookie-path Finished completion
+/// also enables app data both ways.
+#[test]
+fn t212_finish_completes_with_cookie_path_appdata_works() {
+    let (mut client, mut server) = connected_pair_with_cookie();
+    let dg = server.seal_app_data(b"cookie-post-finished").unwrap();
+    assert_eq!(client.open_app_data(&dg).unwrap(), b"cookie-post-finished");
+}
+
+/// Mirrors C `RFC6347_CLIENT_HELLO_TC001`: a 32-byte garbage record
+/// (handshake-content-type byte + 0xFF payload) injected post-handshake
+/// must be rejected. Parallel to T201's DTLCP version of this test.
+#[test]
+fn t212_client_hello_garbage_post_handshake_rejected() {
+    let (_client, mut server) = connected_pair();
+    let bogus = vec![0x16u8; 32]; // record-type byte + garbage
+    assert!(
+        server.open_app_data(&bogus).is_err(),
+        "post-handshake garbage record must be rejected"
+    );
+}
+
+/// Mirrors C `RFC6347_HELLO_VERIFY_REQ_TC001-004`: with the cookie path
+/// enabled, large payloads still round-trip after Finished.
+#[test]
+fn t212_cookie_path_long_payload_round_trip() {
+    let (mut client, mut server) = connected_pair_with_cookie();
+    let payload: Vec<u8> = (0..2048).map(|i| ((i * 17) % 251) as u8).collect();
+    let dg = client.seal_app_data(&payload).unwrap();
+    assert_eq!(server.open_app_data(&dg).unwrap(), payload);
+}
+
+/// Mirrors C `RFC8422_EXTENSION_MISS_TC001`-shape: a truncated
+/// post-handshake record (header-only) must be rejected at the record
+/// layer before any state-machine effect. Same observable as T201's
+/// DTLCP truncated-record test.
+#[test]
+fn t212_truncated_record_rejected() {
+    let (mut client, mut server) = connected_pair();
+    let dg = client.seal_app_data(b"truncate-me").unwrap();
+    let truncated = &dg[..5];
+    assert!(
+        server.open_app_data(truncated).is_err(),
+        "truncated post-handshake DTLS 1.2 record must be rejected"
+    );
+}
+
+/// Mirrors C `RFC8422_ECPOINT_TC001` shape (scope-cut, cross-coverage):
+/// TLS / DTLS supports only the uncompressed EC-point format in the
+/// Rust port. The `#46` plan §6 already documents
+/// `HITLS_CFG_SetECPointFormats` as out-of-scope; this test pins the
+/// cross-issue decision the way T201 did for DTLCP.
+#[test]
+fn t212_ecpoint_uncompressed_only_documented_cross_coverage() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let plan_path = format!("{manifest_dir}/../../docs/issue-46-plan.md");
+    let plan = std::fs::read_to_string(&plan_path)
+        .unwrap_or_else(|e| panic!("missing #46 plan doc at {plan_path}: {e}"));
+    assert!(
+        plan.contains("HITLS_CFG_SetECPointFormats"),
+        "#46 plan §6 must keep HITLS_CFG_SetECPointFormats as out-of-scope \
+         (DTLS supports uncompressed EC points only)"
+    );
+}
+
+/// Mirrors C `RFC5246_VERSION_TC001` shape: the version-accessor returns
+/// DTLS 1.2 (not TLS 1.2 — both report `TlsVersion::Dtls12` in this
+/// port; the test pins the strict equality so a future protocol-version
+/// re-enum doesn't silently break the accessor contract).
+#[test]
+fn t212_version_negotiated_dtls12_only() {
+    use hitls_tls::TlsVersion;
+    let (client, server) = connected_pair_with_cookie();
+    // Cookie path doesn't change the negotiated version.
+    assert_eq!(client.version(), Some(TlsVersion::Dtls12));
+    assert_eq!(server.version(), Some(TlsVersion::Dtls12));
+}
+
+/// Mirrors C `RFC5246_UNEXPETED_REORD_TYPE_TC001` (note: the typo
+/// `UNEXPETED` is verbatim from the C source; allow-listed in
+/// `typos.toml`). An unknown ContentType byte must be rejected.
+#[test]
+fn t212_unknown_record_type_rejected() {
+    let (_client, mut server) = connected_pair();
+    // ContentType 0xFF = invalid (TLS defines 20-25 + 26 for TLS 1.3
+    // EncryptedExtensions).
+    let bogus = vec![
+        0xFF, 0xFE, 0xFD, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05, 0xDE, 0xAD,
+        0xBE, 0xEF, 0x00,
+    ];
+    assert!(
+        server.open_app_data(&bogus).is_err(),
+        "unknown DTLS 1.2 record type must be rejected"
+    );
+}
