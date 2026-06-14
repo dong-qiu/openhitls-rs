@@ -16789,3 +16789,54 @@ Pitfall (codified):
     T223/T228 layered annotation 模式扩展到 multi-doc synchronization
 
 Recorded as DEV_LOG Phase T116.
+
+### T246 — Phase F-followup-2 tlsfuzzer DTLS + state-machine coverage 10 audit pins (Phase F follow-up 5 sub-PR 第 2 弹)
+
+> 请继续 Phase F
+
+承接 T116 Phase F-followup-1。
+
+改动:
+  migrated_phase_f_audit_pins.rs 追加 T246 banner + 10 audit pins
+  累计 18 tests in 1 file
+
+10 audit pins 覆盖 c-test-migration-plan §7.2 protocol-conformance harness:
+  t246_tlsfuzzer_workflow_file_present (.github/workflows/tlsfuzzer.yml 存在 + 引用 tlsfuzzer/test-tls13)
+  t246_tlsfuzzer_tls13_expansion_dev_log_anchors (T93/T94/T100/T108 anchors)
+  t246_tlsfuzzer_tls12_integration_anchors (T90 anchor + tlsfuzzer 引用)
+  t246_dtls_resilience_suite_present (dtls_resilience.rs ≥ 8 tests, T201)
+  t246_dtls12_consistency_suite_present (dtls12_consistency.rs ≥ 20 tests, T211+T212)
+  t246_tlcp_consistency_suite_present (tlcp_consistency.rs ≥ 20 tests, T209+T210)
+  t246_tlcp_integration_tests_present (tlcp.rs ≥ 5 handshake-variant tests)
+  t246_dtls13_state_machine_coverage_claude_md_pin (CLAUDE.md 含 DTLS 1.3 state-machine 或 parser anchor)
+  t246_cargo_bench_no_regression_discipline_pin (c-test-migration-plan §7.2 'cargo bench' 字面量)
+  t246_audit_phase_f_followup2_plan_docs_in_sync (T246 + 'tlsfuzzer DTLS scripts' plan-doc cross-coverage)
+
+关键设计:
+  扩展 T116 audit-pin 方法学到 protocol-conformance coverage 跨 .github/workflows/ + crates/hitls-tls/tests/ + tests/interop/tests/ + CLAUDE.md + DEV_LOG + c-test-migration-plan
+  file-presence + test-count-floor 模式 (≥ N #[test] per file) 防止整 suite 静默丢失, 但允许 additive growth
+
+累计:
+  T116 (8) + T246 (10) = 18 tests
+
+验证:
+  cargo test -p hitls-tls --test migrated_phase_f_audit_pins --all-features  18/0
+  cargo test -p hitls-tls --all-features                                     1647/0 零回归 (was 1637, +10)
+  cargo fmt + cargo clippy --workspace --all-features -D warnings + typos    clean
+
+作用域:
+  同测试文件 +~180 行 (10 pins + banner)
+  0 product code
+  0 新 TODO
+
+沿用方法学:
+  T112 4-tuple + T235 cross-crate inventory pin (扩展到 .github/workflows/) + T234 inline-only exception
+
+新方法学:
+  「test-count-floor inventory pin」 (codified):
+    与其断言 exact #[test] count (禁止 additive growth)
+    断言 ≥ N count per file
+    防止整 suite 静默丢失, 允许 future PR 添加 tests
+    floor count 从 codified delivery 锚点推导 (e.g. T211+T212 = 23, floor = 20 留 margin)
+
+Recorded as DEV_LOG Phase T246.

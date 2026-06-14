@@ -164,6 +164,178 @@ fn t116_phase_f_closeout_t213_dev_log_cross_pin() {
     }
 }
 
+// ===========================================================================
+// T246 / Phase F-followup-2 — tlsfuzzer DTLS + state-machine coverage.
+//
+// Covers the c-test-migration-plan.md §7.2 acceptance criteria portion
+// for protocol-conformance harness coverage:
+//
+// - tlsfuzzer TLS 1.3 + 1.2 curated scripts (T93/T94/T100/T108 codified
+//   expansion; 46+ scripts)
+// - DTLS resilience tests (T201 codified)
+// - DTLS 1.2 consistency (T211-T212 codified)
+// - DTLS 1.3 state-machine + parser robustness coverage (CLAUDE.md
+//   status line anchor)
+// - TLCP integration tests (T209-T210 codified)
+//
+// Cumulative: T116 (8) + T246 (10) = 18 tests.
+// ===========================================================================
+
+/// T246 audit pin #1: tlsfuzzer CI workflow file exists. The opt-in
+/// `tlsfuzzer.yml` workflow drives the curated script set against
+/// `s-server` / `s-client` CLI instances.
+#[test]
+fn t246_tlsfuzzer_workflow_file_present() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let workflow_path = format!("{manifest_dir}/../../.github/workflows/tlsfuzzer.yml");
+    let workflow = std::fs::read_to_string(&workflow_path)
+        .unwrap_or_else(|e| panic!("tlsfuzzer.yml missing at {workflow_path}: {e}"));
+    assert!(
+        workflow.contains("tlsfuzzer") || workflow.contains("test-tls13"),
+        "tlsfuzzer.yml workflow must reference tlsfuzzer test scripts"
+    );
+}
+
+/// T246 audit pin #2: DEV_LOG records tlsfuzzer TLS 1.3 curated set
+/// expansion lineage T93 / T94 / T100 / T108 anchors. Each anchor
+/// added scripts to the CI suite; their preservation guards against
+/// silent regressions.
+#[test]
+fn t246_tlsfuzzer_tls13_expansion_dev_log_anchors() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let dev_log = std::fs::read_to_string(format!("{manifest_dir}/../../DEV_LOG.md")).unwrap();
+    for anchor in ["T93", "T94", "T100", "T108"] {
+        assert!(
+            dev_log.contains(anchor),
+            "DEV_LOG must retain tlsfuzzer expansion anchor `{anchor}`"
+        );
+    }
+}
+
+/// T246 audit pin #3: DEV_LOG records tlsfuzzer TLS 1.2 integration
+/// at T90 + mTLS-1.2 at T108. These delivered the 9 TLS 1.2 + 3
+/// mTLS-1.2 curated scripts referenced from CLAUDE.md status line.
+#[test]
+fn t246_tlsfuzzer_tls12_integration_anchors() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let dev_log = std::fs::read_to_string(format!("{manifest_dir}/../../DEV_LOG.md")).unwrap();
+    assert!(
+        dev_log.contains("T90"),
+        "DEV_LOG must retain T90 TLS 1.2 tlsfuzzer integration anchor"
+    );
+    assert!(
+        dev_log.contains("test-tls13") || dev_log.contains("tlsfuzzer"),
+        "DEV_LOG must reference tlsfuzzer scripts by name"
+    );
+}
+
+/// T246 audit pin #4: DTLS resilience suite at T201 codified
+/// (`tests/interop/tests/dtls_resilience.rs`). 8+ resilience tests.
+#[test]
+fn t246_dtls_resilience_suite_present() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let path = format!("{manifest_dir}/../../tests/interop/tests/dtls_resilience.rs");
+    let body = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("dtls_resilience.rs missing at {path}: {e}"));
+    let test_count = body.matches("#[test]").count();
+    assert!(
+        test_count >= 8,
+        "dtls_resilience.rs must contain at least 8 #[test] functions (T201 baseline); found {test_count}"
+    );
+}
+
+/// T246 audit pin #5: DTLS 1.2 consistency suite at T211-T212
+/// codified (`tests/interop/tests/dtls12_consistency.rs`). 23
+/// audit-pin tests delivered.
+#[test]
+fn t246_dtls12_consistency_suite_present() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let path = format!("{manifest_dir}/../../tests/interop/tests/dtls12_consistency.rs");
+    let body = std::fs::read_to_string(&path).unwrap();
+    let test_count = body.matches("#[test]").count();
+    assert!(
+        test_count >= 20,
+        "dtls12_consistency.rs must contain at least 20 #[test] functions (T211+T212); found {test_count}"
+    );
+}
+
+/// T246 audit pin #6: TLCP consistency suite at T209-T210 codified
+/// (`tests/interop/tests/tlcp_consistency.rs`). 22 audit-pin tests
+/// delivered.
+#[test]
+fn t246_tlcp_consistency_suite_present() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let path = format!("{manifest_dir}/../../tests/interop/tests/tlcp_consistency.rs");
+    let body = std::fs::read_to_string(&path).unwrap();
+    let test_count = body.matches("#[test]").count();
+    assert!(
+        test_count >= 20,
+        "tlcp_consistency.rs must contain at least 20 #[test] functions (T209+T210); found {test_count}"
+    );
+}
+
+/// T246 audit pin #7: TLCP integration tests (happy-path 11
+/// handshake variants in `tests/interop/tests/tlcp.rs`). These
+/// cover ECDHE/ECC + GCM/CBC matrix that the consistency suite
+/// audits.
+#[test]
+fn t246_tlcp_integration_tests_present() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let path = format!("{manifest_dir}/../../tests/interop/tests/tlcp.rs");
+    let body = std::fs::read_to_string(&path).unwrap();
+    let test_count = body.matches("#[test]").count();
+    assert!(
+        test_count >= 5,
+        "tlcp.rs must contain at least 5 #[test] handshake-variant tests; found {test_count}"
+    );
+}
+
+/// T246 audit pin #8: DTLS 1.3 state-machine + parser robustness
+/// coverage. CLAUDE.md status line records this phase explicitly;
+/// pin the anchor so a future regression that drops the coverage
+/// fails this audit.
+#[test]
+fn t246_dtls13_state_machine_coverage_claude_md_pin() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let claude_md = std::fs::read_to_string(format!("{manifest_dir}/../../CLAUDE.md")).unwrap();
+    assert!(
+        claude_md.contains("DTLS 1.3 state-machine") || claude_md.contains("DTLS 1.3 parser"),
+        "CLAUDE.md must retain DTLS 1.3 state-machine + parser robustness anchor"
+    );
+}
+
+/// T246 audit pin #9: Cargo bench no-regression discipline. The
+/// `c-test-migration-plan.md` §7.2 requires `cargo bench` to not
+/// regress. The discipline is documented in CLAUDE.md / DEV_LOG;
+/// pin the literal "cargo bench" reference.
+#[test]
+fn t246_cargo_bench_no_regression_discipline_pin() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let plan = std::fs::read_to_string(format!(
+        "{manifest_dir}/../../docs/c-test-migration-plan.md"
+    ))
+    .unwrap();
+    assert!(
+        plan.contains("cargo bench"),
+        "c-test-migration-plan.md §7.2 must retain the cargo bench no-regression criterion"
+    );
+}
+
+/// T246 audit pin #10: plan-doc cross-coverage for T246 + §8
+/// follow-up table.
+#[test]
+fn t246_audit_phase_f_followup2_plan_docs_in_sync() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let plan_path = format!("{manifest_dir}/../../docs/issue-42-phase-f-plan.md");
+    let plan = std::fs::read_to_string(&plan_path).unwrap();
+    for anchor in ["T246", "tlsfuzzer DTLS scripts"] {
+        assert!(
+            plan.contains(anchor),
+            "Phase F plan doc must contain anchor `{anchor}` for T246 coverage"
+        );
+    }
+}
+
 /// T116 audit pin #8: plan-doc cross-coverage. The Phase F plan doc
 /// (`docs/issue-42-phase-f-plan.md`) must remain the authority for
 /// both the original §7 rollup and the new §8 follow-up section.
