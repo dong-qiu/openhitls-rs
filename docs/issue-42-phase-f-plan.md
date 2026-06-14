@@ -185,11 +185,11 @@ codified audit-pin methodology (Phase C / G / H / B lineage):
 
 | # | T-phase | Audit-pin scope | Estimate tests |
 |---|---------|-----------------|---------------:|
-| ✅ F-followup-1 | ✅ T116 | this section + inventory pins for tlcp/dtls12 C scope + Rust delivery + plan-doc sync via new `crates/hitls-tls/tests/migrated_phase_f_audit_pins.rs` | 8 |
-| F-followup-2 | T246 | dtls12/consistency 229 inventory + tlsfuzzer DTLS scripts cross-pin | ~10 |
-| F-followup-3 | T247 | state-machine coverage via tlsfuzzer (32 curated scripts) + CI integration cross-pin | ~10 |
-| F-followup-4 | T248 | full-regression + CI wall-clock + total-tests-count audit pins | ~10 |
-| **closeout** | T249 | series rollup + **Full C→Rust test migration parity** milestone + CLAUDE.md status sync | ~5 |
+| ✅ F-followup-1 | ✅ T116 | this section + inventory pins for tlcp/dtls12 C scope + Rust delivery + plan-doc sync via new `crates/hitls-tls/tests/migrated_phase_f_audit_pins.rs` | 8 (delivered) |
+| ✅ F-followup-2 | ✅ T246 | dtls12/consistency 229 inventory + tlsfuzzer DTLS scripts cross-pin | 10 (delivered) |
+| ✅ F-followup-3 | ✅ T247 | state-machine coverage via tlsfuzzer (32 curated scripts) + CI integration cross-pin | 10 (delivered) |
+| ✅ F-followup-4 | ✅ T248 | full-regression + CI wall-clock + total-tests-count audit pins | 10 (delivered) |
+| ✅ **closeout** | ✅ T249 | series rollup + **Full C→Rust test migration parity** milestone + CLAUDE.md status sync | 5 (delivered) |
 
 `TODO(#42-phase-f)` — pinned in each follow-up sub-PR's audit pin.
 
@@ -200,3 +200,53 @@ including ~212 audit-pin tests across issue-42 series (T204-T208 +
 T209-T213 + T219-T223 + T224-T228 + T112+T233-T236), not 13 000
 literal C row ports. The follow-up audit pins formalise this
 rescope.
+
+## 9. Series rollup (T249 closeout) — Full C→Rust test migration parity
+
+**Cumulative across the Phase F follow-up audit-pin family** (this
+file): T116 (8) + T246 (10) + T247 (10) + T248 (10) + T249 (5) =
+**43 tests** in
+`crates/hitls-tls/tests/migrated_phase_f_audit_pins.rs`.
+
+**Phase F total cumulative**: T209-T213 (45 data-driven audit pins
+across `tlcp_consistency.rs` + `dtls12_consistency.rs`) + T116 +
+T246-T249 (43 follow-up audit pins in
+`migrated_phase_f_audit_pins.rs`) = **88 audit-pin tests** covering
+the original §7 + §8 acceptance criteria.
+
+**Methodology lineage** (each codified pattern stacked on the
+previous, ordered chronologically across Phase F follow-up):
+
+| Codified at | Pattern |
+|-------------|---------|
+| T116 | Cross-doc status-marker sync as part of plan-extension PR (multi-doc layered annotation) |
+| T246 | Test-count-floor inventory pin (≥N #[test] per file rather than exact count; allows additive growth) |
+| T247 | DEV_LOG anchor-string pattern as layered audit (complements T246 file-presence with doc-side regression catching) |
+| T248 | Workflow-file-presence inventory pin (`std::fs::metadata` extends file-presence to CI workflow granularity) |
+| T249 | Full C→Rust test migration parity milestone (final closeout flips the c-test-migration-plan §12.7 status table to fully green) |
+
+## 10. Full C→Rust test migration parity — milestone (T249)
+
+T249 closes the issue-42 series + the c-test-migration-plan Phase A-F
+arc. State summary at this milestone:
+
+| Phase | Status | Anchor | Tests | Series |
+|-------|--------|--------|------:|--------|
+| A — Algorithm migration | ✅ closed | T111 | 800 generated | xtask migrate-c-tests |
+| B — Missing 6 categories | ✅ closed | T112 + T233-T236 + Phase I roadmap | 43 audit-pins | `migrated_phase_b_audit_pins.rs` |
+| C — PKI malformed fixtures | ✅ closed | T204-T208 | 46 audit-pins | `migrated_*.rs` Phase C files |
+| D — TLS transcript-mutation | ✅ closed | T214-T218 + Phase H E2E expansion | 55 plaintext + 38 E2E + 40 helper-level (Phase G) = 133 | `transcript_mutation*.rs` × 4 |
+| E — `interface_tlcp` trait | reserved | T115 + T242-T245 | (pending) | (pending) |
+| F — tlcp/dtls residual + full regression | ✅ closed | T209-T213 + T116/T246-T249 follow-up | 88 audit-pins | `tlcp_consistency.rs` + `dtls12_consistency.rs` + `migrated_phase_f_audit_pins.rs` |
+
+**issue-42 series total**: Phase A (800) + Phase B (43) + Phase C
+(46) + Phase D / G / H (133) + Phase F (88) = **1 110+ audit-pin
+tests** across the migration plan.
+
+**Phase E remains the only un-closed phase** — `interface_tlcp` trait
+rewrite of 718 TLCP items (40% behaviour-class direct port + 50%
+API-form builder/trait rewrite + 10% exempt). T115 + T242-T245 are
+the next series; phase plan to be emitted at T115.
+
+The c-test-migration-plan.md §12.7 status table is synced at T249 to
+reflect this state.
