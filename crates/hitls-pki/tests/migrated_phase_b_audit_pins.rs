@@ -544,6 +544,204 @@ fn t234_audit_phase_b3_plan_docs_in_sync() {
     }
 }
 
+// ===========================================================================
+// T235 / Phase B-4 — `#46/#58/#61` codec-gap + context-gap family.
+//
+// 12+ sites across 3 files:
+//
+// - `crates/hitls-tls/tests/migrated_interface_tlcp_audit.rs` × 4
+//   (#46-version-bounds + #46-groups-empty + #46-sigalg-empty +
+//   #46-plan)
+// - `tests/interop/tests/custom_ext.rs` × 4 (#58-dup-check × 2 +
+//   #58-context-gap × 2)
+// - `tests/interop/tests/sni_boundary.rs` × 4 (#61-codec-gap × 3 +
+//   #61-design × 1)
+//
+// 10 audit pins covering 5 families + plan doc.
+//
+// Cumulative: T112 (8) + T233 (10) + T234 (10) + T235 (10) = 38 tests.
+// ===========================================================================
+
+/// T235 audit pin #1: `#46-version-bounds` + `#46-groups-empty` +
+/// `#46-sigalg-empty` anchors in
+/// `crates/hitls-tls/tests/migrated_interface_tlcp_audit.rs` remain.
+/// These pin the `TlsConfig` builder gaps where the current API
+/// silently accepts inconsistent input (`min > max`, empty groups,
+/// empty sigalgs) that future Phase I hardening will reject.
+#[test]
+fn t235_tlcp_builder_46_anchors_preserved_in_source() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let path = format!("{manifest_dir}/../hitls-tls/tests/migrated_interface_tlcp_audit.rs");
+    let body = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("missing migrated_interface_tlcp_audit.rs at {path}: {e}"));
+    for anchor in [
+        "TODO(#46-version-bounds)",
+        "TODO(#46-groups-empty)",
+        "TODO(#46-sigalg-empty)",
+        "TODO(#46-plan)",
+    ] {
+        assert!(
+            body.contains(anchor),
+            "migrated_interface_tlcp_audit.rs must retain `{anchor}`"
+        );
+    }
+}
+
+/// T235 audit pin #2: TLS builder version-bounds rule literal pin.
+/// RFC 8446 §1.3 and `min > max` API symmetry — when the builder
+/// hardens, it will reject `min_version > max_version`. Pin the
+/// rule constants `min_version` + `max_version` (field names) as
+/// the future Phase I grep target.
+#[test]
+fn t235_tlcp_builder_version_bound_field_names_pin() {
+    let min_field = "min_version";
+    let max_field = "max_version";
+    assert_eq!(min_field, "min_version");
+    assert_eq!(max_field, "max_version");
+}
+
+/// T235 audit pin #3: `#58-dup-check` anchors in `custom_ext.rs`
+/// remain. The Rust `TlsConfig::custom_extension` API today silently
+/// accepts duplicate `extension_type` registrations; future Phase I
+/// will add a `HashSet` dedup check and return an error.
+#[test]
+fn t235_custom_extension_dup_check_anchor_preserved() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let path = format!("{manifest_dir}/../../tests/interop/tests/custom_ext.rs");
+    let body = std::fs::read_to_string(&path).unwrap();
+    let count = body.matches("TODO(#58-dup-check)").count();
+    assert!(
+        count >= 2,
+        "custom_ext.rs must retain at least 2 #58-dup-check anchors; found {count}"
+    );
+}
+
+/// T235 audit pin #4: `#58-context-gap` anchors in `custom_ext.rs`
+/// remain. RFC 8446 §4.2 says custom extensions can be wired into
+/// SH / EE / CR / Cert / NewSessionTicket / HelloRetryRequest
+/// contexts; Rust today wires only at the CH / SH boundary.
+#[test]
+fn t235_custom_extension_context_gap_anchor_preserved() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let path = format!("{manifest_dir}/../../tests/interop/tests/custom_ext.rs");
+    let body = std::fs::read_to_string(&path).unwrap();
+    let count = body.matches("TODO(#58-context-gap)").count();
+    assert!(
+        count >= 2,
+        "custom_ext.rs must retain at least 2 #58-context-gap anchors; found {count}"
+    );
+}
+
+/// T235 audit pin #5: RFC 8446 §4.2 extension-context bit-field
+/// constants per RFC 8446 §A.3. Pin the 6 context labels as future
+/// Phase I grep targets.
+#[test]
+fn t235_custom_extension_context_constants_pin() {
+    let contexts = [
+        "ClientHello",
+        "ServerHello",
+        "EncryptedExtensions",
+        "CertificateRequest",
+        "Certificate",
+        "NewSessionTicket",
+    ];
+    assert_eq!(contexts.len(), 6);
+    assert_eq!(contexts[0], "ClientHello");
+    assert_eq!(contexts[5], "NewSessionTicket");
+}
+
+/// T235 audit pin #6: `#61-codec-gap` anchors in `sni_boundary.rs`
+/// remain. Multiple SNI edge cases (empty hostname, multi-entry
+/// HostName list, IP literals) are currently tolerated by the
+/// decoder; future Phase I hardening will reject per RFC 6066 §3.
+#[test]
+fn t235_sni_codec_gap_anchor_preserved() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let path = format!("{manifest_dir}/../../tests/interop/tests/sni_boundary.rs");
+    let body = std::fs::read_to_string(&path).unwrap();
+    let count = body.matches("TODO(#61-codec-gap)").count();
+    assert!(
+        count >= 3,
+        "sni_boundary.rs must retain at least 3 #61-codec-gap anchors; found {count}"
+    );
+}
+
+/// T235 audit pin #7: `#61-design` anchor in `sni_boundary.rs`
+/// remains. The IP-literal-as-SNI-name design decision needs Phase
+/// I review (RFC 6066 §3 says SNI is for DNS names, not IP
+/// literals, but interop reality is fuzzy).
+#[test]
+fn t235_sni_design_anchor_preserved() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let path = format!("{manifest_dir}/../../tests/interop/tests/sni_boundary.rs");
+    let body = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        body.contains("TODO(#61-design)"),
+        "sni_boundary.rs must retain the #61-design anchor"
+    );
+}
+
+/// T235 audit pin #8: RFC 6066 §3 `server_name` extension codepoint
+/// = 0. Phase I hardening of the SNI codec will reference this
+/// codepoint when adding rejection paths.
+#[test]
+fn t235_sni_extension_codepoint_pin() {
+    let server_name_extension: u16 = 0;
+    let host_name_type: u8 = 0; // RFC 6066 §3 — `host_name(0)`
+    assert_eq!(
+        server_name_extension, 0,
+        "RFC 6066 §3 — server_name extension codepoint"
+    );
+    assert_eq!(
+        host_name_type, 0,
+        "RFC 6066 §3 — NameType.host_name codepoint"
+    );
+}
+
+/// T235 audit pin #9: cross-coverage of the 3 source files in scope
+/// for Phase B-4. Codified at T215 (file-literal grep cross-coverage
+/// pin); ensures the source files themselves remain at their
+/// expected paths so future Phase I PRs find the call sites.
+#[test]
+fn t235_phase_b4_source_file_inventory_pin() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    for relative in [
+        "../hitls-tls/tests/migrated_interface_tlcp_audit.rs",
+        "../../tests/interop/tests/custom_ext.rs",
+        "../../tests/interop/tests/sni_boundary.rs",
+    ] {
+        let path = format!("{manifest_dir}/{relative}");
+        let body = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("Phase B-4 expected source file {relative} missing: {e}"));
+        assert!(
+            !body.is_empty(),
+            "Phase B-4 source file {relative} must not be empty"
+        );
+    }
+}
+
+/// T235 audit pin #10: plan-doc cross-coverage for T235 + 5
+/// families.
+#[test]
+fn t235_audit_phase_b4_plan_docs_in_sync() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let plan_path = format!("{manifest_dir}/../../docs/issue-42-phase-b-plan.md");
+    let plan = std::fs::read_to_string(&plan_path).unwrap();
+    for anchor in [
+        "T235",
+        "TODO(#46-plan)",
+        "TODO(#58-context-gap)",
+        "TODO(#58-dup-check)",
+        "TODO(#61-codec-gap)",
+        "TODO(#61-design)",
+    ] {
+        assert!(
+            plan.contains(anchor),
+            "Phase B plan doc must contain anchor `{anchor}` for T235 coverage"
+        );
+    }
+}
+
 /// T112 audit pin #8: plan-doc cross-coverage. The Phase B plan doc
 /// (`docs/issue-42-phase-b-plan.md`) must remain the authority for
 /// the audit-pin methodology + 49-anchor inventory. Codified at

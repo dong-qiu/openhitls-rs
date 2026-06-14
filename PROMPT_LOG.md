@@ -16596,3 +16596,60 @@ Pitfall (codified):
     否则 future README 清理可能在 inventory check 通过的情况下静默丢失 inline 锚点
 
 Recorded as DEV_LOG Phase T234.
+
+### T235 — Phase B-4 #46/#58/#61 codec-gap + context-gap family 10 audit pins (Phase B 5 sub-PR 第 4 弹)
+
+> 按 B 走
+
+承接 T234 Phase B-3。
+
+改动:
+  migrated_phase_b_audit_pins.rs 追加 T235 banner + 10 audit pins
+  累计 38 tests in 1 file
+
+覆盖 12+ 站点跨 3 文件:
+  migrated_interface_tlcp_audit.rs × 4 (#46-version-bounds + #46-groups-empty + #46-sigalg-empty + #46-plan)
+  custom_ext.rs × 4 (#58-dup-check × 2 + #58-context-gap × 2)
+  sni_boundary.rs × 4 (#61-codec-gap × 3 + #61-design × 1)
+
+10 audit pins:
+  t235_tlcp_builder_46_anchors_preserved_in_source (4 #46 锚点)
+  t235_tlcp_builder_version_bound_field_names_pin (min_version + max_version 字段名)
+  t235_custom_extension_dup_check_anchor_preserved (≥ 2 #58-dup-check)
+  t235_custom_extension_context_gap_anchor_preserved (≥ 2 #58-context-gap)
+  t235_custom_extension_context_constants_pin (RFC 8446 §A.3 6 contexts: CH/SH/EE/CR/Cert/NewSessionTicket)
+  t235_sni_codec_gap_anchor_preserved (≥ 3 #61-codec-gap)
+  t235_sni_design_anchor_preserved (#61-design IP-literal-as-SNI)
+  t235_sni_extension_codepoint_pin (RFC 6066 §3 server_name=0 + host_name=0)
+  t235_phase_b4_source_file_inventory_pin (3 源文件 path 存在)
+  t235_audit_phase_b4_plan_docs_in_sync (plan doc + T235 + 5 TODO 家族)
+
+关键设计:
+  扩展 T234 stub-file 家族方法学到 behavioural/codec/context 家族 (横跨 hitls-tls + tests/interop)
+  3 源文件横跨 2 crate (hitls-tls + integration tests)
+  file inventory pin 防止测试文件移位导致审计覆盖静默丢失
+  RFC 8446 §A.3 6-context 常量 pin = Phase I 把 custom extensions 接到额外 4 contexts (EE+CR+Cert+NewSessionTicket) 的 grep target
+
+累计:
+  T112 (8) + T233 (10) + T234 (10) + T235 (10) = 38 tests
+
+验证:
+  cargo test -p hitls-pki --test migrated_phase_b_audit_pins --all-features  38/0
+  cargo test -p hitls-pki --all-features                                     1670/0 零回归 (was 1660, +10)
+  cargo fmt + cargo clippy --workspace --all-features -D warnings + typos    clean
+
+作用域:
+  同测试文件 +~200 行 (10 pins + banner)
+  0 product code
+  0 新 TODO
+
+沿用方法学:
+  T112 4-tuple + T233 OID identity pin + T234 family inventory pin + T222 source-file inventory pin
+
+新方法学:
+  「cross-crate source file inventory pin」 (codified):
+    扩展 T234 README inventory pin 模式到跨 crate 的源文件
+    各路径用 manifest_dir 相对路径解析
+    一个 crate 中的 audit pin 可验证兄弟 crate + workspace tests/interop 树中的文件存在
+
+Recorded as DEV_LOG Phase T235.
