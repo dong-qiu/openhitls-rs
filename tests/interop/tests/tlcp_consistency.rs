@@ -265,6 +265,9 @@ fn audit_plan_docs_in_sync() {
         "frame_tlcp_consistency_1.c",
         "frame_dtls12_consistency.c",
         "TODO(#42-phase-f)",
+        "## 7. Series rollup",
+        "**45 tests**",
+        "**5/5 sub-PRs closed**",
     ] {
         assert!(
             plan.contains(anchor),

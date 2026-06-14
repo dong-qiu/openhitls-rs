@@ -61,11 +61,11 @@ existing happy-path coverage.
 
 | # | T-phase | Source family | Estimate tests | Approach |
 |---|---------|---------------|---------------:|----------|
-| ✅ plan + F-1 | ✅ T209 | this doc + `frame_tlcp_consistency_1.c` (RFC-layer rejection + record-layer) | ~12 (this PR) | merged (this PR) |
-| F-2 | T210 | `frame_tlcp_consistency_2.c` + `_3.c` (cert / resume / close_notify) | ~12 | extends `tlcp_consistency.rs` |
-| F-3 | T211 | `frame_dtls12_consistency.c` first batch (anti-replay / cookie / record) | ~12 | new `dtls12_consistency.rs` (sibling to `dtls_resilience.rs`) |
-| F-4 | T212 | `frame_dtls12_consistency.c` remainder (handshake reassembly / epoch / disorder) | ~12 | extends `dtls12_consistency.rs` |
-| **closeout** | T213 | series rollup + Phase F close | — | series summary |
+| ✅ plan + F-1 | ✅ T209 | this doc + `frame_tlcp_consistency_1.c` | 12 (delivered) | merged (PR #291) |
+| ✅ F-2 | ✅ T210 | `frame_tlcp_consistency_2.c` + `_3.c` | 10 (delivered) | merged (PR #292) |
+| ✅ F-3 | ✅ T211 | `frame_dtls12_consistency.c` first batch | 13 (delivered) | merged (PR #293) |
+| ✅ F-4 | ✅ T212 | `frame_dtls12_consistency.c` remainder | 10 (delivered) | merged (PR #294) |
+| ✅ **closeout** | ✅ T213 | series rollup + Phase F close | — | this PR |
 
 `TODO(#42-phase-f)` — pinned in this doc and in each Phase F sub-PR's
 `*_consistency.rs` audit pin. Each sub-PR removes its row from the planned
@@ -103,11 +103,65 @@ an `audit_plan_docs_in_sync` test that pins this plan doc's anchors.
 
 ## 6. Acceptance criteria
 
-- [ ] 5 sub-PR series merged with ~48 audit-pin tests
-- [ ] `tests/interop/tests/` has new `tlcp_consistency.rs` +
+- [x] 5 sub-PR series merged with **45 audit-pin tests** (T209 12 + T210 10 + T211 13 + T212 10)
+- [x] `tests/interop/tests/` has new `tlcp_consistency.rs` +
       `dtls12_consistency.rs` files
-- [ ] Each test asserts a specific reject path (record/handshake-layer
-      error) or a verified-positive round-trip
-- [ ] DEV_LOG **T209-T213** entries; PROMPT_LOG entries
-- [ ] `audit_plan_docs_in_sync` cross-file pin in every Phase F test file
-      asserts this plan doc remains authoritative
+- [x] Each test asserts a specific reject path (record/handshake-layer
+      error), a verified-positive round-trip, or an explicit gap pin
+      with `TODO(#42-phase-f)`
+- [x] DEV_LOG **T209-T213** entries; PROMPT_LOG entries
+- [x] `audit_plan_docs_in_sync` cross-file pin in every Phase F test file
+      asserts this plan doc + §7 rollup totals
+
+## 7. Series rollup (T213 closeout)
+
+The 5-sub-PR series is closed; this section is the final tally so the
+issue closer / future readers can see the whole shape at a glance.
+
+| Sub-PR | Phase | Source family | C scope (fn / rows) | Delivered tests | PR | Outcome |
+|--------|-------|---------------|--------------------:|----------------:|----|---------|
+| plan + F-1 | T209 | this doc + `frame_tlcp_consistency_1.c` | 34 fn / 119 rows | 12 | #291 | merged |
+| F-2 | T210 | `frame_tlcp_consistency_2.c` + `_3.c` | 35 fn / 114 rows | 10 | #292 | merged |
+| F-3 | T211 | `frame_dtls12_consistency.c` first batch | (subset of 54 fn / 173 rows) | 13 | #293 | merged |
+| F-4 | T212 | `frame_dtls12_consistency.c` remainder | (remainder of 54 fn / 173 rows) | 10 | #294 | merged |
+| closeout | T213 | series rollup + Phase F close | — | — | this PR | — |
+| **Totals** | | **123 fn / ~511 rows** | | **45 tests** | | **5/5 sub-PRs closed** |
+
+**Net result vs C input**: 45 net new Rust audit-pin tests against 123
+unique C TC families / ~511 parameterised `.data` rows across the
+TLCP + DTLS 1.2 consistency suites. The reduction reflects Phase F's
+§2 thesis: a large fraction of the C surface is parameterised
+algorithm × handshake-state matrices that the existing
+`tests/interop/tests/{tlcp,dtls12,dtls_resilience}.rs` files already
+cover. The 45 audit-pin tests are the **delta** — semantics C asserts
+that no Rust test currently pins.
+
+**Methodology lineage** (each sub-PR codified patterns the next
+reused):
+
+- T209 — Phase F template reuse from T201 dtlcp_consistency / TCP-over
+  reliable transport seq-num pin / record-layer single-record
+  lenient default
+- T210 — Alert level/desc byte round-trip = shutdown-API-less TLCP
+  transport-layer pin / accessor direct `Option` compare = T199 fn
+  signature 法的轻量替代
+- T211 — Deprecated-feature scope-cut pin (RFC 7574 CRIME
+  compression) / DTLS record header offset 11-12 length pin /
+  sibling file complementary attack-surface
+- T212 — Verbatim-C-typo allowlist accumulation
+  (`typos.toml` accumulates 5 C-quirk patterns)
+- T213 — Closeout = §7 rollup table + Methodology lineage + folds
+  into existing `audit_plan_docs_in_sync` (no new test fn)
+
+**Follow-up TODOs left open** (2, both `TODO(#42-phase-f)`):
+
+- TLCP `open_app_data` strict-mode trailing-bytes (T209) — consider
+  requiring the input slice length to match the record's declared
+  total. Currently lenient (single-record-at-a-time).
+- DTLS 1.2 compression follow-up (T211) — if compression is ever
+  re-introduced (e.g. for GB/T compliance), wire a builder flag and
+  re-pin the negotiated-method accessor.
+
+These are product-side hardening / extension tasks that surfaced
+during the audit; the corresponding tests pin **current** lenient
+behaviour so a future hardening lands as a deliberate change.

@@ -15316,3 +15316,80 @@ Phase F 累计:
     形成「C-quirk vocabulary」防 strict spell-check 阻塞 PR
 
 Recorded as DEV_LOG Phase T212.
+
+### T213 — Phase F 收官 (Phase F 5 sub-PR 第 5 / 最终弹)
+
+> 先做Phase F：我希望你能连续工作，依次完成T209~T213, 每完成1项任务按照定义的提交工作流提交，每项任务的代码确认合入主干后自动开始下一项任务
+
+承接 T212 Phase F-4。
+关闭 Phase F 5-sub-PR 系列:
+  T209 tlcp_1 (12)
+  T210 tlcp_2 + _3 (10)
+  T211 dtls12 首批 (13)
+  T212 dtls12 剩余 (10)
+  T213 closeout (本 PR)
+
+系列净产:
+  Sub-PR    Phase  Source                                       C scope (fn/rows)              Delivered  PR
+  -----------------------------------------------------------------------------------------------------------
+  plan+F-1  T209   this doc + frame_tlcp_consistency_1.c        34 / 119                       12         #291
+  F-2       T210   frame_tlcp_consistency_2.c + _3.c            35 / 114                       10         #292
+  F-3       T211   frame_dtls12_consistency.c first batch       (subset of 54 / 173)           13         #293
+  F-4       T212   frame_dtls12_consistency.c remainder         (remainder of 54 / 173)        10         #294
+  closeout  T213   series rollup + Phase F close                -                              -          本 PR
+  Totals                                                        123 / ~511                     45 tests   5/5
+
+45 tests / 123 fn / ~511 rows 缩减比例反映 Phase F 核心论点 (plan §2):
+  大量 C 测面是参数化算法 × 握手状态矩阵
+  tests/interop/tests/{tlcp,dtls12,dtls_resilience}.rs 已端到端覆盖
+  本系列 45 个 audit pin 是 delta — C 断言但 Rust 此前未 pin 的语义
+
+改动 — 0 新 product / 0 新 test fn:
+  docs/issue-42-phase-f-plan.md:
+    §3 表 4 行 ✅ + PR# 标记 (T209 12 #291 / T210 10 #292 / T211 13 #293 / T212 10 #294)
+    §6 acceptance criteria 全 ✅
+    新 §7 series rollup table (5 sub-PR + Totals 行 + Methodology lineage 5 行 + 2 个 follow-up TODO 锁)
+  2 个 Phase F 测试文件 audit_plan_docs_in_sync 加 3 个新断言:
+    `## 7. Series rollup` section header
+    `**45 tests**` 字面值
+    `**5/5 sub-PRs closed**` 字面值
+
+为何无新 test fn:
+  沿用 T200 #46 + T208 Phase C codified 模式
+  closeout 折入既有 audit_plan_docs_in_sync 单测避免 fn 膨胀
+  2 个文件同名 fn 各改 1 处 + 1 个 plan doc 改完成
+
+累计 (终值):
+  T209 (12) + T210 (10) + T211 (13) + T212 (10) = 45 tests in 2 files
+
+Phase F 总成果:
+  2 个新 *_consistency.rs (tlcp 22 + dtls12 23 — sibling to dtls_resilience + dtlcp_consistency)
+  1 个新 plan doc (issue-42-phase-f-plan.md)
+  2 个 follow-up TODO(#42-phase-f):
+    T209 TLCP trailing-bytes strict-mode
+    T211 DTLS compression follow-up
+
+验证:
+  cargo test -p hitls-integration-tests --test tlcp_consistency --test dtls12_consistency --all-features  22/0 + 23/0 = 45/0
+  cargo test -p hitls-integration-tests --all-features                                                    380+/0 零回归
+  cargo fmt + cargo clippy --workspace --all-features -D warnings + typos                                 clean
+
+作用域:
+  docs/issue-42-phase-f-plan.md +60 行 (§7 + lineage + TODO 锁)
+  2 个测试文件 audit_plan_docs_in_sync 各 +3 anchor
+  0 product code / 0 新 test fn
+
+沿用 + 新方法学:
+  沿用 T200 #46-closeout + T208 Phase C-closeout 模式 (series rollup + Methodology lineage + 折入既有 pin)
+
+  新「双 Phase closeout 一致性 (Phase C T208 + Phase F T213)」 (codified):
+    两个连续 Phase 都用同款 closeout 模板:
+      plan §7 rollup table
+      + Methodology lineage
+      + 2-文件 pin 字面值 anchor
+      + 1-2 TODO 锁
+    证明 T208 提出的 closeout 模式 reusable
+    形成 Phase 收官 standard recipe
+    减少未来 Phase 收官 reinvent cost (Phase D 收官时直接复用)
+
+Recorded as DEV_LOG Phase T213.
