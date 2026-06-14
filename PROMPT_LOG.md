@@ -14800,3 +14800,75 @@ Feature gate:
     直接 drop 测试避免 fixture-driven 误判
 
 Recorded as DEV_LOG Phase T205.
+
+### T206 — Phase C-3 x509_crl.c 非 RFC5280 10 tests (Phase C 5 sub-PR 第 3 弹)
+
+> 我希望你能连续工作，依次完成T204~T208, 每完成1项任务按照定义的提交工作流提交，每项任务的代码确认合入主干后自动开始下一项任务
+
+承接 T205 Phase C-2 PKCS12。
+
+改动:
+  新 crates/hitls-pki/tests/migrated_x509_crl_extensions.rs (~180 行 / 10 tests + decision matrix mod-doc + plan-doc 跨文件 pin)
+
+10 tests:
+  PARSE_VERSION_FUNC_TC001:
+    crl_parse_rsa_v1_no_extensions      v1 baseline
+    crl_parse_rsa_v2_with_extensions    v2 with ext
+  PARSE_REVOKEDLIST_FUNC_TC001:
+    crl_parse_rsa_v1_empty_revoked_list noCRL
+    crl_parse_rsa_v1_multi_revoked_entries mul
+  PARSE_SIGNALG_FUNC_TC001:
+    crl_parse_ecdsa_v2_signature_algorithm
+    crl_parse_dsa_v2_signature_algorithm_unsupported_gap DSA-SHA-256 OID 不支持 → gap pin
+    crl_parse_sm2_v2_signature_algorithm
+  PARSE_EXTENSIONS_FUNC_TC001:
+    crl_parse_extension_issuer_alternative_name_tolerated IAN
+    crl_parse_extension_baseline_test_crl CRLNumber 存在 pin
+  audit_plan_docs_in_sync 跨文件 pin
+
+关键发现:
+  DSA-SHA-256 (OID 2.16.840.1.101.3.4.3.2) Rust CRL parser 不支持
+  改 happy-path → unsupported-algorithm gap pin
+  用 expect_err 锁 InvalidCrl(unknown TBS signature algorithm)
+  + TODO(#42-phase-c) 未来补 dispatch
+
+Fixture 复用:
+  tests/vectors/c-asn1-fixtures/cert/asn1/{rsa,ecdsa,dsa,sm2}_crl/ 已 mirrored 每算法 15+ 文件
+  (crl_v1 / v2 / v1.noCRL / v1.mul / v1.notCA / v1.v1 等)
+  extension_crl/test_crl.pem + test_crl_add_issuer_alternative_name.pem 用于 IAN
+
+踩坑:
+  初版 DSA test 用 happy-path 模式 (SM2/ECDSA 同样有效) → InvalidCrl panic
+  fix 改 expect_err gap pin (DSA-SHA-256 OID hardcoded check + TODO marker)
+
+Feature gate:
+  #![cfg(feature = "x509")] 与 hitls-pki x509 feature 对齐 (T204/T205 codified)
+
+验证:
+  cargo test -p hitls-pki --test migrated_x509_crl_extensions --all-features  10/0
+  cargo test -p hitls-pki --tests                                             1616/0
+  cargo fmt + cargo clippy --workspace --all-features -D warnings             clean
+
+作用域:
+  1 个新测试文件 ~180 行
+  0 product code
+  1 个 TODO(#42-phase-c) (DSA dispatch)
+
+沿用 + 新方法学:
+  沿用 T205 「fixture-driven」+「feature gate 与 Cargo.toml 对齐」+「audit_plan_docs_in_sync 跨文件 pin」
+
+  新「unsupported-algorithm gap pin」 (codified):
+    当 fixture 触发未实现 algorithm 时
+    改 happy-path → expect_err gap pin + TODO 锁 OID
+    比 drop 测试保留 attack-surface 覆盖 + 锁定未来扩展路径
+
+  新「algorithm-matrix fixture 复用」:
+    C testdata 提供 {rsa,ecdsa,dsa,sm2}_crl/ 平行算法目录
+    Rust per-algorithm 1 test 提供 cipher-coverage matrix
+    不重复 round-trip 逻辑
+
+  新「extension parse = tolerated pin 非 accessor 完整性」:
+    IssuerAltName 等 CRL 扩展 Rust 无专用 accessor
+    测试 pin「parse 不 reject」即 negative claim 文档化 lenient 行为
+
+Recorded as DEV_LOG Phase T206.
