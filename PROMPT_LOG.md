@@ -16653,3 +16653,79 @@ Recorded as DEV_LOG Phase T234.
     一个 crate 中的 audit pin 可验证兄弟 crate + workspace tests/interop 树中的文件存在
 
 Recorded as DEV_LOG Phase T235.
+
+### T236 — Phase B closeout: series rollup + Phase I roadmap doc emission + methodology lineage (Phase B 5 sub-PR 终弹)
+
+> 按 B 走
+
+Closes T112+T233-T235 Phase B series.
+
+改动:
+  crates/hitls-pki/tests/migrated_phase_b_audit_pins.rs 追加 T236 banner + 5 closeout pin tests
+    累计 43 tests in 1 file
+  docs/issue-42-phase-b-plan.md
+    §1 Status: ✅ Complete (T112+T233-T236 all merged)
+    §4 表格 5/5 关闭
+    §6 验收项全勾
+    §7 series rollup (5-anchor 方法学血脉表 T112→T236 + 43-tests 累计 + outcome statement)
+  新建 docs/issue-42-phase-i-roadmap.md (~250 行)
+    18-anchor per-anchor what-to-close pointer table
+    cover 全部 49 Phase B audit-pinned TODOs
+    分 6 个 Phase I sub-task I-1 ~ I-6 + 预估工时
+
+5 closeout pin tests:
+  t236_phase_b_cumulative_count_pin (this-file 43; fn-prefix 计数避开 T223 #[test] 自计数)
+  t236_phase_b_methodology_lineage_pinned (plan §7 5 个锚点 T112/T233/T234/T235/T236)
+  t236_phase_b_plan_doc_all_subprs_closed (§4 ✅ T112-T236 + 5/5 sub-PRs closed)
+  t236_phase_i_roadmap_emitted (18 锚点覆盖 + 'what-to-close' canonical header)
+  t236_phase_b_closeout_banner_pinned (43-tests + issue-42-phase-i-roadmap.md + 'not silently deferred')
+
+Phase I roadmap 拆分:
+  I-1 RSA-PSS PKCS#8 codec (1.5d)
+  I-2 SM2 PKCS#8 codec (1.0d)
+  I-3 Brainpool + NIST P-224 curves (2.0d)
+  I-4 PBES2 encrypted PKCS#8 (1.0d)
+  I-5 RSA codec extract refactor (0.5d)
+  I-6 TLS builder + custom-ext + SNI hardening (1.0d)
+  = 7 天总计
+  3 anchor 家族 (#47-conf-cnf + #47-sm-defer + #47-keymgmt-defer) 路由到 Phase I product-roadmap review
+
+关键设计:
+  roadmap-doc emission 为 canonical 'substantive closeout artefact'
+  与 T223 partial-close annotation + T228 H-RESOLVED escalation 是兄弟 pattern
+  区别: 发布专门的 PLANNING DOC 给延期工作
+  非在既有 TODO 站点上注释
+  T223/T228 的 layered annotation 仍适用 (TODO 锚点作 historical grep target 保留)
+  但 substantive forward-looking 工作计划在 roadmap
+
+累计:
+  T112 (8) + T233 (10) + T234 (10) + T235 (10) + T236 (5) = 43 tests
+
+验证:
+  cargo test -p hitls-pki --test migrated_phase_b_audit_pins --all-features  43/0
+  cargo test -p hitls-pki --all-features                                     1675/0 零回归 (was 1670, +5)
+  cargo fmt + cargo clippy --workspace --all-features -D warnings + typos    clean
+
+Pitfall (codified):
+  Phase I roadmap 用 backtick-wrapped 裸锚点名 (`#44-strict-version`) 在 section heading
+  非字面 `TODO(#44-strict-version)` 形式
+  T236 anchor-coverage pin 起初 assert TODO() 包装失败
+  修复: 匹配裸锚点名 (无 TODO() 包装) —— roadmap 用更简洁的 heading style 是 legit, pin 必须匹配 doc 实际惯例
+
+作用域:
+  same test file +~140 行 (5 pins + §8 banner)
+  plan doc §1/§4/§6/§7 (~55 行 §7 rollup)
+  新 roadmap doc (~250 行, 18 per-anchor)
+  0 product code
+  0 新 TODO
+
+沿用方法学:
+  T223/T228 closeout 标准配方 (§N rollup + Methodology lineage + N TODO marks)
+
+新方法学:
+  「Phase I roadmap doc emission as substantive closeout」 (codified):
+    audit 工作产出的 deferred-work 列表超出 plan §8 容量时
+    emit STANDALONE PLANNING DOC 含 per-anchor what-to-close pointers + est. days + crate ownership
+    该独立 doc 成为下一轮 phase (Phase I) 的 planning artefact
+
+Recorded as DEV_LOG Phase T236.
