@@ -15182,3 +15182,75 @@ Recorded as DEV_LOG Phase T209.
     比断言 fn signature 更鲁棒 (同时验返回值 + 函数存在性)
 
 Recorded as DEV_LOG Phase T210.
+
+### T211 — Phase F-3 dtls12/consistency 首批 13 tests (Phase F 5 sub-PR 第 3 弹)
+
+> 先做Phase F：我希望你能连续工作，依次完成T209~T213, 每完成1项任务按照定义的提交工作流提交，每项任务的代码确认合入主干后自动开始下一项任务
+
+承接 T210 Phase F-2 tlcp_2+_3。
+
+改动:
+  新 tests/interop/tests/dtls12_consistency.rs (~225 行 / 13 tests + decision matrix mod-doc + plan-doc 跨文件 pin)
+
+13 tests:
+  Baseline (2):
+    handshake_completes_appdata_bidirectional (RFC6347)
+    handshake_completes_with_cookie_path (HelloVerifyRequest)
+  Alert round-trip (2):
+    close_notify_alert_round_trip
+    fatal_alert_round_trip
+  MSGLENGTH_TOOLONG (2):
+    msglength_too_long_rejected (DTLS header offset 11-12)
+    msglength_low_byte_too_small_rejected
+  MSGLENGTH_ZERO (1):
+    zero_length_appdata_round_trip
+  Accessor (2):
+    version_accessor_returns_dtls12
+    cipher_suite_accessor_returns_negotiated_suite (client==server agreement)
+  COMPRESSED scope-cut (1):
+    compression_scope_cut_pin + TODO(#42-phase-f) (RFC 7574 CRIME)
+  AEAD (1):
+    tampered_ciphertext_rejected
+  Size (1):
+    large_message_round_trip_4kib
+  plan pin (1):
+    audit_plan_docs_in_sync
+
+关键设计:
+  Sibling to dtls_resilience.rs (T201 已覆盖 anti-replay/out-of-order/selective-loss)
+  本 file 互补 record-layer rejection 类别 (length sanity / alert / version+cipher accessor / compression scope-cut)
+
+Phase F 累计:
+  T209 (12) + T210 (10) + T211 (13) = 35 tests in 2 files
+
+验证:
+  cargo test -p hitls-integration-tests --test dtls12_consistency --all-features  13/0
+  cargo test -p hitls-integration-tests --all-features                            370+/0 零回归
+  cargo fmt + cargo clippy --workspace --all-features -D warnings + typos         clean
+
+作用域:
+  1 个新测试文件 ~225 行
+  0 product code
+  1 个新 TODO(#42-phase-f) (compression follow-up)
+
+沿用 + 新方法学:
+  沿用 T209 Phase F 模板复用 (一次成功 swap connection_tlcp -> connection_dtls12 + make_tlcp -> make_dtls12 + add cookie 参数)
+  + T209 TCP-over reliable seq pin 对偶到 UDP DTLS (anti-replay window 已 dtls_resilience 覆盖)
+  + T210「Alert 字节 round-trip」+「accessor Option 直接比较」
+
+  新「deprecated-feature scope-cut pin」 (codified):
+    RFC 7574 CRIME compression / 已废弃 feature 用 happy-path 测无 compression API 调用
+    + 注释 TODO 若未来需重启
+    比 expect_err 更安全 (避免锁死「永远不支持」, 容纳合规变化)
+
+  新「DTLS record header offset 11-12 length pin」:
+    DTLS 13 字节 header layout (type/version/epoch/seq/length)
+    与 TLS 5 字节 (type/version/length) 不同
+    length byte offset 必须按版本算 (TLS=3-4, DTLS=11-12)
+
+  新「sibling file 互补 attack surface」:
+    dtls_resilience (T201) 覆盖 loss-simulation
+    dtls12_consistency (T211) 互补 length/version/cipher 类别
+    同 namespace 不同 attack-surface 避免一文件膨胀
+
+Recorded as DEV_LOG Phase T211.
