@@ -33,7 +33,7 @@
 //! asserts the key audit anchors. Same pattern as T195's
 //! `audit_plan_docs_in_sync` for #46.
 
-#![cfg(feature = "x509")]
+#![cfg(feature = "cms")]
 
 use hitls_pki::cms::CmsMessage;
 
