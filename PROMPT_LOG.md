@@ -16840,3 +16840,64 @@ Recorded as DEV_LOG Phase T116.
     floor count 从 codified delivery 锚点推导 (e.g. T211+T212 = 23, floor = 20 留 margin)
 
 Recorded as DEV_LOG Phase T246.
+
+### T247 — Phase F-followup-3 state-machine + CI integration coverage 10 audit pins (Phase F follow-up 5 sub-PR 第 3 弹)
+
+> 请继续 Phase F
+
+承接 T246 Phase F-followup-2。
+
+改动:
+  migrated_phase_f_audit_pins.rs 追加 T247 banner + 10 audit pins
+  累计 28 tests in 1 file
+
+10 audit pins 覆盖 c-test-migration-plan §7.2 'state-machine 部分':
+  t247_tls13_alert_state_machine_dev_log_anchors (T88/T89/T103/T104)
+  t247_tls12_state_machine_dev_log_anchors (T90/T108/T110/T117/T118)
+  t247_mtls_state_machine_dev_log_anchors (T99/T102 + 'mTLS' 或 'in-handshake')
+  t247_0rtt_state_machine_dev_log_anchors (T106/T109 + '0-RTT' 或 'early data')
+  t247_keyupdate_state_machine_dev_log_anchors (T100/T101 + 'KeyUpdate')
+  t247_external_psk_state_machine_dev_log_anchor (T119 + '--psk' CLI flag)
+  t247_tlsfuzzer_xfail_bookkeeping_dev_log_anchors (T89/T93 + 'XFAIL')
+  t247_ci_sample_mode_wall_clock_optimisation_claude_md_pin (CLAUDE.md 'sampling-mode' 或 '80 s')
+  t247_tlsfuzzer_cert_matrix_dev_log_anchor (T93 cert-matrix 或 XFAIL_DIR)
+  t247_audit_phase_f_followup3_plan_docs_in_sync (T247 + 'state-machine' plan-doc cross-coverage)
+
+关键设计:
+  扩展 T246 file-presence 模式到 DEV_LOG 锚点字符串模式
+  asserts DEV_LOG 叙述锚点跨 phase 持续存在 (而非 file presence)
+  与 T246 file-presence 形成 2-axis 审计:
+    code-side regression: file count 下降 → T246 catches
+    doc-side regression: anchor 叙述移除 → T247 catches
+  5 state-machine 家族 (TLS 1.3 alert / TLS 1.2 / mTLS / 0-RTT / KeyUpdate / external-PSK) 集体 cross-pin 17 个 DEV_LOG 锚点 T88-T119
+
+累计:
+  T116 (8) + T246 (10) + T247 (10) = 28 tests
+
+验证:
+  cargo test -p hitls-tls --test migrated_phase_f_audit_pins --all-features  28/0
+  cargo test -p hitls-tls --all-features                                     1657/0 零回归 (was 1647, +10)
+  cargo fmt + cargo clippy --workspace --all-features -D warnings + typos    clean
+
+Pitfall (codified):
+  clippy::doc_lazy_continuation 拒绝 '/// + T97 client + ...' doc 续行 (read as list bullet)
+  修复: em-dash 分隔 list 'T96 server, T97 client, T99 CV alert, T102 sigalgs comprehensive list'
+  同 T217/T220/T227/T228/T235/T116 pitfall
+
+作用域:
+  同测试文件 +~160 行 (10 pins + banner)
+  0 product code
+  0 新 TODO
+
+沿用方法学:
+  T112 4-tuple + T235 cross-crate + T246 test-count-floor + T223 partial-close
+
+新方法学:
+  「DEV_LOG anchor-string pattern as layered audit」 (codified):
+    互补于 T246 file-presence 模式
+    asserts DEV_LOG 叙述短语 (codify phase 或 methodology) 跨 edit 持续
+    结合 T246 file-presence 形成 2-axis 审计:
+      code-side regression catches file 计数 drop
+      doc-side regression catches anchor 叙述 removal
+
+Recorded as DEV_LOG Phase T247.

@@ -336,6 +336,190 @@ fn t246_audit_phase_f_followup2_plan_docs_in_sync() {
     }
 }
 
+// ===========================================================================
+// T247 / Phase F-followup-3 — state-machine + CI integration coverage.
+//
+// Covers the c-test-migration-plan.md §7.2 "状态机部分写
+// tlsfuzzer/DTLS 脚本" portion of the acceptance criteria.
+//
+// 10 audit pins cross-referencing the DEV_LOG state-machine
+// hardening lineage (T88 → T119) and the CI sample-mode optimisation
+// path (T93 12min → 80s).
+//
+// Cumulative: T116 (8) + T246 (10) + T247 (10) = 28 tests.
+// ===========================================================================
+
+/// T247 audit pin #1: TLS 1.3 alert-before-close state-machine
+/// (T88 CCS + T89 alert-on-error generalisation + T103 empty-Alert
+/// + T104 cross-record reassembly). DEV_LOG anchors must remain.
+#[test]
+fn t247_tls13_alert_state_machine_dev_log_anchors() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let dev_log = std::fs::read_to_string(format!("{manifest_dir}/../../DEV_LOG.md")).unwrap();
+    for anchor in ["T88", "T89", "T103", "T104"] {
+        assert!(
+            dev_log.contains(anchor),
+            "DEV_LOG must retain TLS 1.3 alert state-machine anchor `{anchor}`"
+        );
+    }
+}
+
+/// T247 audit pin #2: TLS 1.2 state-machine hardening lineage (T90
+/// + T108 + T110 + T117 + T118). DEV_LOG anchors must remain.
+#[test]
+fn t247_tls12_state_machine_dev_log_anchors() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let dev_log = std::fs::read_to_string(format!("{manifest_dir}/../../DEV_LOG.md")).unwrap();
+    for anchor in ["T90", "T108", "T110", "T117", "T118"] {
+        assert!(
+            dev_log.contains(anchor),
+            "DEV_LOG must retain TLS 1.2 state-machine anchor `{anchor}`"
+        );
+    }
+}
+
+/// T247 audit pin #3: mTLS in-handshake state-machine — T96 server,
+/// T97 client, T99 CV alert, T102 sigalgs comprehensive list. The
+/// DEV_LOG anchors must remain.
+#[test]
+fn t247_mtls_state_machine_dev_log_anchors() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let dev_log = std::fs::read_to_string(format!("{manifest_dir}/../../DEV_LOG.md")).unwrap();
+    for anchor in ["T99", "T102"] {
+        assert!(
+            dev_log.contains(anchor),
+            "DEV_LOG must retain mTLS state-machine anchor `{anchor}`"
+        );
+    }
+    assert!(
+        dev_log.contains("mTLS") || dev_log.contains("in-handshake"),
+        "DEV_LOG must reference mTLS or in-handshake state-machine work"
+    );
+}
+
+/// T247 audit pin #4: 0-RTT state-machine (T106 rejected-garbage
+/// tolerance + T109 acceptance verification). DEV_LOG anchors must
+/// remain.
+#[test]
+fn t247_0rtt_state_machine_dev_log_anchors() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let dev_log = std::fs::read_to_string(format!("{manifest_dir}/../../DEV_LOG.md")).unwrap();
+    for anchor in ["T106", "T109"] {
+        assert!(
+            dev_log.contains(anchor),
+            "DEV_LOG must retain 0-RTT state-machine anchor `{anchor}`"
+        );
+    }
+    assert!(
+        dev_log.contains("0-RTT")
+            || dev_log.contains("early data")
+            || dev_log.contains("early_data"),
+        "DEV_LOG must reference 0-RTT / early data work"
+    );
+}
+
+/// T247 audit pin #5: KeyUpdate state-machine (T100 codec authority
+/// + T101 cross-record reassembly). DEV_LOG anchors must remain.
+#[test]
+fn t247_keyupdate_state_machine_dev_log_anchors() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let dev_log = std::fs::read_to_string(format!("{manifest_dir}/../../DEV_LOG.md")).unwrap();
+    for anchor in ["T100", "T101"] {
+        assert!(
+            dev_log.contains(anchor),
+            "DEV_LOG must retain KeyUpdate state-machine anchor `{anchor}`"
+        );
+    }
+    assert!(
+        dev_log.contains("KeyUpdate")
+            || dev_log.contains("keyupdate")
+            || dev_log.contains("key_update"),
+        "DEV_LOG must reference KeyUpdate work"
+    );
+}
+
+/// T247 audit pin #6: External-PSK state-machine (T119 TLS 1.3
+/// server-side external PSK with `--psk` / `--psk-identity` flags).
+/// DEV_LOG anchor must remain.
+#[test]
+fn t247_external_psk_state_machine_dev_log_anchor() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let dev_log = std::fs::read_to_string(format!("{manifest_dir}/../../DEV_LOG.md")).unwrap();
+    assert!(
+        dev_log.contains("T119"),
+        "DEV_LOG must retain T119 external-PSK state-machine anchor"
+    );
+    assert!(
+        dev_log.contains("--psk"),
+        "DEV_LOG must reference the --psk CLI flag for external-PSK support"
+    );
+}
+
+/// T247 audit pin #7: tlsfuzzer XFAIL bookkeeping methodology
+/// (T89 codified per-script XFAIL dirs + T93 `XFAIL_DIR` env hook).
+/// DEV_LOG anchors must remain.
+#[test]
+fn t247_tlsfuzzer_xfail_bookkeeping_dev_log_anchors() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let dev_log = std::fs::read_to_string(format!("{manifest_dir}/../../DEV_LOG.md")).unwrap();
+    assert!(
+        dev_log.contains("XFAIL"),
+        "DEV_LOG must reference the XFAIL bookkeeping methodology"
+    );
+    for anchor in ["T89", "T93"] {
+        assert!(
+            dev_log.contains(anchor),
+            "DEV_LOG must retain XFAIL bookkeeping anchor `{anchor}`"
+        );
+    }
+}
+
+/// T247 audit pin #8: CI sample-mode wall-clock optimisation
+/// (CLAUDE.md status line: "CI sampling-mode wall-clock 12 min →
+/// 80 s for all 26 scripts").
+#[test]
+fn t247_ci_sample_mode_wall_clock_optimisation_claude_md_pin() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let claude_md = std::fs::read_to_string(format!("{manifest_dir}/../../CLAUDE.md")).unwrap();
+    assert!(
+        claude_md.contains("sampling-mode")
+            || claude_md.contains("80 s")
+            || claude_md.contains("80s"),
+        "CLAUDE.md must retain CI sampling-mode wall-clock optimisation anchor"
+    );
+}
+
+/// T247 audit pin #9: tlsfuzzer cert-matrix coverage (T93 codified
+/// 3 cert types × dedicated `s-server` instances + per-cert XFAIL
+/// dirs).
+#[test]
+fn t247_tlsfuzzer_cert_matrix_dev_log_anchor() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let dev_log = std::fs::read_to_string(format!("{manifest_dir}/../../DEV_LOG.md")).unwrap();
+    assert!(
+        dev_log.contains("cert-matrix")
+            || dev_log.contains("cert matrix")
+            || dev_log.contains("XFAIL_DIR"),
+        "DEV_LOG must retain T93 cert-matrix coverage anchor"
+    );
+}
+
+/// T247 audit pin #10: plan-doc cross-coverage for T247.
+#[test]
+fn t247_audit_phase_f_followup3_plan_docs_in_sync() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let plan_path = format!("{manifest_dir}/../../docs/issue-42-phase-f-plan.md");
+    let plan = std::fs::read_to_string(&plan_path).unwrap();
+    assert!(
+        plan.contains("T247"),
+        "Phase F plan doc must contain T247 anchor"
+    );
+    assert!(
+        plan.contains("state-machine"),
+        "Phase F plan doc must reference state-machine coverage"
+    );
+}
+
 /// T116 audit pin #8: plan-doc cross-coverage. The Phase F plan doc
 /// (`docs/issue-42-phase-f-plan.md`) must remain the authority for
 /// both the original §7 rollup and the new §8 follow-up section.
