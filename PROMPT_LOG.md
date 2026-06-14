@@ -14953,3 +14953,81 @@ Fixture 复用:
     把「fixture 镜像保留」单独列为 acceptance criterion
 
 Recorded as DEV_LOG Phase T207.
+
+### T208 — Phase C 收官 (Phase C 5 sub-PR 第 5 / 最终弹)
+
+> 我希望你能连续工作，依次完成T204~T208, 每完成1项任务按照定义的提交工作流提交，每项任务的代码确认合入主干后自动开始下一项任务
+
+承接 T207 Phase C-4。
+关闭 Phase C 5-sub-PR 系列:
+  T204 cms (11)
+  T205 pkcs12 (10)
+  T206 x509_crl (10)
+  T207 x509_check + vfy (15)
+  T208 closeout (本 PR)
+
+系列净产:
+  Sub-PR    Phase  Source                          C scope (fn/rows)   Delivered  PR
+  ---------------------------------------------------------------------------------
+  plan+C-1  T204   this doc + cms.c + cms_sign.c   40 / 418            11         #286
+  C-2       T205   pkcs12.c + pkcs12_util.c        52 / 242            10         #287
+  C-3       T206   x509_crl.c non-RFC5280          45 / 448            10         #288
+  C-4       T207   x509_check.c + x509_vfy.c       123 / 731           15         #289
+  closeout  T208   series rollup + Phase C close   -                   -          本 PR
+  Totals                                           260 / 1839          46 tests   5/5
+
+46 tests / 260 fn / 1839 rows 缩减比例反映 Phase C 核心论点 (plan §2+§3):
+  大量 C 测面是参数化 cipher × cert × chain 矩阵
+  migrated_x509_parse.rs (1076 fns) + 现有 interop chain tests 已端到端覆盖
+  本系列 46 个 audit pin 是 delta — C 断言但 Rust 此前未 pin 的语义
+
+改动 — 0 新 product / 0 新 test fn:
+  docs/issue-42-phase-c-plan.md:
+    §4 表 4 行 ✅ + PR# 标记 (T204 11 / T205 10 / T206 10 / T207 15)
+    §7 acceptance criteria 全 ✅ 勾选
+    新 §8 series rollup table (5 sub-PR + Totals 行 + Methodology lineage 5 行 + 3 个 follow-up TODO 锁)
+  4 个 Phase C 测试文件 audit_plan_docs_in_sync 加 3 个新断言:
+    `## 8. Series rollup` section header
+    `**46 tests**` 字面值
+    `**5/5 sub-PRs closed**` 字面值
+
+为何无新 test fn:
+  沿用 T200 #46 收官 + T194 #47 收官 codified 模式
+  closeout 折入既有 audit_plan_docs_in_sync 单测避免 fn 膨胀
+  4 个文件同名 fn 各改 1 处 + 1 个 plan doc 改完成
+
+累计 (终值):
+  T204 (11) + T205 (10) + T206 (10) + T207 (15) = 46 tests = 5-sub-PR 总和
+
+验证:
+  cargo test -p hitls-pki --tests                                            1631/0
+  cargo fmt + cargo clippy --workspace --all-features -D warnings            clean
+
+作用域:
+  docs/issue-42-phase-c-plan.md +80 行 (§8 + lineage + TODO 锁)
+  4 个测试文件 audit_plan_docs_in_sync 各 +3 anchor
+  0 product code / 0 新 test fn
+
+Phase C 总成果:
+  4 个新 migrated_*.rs (cms_negative_parse / pkcs12_negative_parse / x509_crl_extensions / x509_check_vfy)
+  1 个新 plan doc (issue-42-phase-c-plan.md)
+  3 个 follow-up TODO(#42-phase-c):
+    CMS strict-version (T204)
+    CRL DSA dispatch (T206)
+    PQC cert chain (T207)
+
+沿用 + 新方法学:
+  沿用 T200 #46-closeout 模式 (series rollup §8 + Methodology lineage + 折入既有 pin 而非新 fn)
+
+  新「跨 PR 系列 codified 累积 = doc-level methodology lineage」 (codified):
+    Phase C 5 sub-PR 每 sub-PR 1 行 codified 方法学
+    收官时归集成 §8 Methodology lineage 列表
+    让 Phase D 起手时直接复用 codified pattern:
+      T204 fixture-driven
+      T205 password binding
+      T206 unsupported-algorithm gap
+      T207 struct field grep
+      T208 closeout-folds-into-pin
+    减少重新 audit 成本
+
+Recorded as DEV_LOG Phase T208.

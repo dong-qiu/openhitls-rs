@@ -233,13 +233,16 @@ fn audit_plan_docs_in_sync() {
         );
     }
 
-    // Out-of-scope anchors must stay documented
+    // T208 closeout anchors — series rollup + totals literals
     for anchor in &[
         "x509_cert.c",
         "cms_sign.c",
         "pkcs12.c",
         "x509_check.c",
         "TODO(#42-phase-c)",
+        "## 8. Series rollup",
+        "**46 tests**",
+        "**5/5 sub-PRs closed**",
     ] {
         assert!(
             plan.contains(anchor),
