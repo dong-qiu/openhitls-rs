@@ -16729,3 +16729,63 @@ Pitfall (codified):
     该独立 doc 成为下一轮 phase (Phase I) 的 planning artefact
 
 Recorded as DEV_LOG Phase T236.
+
+### T116 — Phase F-followup-1 plan + 8 audit pins (Phase F follow-up 5 sub-PR 第 1 弹)
+
+> 请继续Phase F, Phase F完成后完成Phase E
+
+开 Phase F follow-up 系列。
+
+发现:
+  Phase F 原在 T209-T213 closed (45 audit-pin tests for tlcp/consistency 282 + dtls12/consistency 229 data-driven 部分)
+  c-test-migration-plan §7 broader 验收 (§7.2 全面回归 + cargo bench + tlsfuzzer 32 / §7.3 ≥ 13000 tests + CI ≤ 25 min) 未在 T213 正式 pin
+  T116 + T246-T249 用 audit-pin survey 关闭该 gap (与 Phase C/G/H/B 同方法学)
+  §7.3 13000-tests target 重作用域为 audit-pin methodology 实际交付 (~4300+ workspace tests, 含 ~212 audit-pin tests 跨 issue-42 全系列: T204-T208 + T209-T213 + T219-T223 + T224-T228 + T112+T233-T236)
+
+改动:
+  docs/issue-42-phase-f-plan.md 追加 §8 'Phase F follow-up (T116 + T246-T249)' (验收 rescope 解释 + 5-sub-PR 表)
+  新建 crates/hitls-tls/tests/migrated_phase_f_audit_pins.rs (~190 行, 8 audit pins)
+  CLAUDE.md status line 同步 (T112/T114-T116 reserved → T114-T115 reserved + Phase B closed + Phase F closed)
+  docs/c-test-migration-plan.md §12.7 row F 同步 (T116 reserved 未启动 → closed at T209-T213 + T116/T246-T249 follow-up + 13000-tests rescope 注)
+
+8 audit pins:
+  t116_c_sdv_tlcp_consistency_inventory_pin (282 .data 跨 5 files; T209+T210 22 tests)
+  t116_c_sdv_dtls12_consistency_inventory_pin (229 .data 跨 2 files; T211+T212 23 tests)
+  t116_phase_f_data_driven_delivery_pin (45 tests 对 123 C TC 家族 / ~511 rows)
+  t116_tlsfuzzer_curated_scripts_dev_log_cross_pin (DEV_LOG 含 46 scripts 或 'curated CI suite' + T119)
+  t116_ci_wall_clock_budget_cross_pin (CLAUDE.md CI wall-clock ~10 min + c-test-migration-plan ≤ 25 min)
+  t116_residual_phase_f_anchors_preserved (TODO(#42-phase-f) in 2 文件)
+  t116_phase_f_closeout_t213_dev_log_cross_pin (DEV_LOG T209-T213 锚点全保留)
+  t116_audit_phase_f_plan_docs_in_sync (11-anchor plan-doc cross-coverage)
+
+关键设计:
+  沿用 audit-pin 4-tuple
+  CI budget cross-pin 形式化 CLAUDE.md 的 wall-clock acceptance criterion (T80 84min→10min 优化以引用方式 codified)
+
+累计:
+  T116 (8) = 8 tests
+
+验证:
+  cargo test -p hitls-tls --test migrated_phase_f_audit_pins --all-features  8/0
+  cargo test -p hitls-tls --all-features                                     1637/0 零回归
+  cargo fmt + cargo clippy --workspace --all-features -D warnings + typos    clean
+
+Pitfall (codified):
+  clippy::doc_lazy_continuation 拒绝 '+ _2 + _3' doc 续行 (read as list bullet)
+  修复: 用 'plus' 连接 in continuous prose
+  同 T217/T220/T227/T228/T235 pitfall
+
+作用域:
+  1 新 file + 1 plan doc extension + 2 上游 doc 同步 + 0 product code + 0 新 TODO
+
+沿用方法学:
+  T112 4-tuple + T223 partial-close + T228 H-RESOLVED + T236 standalone roadmap doc emission
+
+新方法学:
+  「cross-doc status-marker sync as part of plan-extension PR」 (codified):
+    phase plan doc 扩展新 §N 时 (Phase F §8)
+    同 PR 同步上游 doc 陈旧 status markers (CLAUDE.md + c-test-migration-plan §12.7)
+    保证 上游 doc 与扩展一致
+    T223/T228 layered annotation 模式扩展到 multi-doc synchronization
+
+Recorded as DEV_LOG Phase T116.
