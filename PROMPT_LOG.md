@@ -16023,3 +16023,63 @@ Recorded as DEV_LOG Phase T221.
     后人 implement full PHA driver 时复用此 pin 作 baseline
 
 Recorded as DEV_LOG Phase T222.
+
+### T223 — Phase G closeout: T219-T222 series rollup + plaintext-file partial-close annotation + methodology lineage (Phase G 5 sub-PR final)
+
+> 开始做Phase G：我希望你能连续工作，依次完成T219~T223, 每完成1项任务按照定义的提交工作流提交，每项任务的代码确认合入主干后自动开始下一项任务
+
+Closes T219-T222 Phase G series.
+
+改动:
+  tests/interop/tests/transcript_mutation_encrypted.rs 追加 T223 banner + 5 closeout pin tests
+    累计 40 tests in 1 file
+  tests/interop/tests/transcript_mutation.rs 模块级 docblock 中追加 Phase G partial-close 注释
+    13 个 TODO(#48-encrypted-mutation) 锚点保留
+    同时引出 transcript_mutation_encrypted.rs 与 docs/issue-42-phase-g-plan.md 交叉引用
+  docs/issue-42-phase-g-plan.md
+    §1 Status: ✅ Complete (T219-T223 all merged)
+    §4 表格 5/5 关闭
+    §7 验收项全勾
+    §8 series rollup (方法学血脉表 + still-pending 显式列表 + 95-tests 累计)
+
+5 tests:
+  t223_phase_g_cumulative_count_pin (this-file 40 tests; fn 前缀计数避免 #[test] 字面量自计数 pitfall)
+  t223_phase_g_methodology_lineage_pinned (plan §8 12 个锚点 T186/T196/T207/T209/T215/T216/T217/T219/T220/T221/T222/T223 必含)
+  t223_phase_g_plaintext_file_partial_close_annotation_pin (plaintext file docblock 注释 + cross-ref + 13 个 TODO 锚点保留)
+  t223_phase_g_plan_doc_all_subprs_closed (§4 ✅ T219..T223 + 5/5 sub-PRs closed)
+  t223_phase_g_closeout_banner_pinned (95-tests 字面量 + still-pending + Full TCP encrypted-handshake driver)
+
+关键设计:
+  TODO 锚点不删除而是注释
+  13 个 'TODO(#48-encrypted-mutation)' 保留作 future full-driver PR 的 grep target
+  docblock 顶层注释告诉读者 Phase G 已 helper-level 部分关闭
+  避免误读为未解决 scope-cut
+
+累计:
+  T186 (7) + T214 (10) + T215 (11) + T216 (13) + T217 (14) + T219 (5) + T220 (10) + T221 (10) + T222 (10) + T223 (5) = 95 tests in 3 files
+
+验证:
+  cargo test -p hitls-integration-tests --test transcript_mutation_encrypted --all-features  40/0
+  cargo test -p hitls-integration-tests --test transcript_mutation --all-features            41/0
+  cargo test -p hitls-integration-tests --all-features                                       487/0 零回归
+  cargo fmt + cargo clippy --workspace --all-features -D warnings + typos                    clean
+
+作用域:
+  encrypted file +~110 行 (5 test + §8 banner)
+  plaintext file +9 行 docblock 注释
+  plan doc §1+§4+§7+§8 (~70 行 §8 rollup)
+  0 product code
+  13 TODO 锚点保留不动
+
+沿用方法学:
+  T200/T208/T213/T218 closeout 标准配方 (§N rollup + Methodology lineage + 2-file pins + N TODO marks)
+
+新方法学:
+  「partial-close annotation 作 scope-cut closeout」 (codified):
+    phase 部分关闭 scope-cut 时 (helper-level pins landed, full driver 待续)
+    TODO 锚点保留作 future PR 的 grep target
+    上游 docblock 顶部追加 cross-reference 注释告诉读者 partial-resolution 状态
+    避免删除 TODO 造成 'fixed' 误读
+    避免保留无注释 TODO 造成 'unresolved' 误读
+
+Recorded as DEV_LOG Phase T223.

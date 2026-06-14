@@ -48,7 +48,17 @@
 //!   discards. Pinned by `sh_with_nonzero_legacy_compression_NOT_rejected_gap`.
 //! - `TODO(#48-encrypted-mutation)`: encrypted post-SH transcript mutations
 //!   (cert_verify, finished, certificate) require key-schedule simulation on
-//!   the rogue-server side. Deferred to a follow-up PR.
+//!   the rogue-server side. **Phase G (T219-T223) partially closes this**:
+//!   T219 ships the key-schedule + AEAD infrastructure as `#[allow(dead_code)]`
+//!   helpers (`derive_server_handshake_keys` / `record_nonce` /
+//!   `seal_encrypted_record`); T220 ports `MODIFIED_CERT_VERIFY`; T221 ports
+//!   `MODIFIED_FINISHED`; T222 ports `EncryptedExtensions` + PHA — all at
+//!   helper-level pin granularity. A full TCP encrypted-handshake driver
+//!   (rogue server emitting encrypted EE → Cert → mutated CV → Finished on
+//!   the wire to a real client) remains future work; the 13 TODO markers
+//!   below stay as anchors. See `transcript_mutation_encrypted.rs` for the
+//!   helper-level pins and `docs/issue-42-phase-g-plan.md` §8 for the
+//!   methodology lineage.
 
 use hitls_tls::config::TlsConfig;
 use hitls_tls::connection::TlsClientConnection;

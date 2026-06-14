@@ -1067,3 +1067,123 @@ fn t222_phase_g4_plan_banner_pinned() {
     assert!(plan.contains("T222"));
     assert!(plan.contains("EncryptedExtensions") || plan.contains("PHA"));
 }
+
+// ===========================================================================
+// T223 / Phase G closeout — series rollup + plaintext-file partial-close
+// annotation + §8 methodology lineage.
+//
+// Sibling to T200 / T208 / T213 / T218 closeout phases. The recipe is:
+// §N rollup in the plan doc + module-level partial-close annotation in the
+// sibling Phase D plaintext file + cross-coverage pin in this encrypted file +
+// methodology lineage table in the plan doc + DEV_LOG + PROMPT_LOG.
+//
+// The 13 `TODO(#48-encrypted-mutation)` markers in `transcript_mutation.rs`
+// are **annotated, not removed** — they stay as anchors for the still-pending
+// full TCP encrypted-handshake driver. The annotation surfaces the Phase G
+// helper-level resolution so a future reader is not misled into thinking
+// the scope-cut is unresolved.
+//
+// ## Cumulative across the transcript-mutation family
+//
+// T186 (7) + T214 (10) + T215 (11) + T216 (13) + T217 (14) + T219 (5) +
+// T220 (10) + T221 (10) + T222 (10) + T223 (5) = **95 tests in 3 files**
+// (transcript_mutation.rs 41 + transcript_mutation_tls12.rs 14 +
+// transcript_mutation_encrypted.rs 40).
+// ===========================================================================
+
+/// T223 closeout — pin the cumulative test count in this file matches the
+/// Phase G rollup. A regression that drops a Phase G test would fail this
+/// pin; a refactor that splits the file would need to update the plan doc.
+///
+/// Count is derived from `fn t2..` / `fn g219` patterns rather than the
+/// `#[test]` attribute literal — counting `#[test]` would also match this
+/// test's own `body.matches(...)` call below and inflate the count by 1.
+#[test]
+fn t223_phase_g_cumulative_count_pin() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let path = format!("{manifest_dir}/tests/transcript_mutation_encrypted.rs");
+    let body = std::fs::read_to_string(&path).unwrap();
+    let test_fn_count = body
+        .lines()
+        .filter(|l| l.starts_with("fn g219_") || l.starts_with("fn t22"))
+        .count();
+    assert_eq!(
+        test_fn_count, 40,
+        "Phase G + T223 closeout cumulative count: 5 (T219) + 10 (T220) + \
+         10 (T221) + 10 (T222) + 5 (T223) = 40 in this file"
+    );
+}
+
+/// T223 closeout — pin the §8 methodology lineage table in the Phase G plan
+/// doc. The lineage is the codified knowledge artifact this series produces;
+/// a regression that drops the table would erase the methodology.
+#[test]
+fn t223_phase_g_methodology_lineage_pinned() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let plan_path = format!("{manifest_dir}/../../docs/issue-42-phase-g-plan.md");
+    let plan = std::fs::read_to_string(&plan_path).unwrap();
+    assert!(plan.contains("Methodology lineage"));
+    for anchor in [
+        "T186", "T196", "T207", "T209", "T215", "T216", "T217", "T219", "T220", "T221", "T222",
+        "T223",
+    ] {
+        assert!(
+            plan.contains(anchor),
+            "methodology lineage table must reference codified anchor `{anchor}`"
+        );
+    }
+}
+
+/// T223 closeout — pin that the sibling `transcript_mutation.rs` module
+/// docblock surfaces the Phase G partial-close annotation. A reader of the
+/// plaintext file sees the cross-reference into this encrypted file via
+/// the module docs, not by stumbling across one of the 13 TODO sites.
+#[test]
+fn t223_phase_g_plaintext_file_partial_close_annotation_pin() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let path = format!("{manifest_dir}/tests/transcript_mutation.rs");
+    let body = std::fs::read_to_string(&path).unwrap();
+    assert!(body.contains("Phase G (T219-T223) partially closes this"));
+    assert!(body.contains("transcript_mutation_encrypted.rs"));
+    assert!(body.contains("issue-42-phase-g-plan.md"));
+    assert!(
+        body.contains("TODO(#48-encrypted-mutation)"),
+        "13 TODO anchors remain so a future full-driver PR has a grep target"
+    );
+}
+
+/// T223 closeout — pin all 5 Phase G sub-PRs are marked closed in the plan
+/// doc §4 table. A regression that reopens a row would fail this pin.
+#[test]
+fn t223_phase_g_plan_doc_all_subprs_closed() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let plan_path = format!("{manifest_dir}/../../docs/issue-42-phase-g-plan.md");
+    let plan = std::fs::read_to_string(&plan_path).unwrap();
+    for anchor in [
+        "✅ T219",
+        "✅ T220",
+        "✅ T221",
+        "✅ T222",
+        "✅ T223",
+        "5/5 sub-PRs closed",
+    ] {
+        assert!(
+            plan.contains(anchor),
+            "plan doc must mark `{anchor}` as closed"
+        );
+    }
+}
+
+/// T223 closeout — series rollup banner pin. The cumulative-95-tests
+/// arithmetic is the audit trail; a future reader can grep this banner to
+/// confirm the Phase G series shipped the expected volume.
+#[test]
+fn t223_phase_g_closeout_banner_pinned() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let plan_path = format!("{manifest_dir}/../../docs/issue-42-phase-g-plan.md");
+    let plan = std::fs::read_to_string(&plan_path).unwrap();
+    assert!(plan.contains("**95 tests in 3 files**"));
+    assert!(plan.contains("transcript_mutation_encrypted.rs 40"));
+    assert!(plan.contains("Still-pending follow-up"));
+    assert!(plan.contains("Full TCP encrypted-handshake driver"));
+}
