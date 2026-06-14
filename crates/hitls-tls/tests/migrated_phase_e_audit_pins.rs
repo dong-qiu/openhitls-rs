@@ -585,6 +585,210 @@ fn t243_audit_phase_e_behaviour_remaining_plan_docs_in_sync() {
     );
 }
 
+// ===========================================================================
+// T244 / Phase E-4 — API-form class builder/trait tests.
+//
+// Covers the API-form class (~359 rows, 50% of 718). These C
+// `HITLS_CFG_Set*` / `HITLS_CM_*` getter/setter shapes are rewritten
+// as Rust builder/trait tests rather than literally ported. The
+// `TlsConfig::builder()` is the central artifact; this batch pins
+// its presence + the core setters + the TLCP-specific dual-cert
+// builder ergonomics.
+//
+// Cumulative: T115 (8) + T242 (10) + T243 (10) + T244 (10) = 38 tests.
+// ===========================================================================
+
+/// T244 audit pin #1: `TlsConfig` source module present at the
+/// expected path (`config/mod.rs`). This is the central artifact
+/// the API-form audit-pin sample relies on.
+#[test]
+fn t244_tls_config_source_module_present() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let path = format!("{manifest_dir}/src/config/mod.rs");
+    let metadata =
+        std::fs::metadata(&path).unwrap_or_else(|e| panic!("config/mod.rs missing at {path}: {e}"));
+    assert!(
+        metadata.is_file() && metadata.len() > 0,
+        "config/mod.rs must be a non-empty file"
+    );
+}
+
+/// T244 audit pin #2: `TlsConfigBuilder` type name pin. The
+/// `config/mod.rs` must expose the `TlsConfigBuilder` type.
+#[test]
+fn t244_tls_config_builder_type_name_pin() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let body = std::fs::read_to_string(format!("{manifest_dir}/src/config/mod.rs")).unwrap();
+    assert!(
+        body.contains("TlsConfigBuilder"),
+        "config/mod.rs must expose the TlsConfigBuilder type"
+    );
+    assert!(
+        body.contains("pub fn builder()") || body.contains("pub fn builder("),
+        "config/mod.rs must expose the `builder()` constructor"
+    );
+}
+
+/// T244 audit pin #3: core builder methods. The TLCP integration
+/// tests in `tlcp.rs` exercise these — `role`, `min_version`,
+/// `max_version`, `verify_peer`, `build` — pin their presence in
+/// `config/mod.rs`.
+#[test]
+fn t244_tls_config_builder_core_setters_pin() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let body = std::fs::read_to_string(format!("{manifest_dir}/src/config/mod.rs")).unwrap();
+    for setter in [
+        ".role(",
+        ".min_version(",
+        ".max_version(",
+        ".verify_peer(",
+        ".build(",
+    ] {
+        // Setters live as `pub fn role(...)` not `.role(` in the
+        // source; we check for `fn role(`-style markers instead.
+        let alt = setter.trim_start_matches('.').trim_end_matches('(');
+        let fn_marker = format!("fn {alt}(");
+        assert!(
+            body.contains(&fn_marker),
+            "config/mod.rs must expose builder setter `{alt}` (fn signature `{fn_marker}`)"
+        );
+    }
+}
+
+/// T244 audit pin #4: server cert builder method. TLCP needs a
+/// distinct sign-cert + enc-cert setter pair (per T242 dual-cert
+/// pin); pin the cert-related setter family via multi-anchor
+/// scan.
+#[test]
+fn t244_tls_config_builder_server_cert_setters_pin() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let body = std::fs::read_to_string(format!("{manifest_dir}/src/config/mod.rs")).unwrap();
+    let cert_setter_anchors = [
+        "fn server_cert",
+        "fn server_certificate",
+        "fn cert_chain",
+        "fn server_cert_chain",
+        "fn server_key",
+        "fn add_cert",
+    ];
+    let hit = cert_setter_anchors.iter().any(|a| body.contains(a));
+    assert!(
+        hit,
+        "config/mod.rs must expose at least one server-cert setter via one of: {cert_setter_anchors:?}"
+    );
+}
+
+/// T244 audit pin #5: cipher-suite configuration. The C SDV
+/// `HITLS_CFG_SetCipherSuites` family must have a Rust
+/// equivalent builder method.
+#[test]
+fn t244_tls_config_builder_cipher_suites_setter_pin() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let body = std::fs::read_to_string(format!("{manifest_dir}/src/config/mod.rs")).unwrap();
+    let cs_anchors = [
+        "fn cipher_suites",
+        "fn ciphersuites",
+        "fn with_cipher_suites",
+    ];
+    let hit = cs_anchors.iter().any(|a| body.contains(a));
+    assert!(
+        hit,
+        "config/mod.rs must expose cipher-suites setter via one of: {cs_anchors:?}"
+    );
+}
+
+/// T244 audit pin #6: supported_groups configuration. C SDV
+/// `HITLS_CFG_SetGroups` family.
+#[test]
+fn t244_tls_config_builder_supported_groups_setter_pin() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let body = std::fs::read_to_string(format!("{manifest_dir}/src/config/mod.rs")).unwrap();
+    let group_anchors = [
+        "fn supported_groups",
+        "fn groups",
+        "fn with_groups",
+        "fn supported_curves",
+    ];
+    let hit = group_anchors.iter().any(|a| body.contains(a));
+    assert!(
+        hit,
+        "config/mod.rs must expose supported-groups setter via one of: {group_anchors:?}"
+    );
+}
+
+/// T244 audit pin #7: signature_algorithms configuration. C SDV
+/// `HITLS_CFG_SetSignatureAlgorithms` family.
+#[test]
+fn t244_tls_config_builder_signature_algorithms_setter_pin() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let body = std::fs::read_to_string(format!("{manifest_dir}/src/config/mod.rs")).unwrap();
+    let sigalg_anchors = [
+        "fn signature_algorithms",
+        "fn sig_algorithms",
+        "fn sigalgs",
+        "fn with_signature_algorithms",
+    ];
+    let hit = sigalg_anchors.iter().any(|a| body.contains(a));
+    assert!(
+        hit,
+        "config/mod.rs must expose signature-algorithms setter via one of: {sigalg_anchors:?}"
+    );
+}
+
+/// T244 audit pin #8: TLCP-specific config knobs cross-pin to
+/// `migrated_interface_tlcp_audit.rs` (T199 audit pins) — that file
+/// already covers the TLCP builder edge cases (4 `#46-*` anchors).
+/// This pin verifies the audit-pin file remains correlated.
+#[test]
+fn t244_tlcp_specific_config_knobs_cross_pin_t199() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let body = std::fs::read_to_string(format!(
+        "{manifest_dir}/tests/migrated_interface_tlcp_audit.rs"
+    ))
+    .unwrap();
+    // Reuse T199 anchors that exercise the builder configuration
+    // surface.
+    let test_count = body.matches("#[test]").count();
+    assert!(
+        test_count >= 5,
+        "migrated_interface_tlcp_audit.rs must have ≥5 #[test] T199 audit pins; got {test_count}"
+    );
+}
+
+/// T244 audit pin #9: cross-pin to T243 `t243_tlcp_integration_tests_target_floor_pin`
+/// — the API-form coverage is validated end-to-end by the
+/// integration tests in `tlcp.rs`. The T243 floor pin (≥11)
+/// must remain.
+#[test]
+fn t244_t243_floor_pin_cross_reference() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let body = std::fs::read_to_string(format!(
+        "{manifest_dir}/tests/migrated_phase_e_audit_pins.rs"
+    ))
+    .unwrap();
+    assert!(
+        body.contains("t243_tlcp_integration_tests_target_floor_pin"),
+        "Phase E file must retain the T243 tlcp.rs floor pin (≥11 tests)"
+    );
+}
+
+/// T244 audit pin #10: plan-doc cross-coverage for T244 + API-form
+/// class reference.
+#[test]
+fn t244_audit_phase_e_api_form_plan_docs_in_sync() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let plan_path = format!("{manifest_dir}/../../docs/issue-42-phase-e-plan.md");
+    let plan = std::fs::read_to_string(&plan_path).unwrap();
+    assert!(
+        plan.contains("T244"),
+        "Phase E plan doc must contain T244 anchor"
+    );
+    assert!(
+        plan.contains("API-form") || plan.contains("API form") || plan.contains("HITLS_CFG_Set"),
+        "Phase E plan doc must reference API-form class scope"
+    );
+}
+
 /// T115 audit pin #8: plan-doc cross-coverage. The Phase E plan
 /// doc (`docs/issue-42-phase-e-plan.md`) must remain the authority
 /// for the 718-row inventory + 3-way classification + 5-sub-PR

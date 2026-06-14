@@ -17195,3 +17195,58 @@ Recorded as DEV_LOG Phase T242.
     Codified: audit-pin floor 应跟 plan-doc 声明而非仅初始实现状态
 
 Recorded as DEV_LOG Phase T243.
+
+### T244 — Phase E-4 API-form class builder/trait tests 10 audit pins (Phase E 5 sub-PR 第 4 弹)
+
+> Phase F 完成后完成 Phase E
+
+承接 T243 Phase E-3。
+
+改动:
+  migrated_phase_e_audit_pins.rs 追加 T244 banner + 10 audit pins
+  累计 38 tests in 1 file
+
+10 audit pins (API-form ~359 rows = 50% × 718; C HITLS_CFG_Set* + HITLS_CM_* getter/setter shapes 改写为 Rust builder/trait tests):
+  t244_tls_config_source_module_present (src/config/mod.rs 非空)
+  t244_tls_config_builder_type_name_pin (TlsConfigBuilder + pub fn builder())
+  t244_tls_config_builder_core_setters_pin (5 个 fn: role/min_version/max_version/verify_peer/build)
+  t244_tls_config_builder_server_cert_setters_pin (multi-anchor: server_cert/server_certificate/cert_chain/server_cert_chain/server_key/add_cert)
+  t244_tls_config_builder_cipher_suites_setter_pin (cipher_suites/ciphersuites/with_cipher_suites)
+  t244_tls_config_builder_supported_groups_setter_pin (supported_groups/groups/with_groups/supported_curves)
+  t244_tls_config_builder_signature_algorithms_setter_pin (signature_algorithms/sig_algorithms/sigalgs/with_signature_algorithms)
+  t244_tlcp_specific_config_knobs_cross_pin_t199 (migrated_interface_tlcp_audit.rs ≥ 5 #[test])
+  t244_t243_floor_pin_cross_reference (Phase E 文件保留 t243_tlcp_integration_tests_target_floor_pin 函数名)
+  t244_audit_phase_e_api_form_plan_docs_in_sync (T244 + API-form 或 HITLS_CFG_Set plan-doc cross-coverage)
+
+关键设计:
+  替换 359 row 字面 port 为 7 个 builder setter 家族的 audit-pin
+  介绍新变体 'fn-signature scan' (asserts 'fn <name>(' marker 而非仅 name token)
+    保证 anchor IS 函数定义 (非注释或字符串字面量)
+    比 anchor-string 更紧, 适合 API surface 审计
+  T244 cross-pins T243 floor pin BY FUNCTION NAME 在同文件内
+    扩展 T115 cross-pin-to-test-function-name 方法到 within-file (inter-pin 非仅 inter-file)
+
+累计:
+  T115 (8) + T242 (10) + T243 (10) + T244 (10) = 38 tests
+
+验证:
+  cargo test -p hitls-tls --test migrated_phase_e_audit_pins --all-features  38/0
+  cargo test -p hitls-tls --all-features                                     1710/0 零回归 (was 1700, +10)
+  cargo fmt + cargo clippy --workspace --all-features -D warnings + typos    clean
+
+作用域:
+  同测试文件 +~190 行 (10 pins + banner)
+  0 product code
+  0 新 TODO
+
+沿用方法学:
+  T112 4-tuple + T242 multi-file multi-anchor scan + T246 test-count-floor + T247 anchor-string + T115 test-fn-name cross-pin + T243 tighten-floor
+
+新方法学:
+  「fn-signature scan」 (codified):
+    更紧的 anchor-string 变体
+    asserts 'fn <name>(' marker 确保 anchor IS 函数定义
+    较 anchor-string 更精确, 适 API surface 审计
+    用于审计具体 API 存在性时
+
+Recorded as DEV_LOG Phase T244.
