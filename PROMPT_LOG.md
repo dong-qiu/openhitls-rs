@@ -15776,3 +15776,69 @@ Phase D 总成果:
     帮助后人理解 C 符号 verbatim 引用必要性
 
 Recorded as DEV_LOG Phase T218.
+
+### T219 — Phase G-1 encrypted-mutation infrastructure + 5 baseline tests + Phase G plan doc (Phase G 5 sub-PR 第 1 弹)
+
+> 开始做Phase G：我希望你能连续工作，依次完成T219~T223, 每完成1项任务按照定义的提交工作流提交，每项任务的代码确认合入主干后自动开始下一项任务
+
+承接独立 audit (PR #300 后) 识别的最大单点 gap: 13 个 TODO(#48-encrypted-mutation) 锚点。
+
+Phase G 全景 audit:
+  解决 Phase D (T214-T218) explicit deferred 的 encrypted post-SH mutation gap
+  单点 unlock 150+ TLS 1.3 MODIFIED_CERT_VERIFY / MODIFIED_FINISHED / EncryptedExtensions TCs
+
+关键判断:
+  Plan §5.1 提议的 test-hooks feature gate 仍不需要
+  hitls-tls public API 已暴露 KeySchedule/TrafficKeys/AesGcmAead/derive_secret/compute_shared_secret 全部所需 primitive
+  encrypted-mutation rogue server 与 T186 plaintext rogue server 同款 0 product 改动 pattern
+
+5 sub-PR 拆分:
+  plan + G-1  T219 (本 PR infrastructure + 5 baseline)
+  G-2         T220 MODIFIED_CERT_VERIFY family ~10
+  G-3         T221 MODIFIED_FINISHED family ~10
+  G-4         T222 EncryptedExtensions + PHA ~10
+  closeout    T223
+
+改动:
+  新 docs/issue-42-phase-g-plan.md (~110 行 inventory + 5 sub-PR + Out-of-scope + acceptance criteria)
+  新 tests/interop/tests/transcript_mutation_encrypted.rs (~270 行 含 3 infrastructure helpers + 5 baseline tests + mod-doc)
+
+3 infrastructure helpers:
+  derive_server_handshake_keys (KeySchedule chain 包装)
+  record_nonce (RFC 8446 §5.3 nonce=static_iv XOR seq_num)
+  seal_encrypted_record (RFC 8446 §5.2 application_data record with AEAD)
+
+5 baseline tests:
+  aead_seal_open_round_trip (AES-128-GCM 包装 sanity)
+  key_schedule_derives_distinct_client_server_secrets (RFC 8446 §7.1 chain pin)
+  seal_encrypted_extensions_record_well_formed (TLS 1.3 record format 0x17/0x0303/u16(len)/AEAD pin)
+  phase_d_encrypted_mutation_todos_remain_pinned_pre_resolution (>=5 TODO 锚 pin, T220-T223 resolve)
+  audit_phase_g_plan_docs_in_sync
+
+踩坑:
+  clippy::useless_vec 拒绝 &vec![0x33; 32] (固定大小用 &[0x33; 32])
+  fix 一次性替换 2 处
+
+累计:
+  T186 (7) + T214 (10) + T215 (11) + T216 (13) + T217 (14) + T219 (5) = 60 tests in 3 files
+  transcript_mutation.rs 41 + transcript_mutation_tls12.rs 14 + transcript_mutation_encrypted.rs 5
+
+验证:
+  cargo test -p hitls-integration-tests --test transcript_mutation_encrypted --all-features  5/0
+  cargo test -p hitls-integration-tests --all-features                                       380+/0 零回归
+  cargo fmt + cargo clippy --workspace --all-features -D warnings + typos                    clean
+
+作用域:
+  1 个新 plan doc
+  1 个新测试文件 ~270 行
+  0 product code
+  0 新 TODO
+
+新方法学:
+  「key-schedule rogue server = public API composition」 (codified):
+    hitls-tls KeySchedule/TrafficKeys/AesGcmAead public API 暴露的 primitive 足够把 Phase D deferred encrypted-mutation 在 test code 里 compose 出 rogue server
+    不需要 product feature gate 也不需要重建 framework
+    沿用 T186 「rogue server = public encoder/decoder composition」codified pattern 思路扩展到加密层
+    单 PR T219 提供 infrastructure 后, T220-T223 可纯做 mutation tests
+
+Recorded as DEV_LOG Phase T219.
