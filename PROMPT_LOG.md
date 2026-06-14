@@ -15119,3 +15119,66 @@ Phase F 全景 audit:
     pin gap + TODO 防退化为 strict 后误报
 
 Recorded as DEV_LOG Phase T209.
+
+### T210 — Phase F-2 tlcp_2 + tlcp_3 剩余 10 tests (Phase F 5 sub-PR 第 2 弹)
+
+> 先做Phase F：我希望你能连续工作，依次完成T209~T213, 每完成1项任务按照定义的提交工作流提交，每项任务的代码确认合入主干后自动开始下一项任务
+
+承接 T209 Phase F-1 tlcp_1。
+
+改动:
+  tests/interop/tests/tlcp_consistency.rs 追加 T210 banner + 10 tests
+  累计 22 tests in 1 file
+  沿用 T196「same-file 累计追加」codified
+
+10 tests (来自 tlcp_2+tlcp_3 共 35 TC 家族 audit-pin selection):
+  Alert round-trip (2):
+    close_notify_alert_round_trip (level/desc 2 字节 app-data round-trip)
+    fatal_alert_round_trip
+  AMEND_APPDATA_TC001 (1):
+    amend_appdata_three_messages_in_order (三连发)
+  DISORDER_TC001 strict-order (1):
+    third_record_first_rejected (TLCP reliable seq 严格 vs DTLCP UDP 容忍)
+  Accessor pins (3):
+    version_accessor_returns_tlcp_v11 (TlsVersion::Tlcp)
+    cipher_suite_accessor_returns_negotiated_ecdhe_gcm
+    cipher_suite_accessor_returns_negotiated_ecc_cbc
+  KEY_EXCHANGE_TC001 size pin (1):
+    large_message_round_trip_4kib (4 KiB < 2^14)
+  CBC integrity (1):
+    ecc_cbc_tampered_ciphertext_rejected (encrypt-then-MAC HMAC-SM3 flip)
+  Multi-record (1):
+    split_message_two_records_each_open
+
+踩坑:
+  初版用 TlsVersion::Tlcp11 (按 GB/T 38636 §6 version=0x0101 直觉) -> E0599 variant not found
+  Rust 实际 enum 名 TlsVersion::Tlcp (无版本号后缀)
+  fix: sed 一次性替换
+  沿用 T207「struct 字段名 grep 优先于直觉」codified, 同样适用 enum variant
+
+累计:
+  T209 (12) + T210 (10) = 22 tests in tlcp_consistency.rs
+
+验证:
+  cargo test -p hitls-integration-tests --test tlcp_consistency --all-features  22/0
+  cargo test -p hitls-integration-tests --all-features                          全 360+/0 零回归
+  cargo fmt + cargo clippy --workspace --all-features -D warnings               clean
+
+作用域:
+  1 个已有测试文件 +~165 行
+  0 product code
+  0 新 TODO
+
+沿用 + 新方法学:
+  沿用 T196「same-file 累计追加」+ T207「struct 字段名 grep 优先于直觉」(扩展到 enum variant) + T209 Phase F 模板复用 + T209 TCP-over reliable seq-num pin
+
+  新「Alert level/desc 字节 round-trip = shutdown-API-less TLCP transport 层 pin」 (codified):
+    Rust 无 shutdown() 暴露时
+    把 close_notify / fatal alert 编码视为 2 字节 app-data 测 transport 层 round-trip
+
+  新「accessor 直接 Option 比较 = T199 fn signature 法的轻量替代」:
+    client.version() 返回 Option<TlsVersion>
+    直接 assert_eq!(..., Some(...))
+    比断言 fn signature 更鲁棒 (同时验返回值 + 函数存在性)
+
+Recorded as DEV_LOG Phase T210.

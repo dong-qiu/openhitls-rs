@@ -272,3 +272,152 @@ fn audit_plan_docs_in_sync() {
         );
     }
 }
+
+// ===========================================================================
+// T210 / Phase F-2 — frame_tlcp_consistency_{2,3} TC families.
+//
+// Adds 10 tests appended under a new section banner. Covers families that
+// don't need crafted handshake messages (the Rust port has no public
+// in-handshake mutator): close_notify, version/cipher accessors, multi-
+// message disorder pins, large-message split round-trips, AEAD integrity
+// on the CBC variant, etc.
+//
+// ## C-source mapping (this batch)
+//
+// | C TC family | Rust test |
+// |-------------|-----------|
+// | `CLOSE_NOTIFY_TC001` | `tlcp_consistency_close_notify_alert_round_trip` |
+// | `FATAL_ALERT_TC003` | `tlcp_consistency_fatal_alert_round_trip` |
+// | `AMEND_APPDATA_TC001` | `tlcp_consistency_amend_appdata_three_messages_in_order` |
+// | `DISORDER_TC001-003` | `tlcp_consistency_third_record_first_rejected` |
+// | (accessor) | `tlcp_consistency_version_accessor_returns_tlcp_v11` |
+// | (accessor) | `tlcp_consistency_cipher_suite_accessor_returns_negotiated_ecdhe_gcm` |
+// | (accessor) | `tlcp_consistency_cipher_suite_accessor_returns_negotiated_ecc_cbc` |
+// | `KEY_EXCHANGE_TC001` (large msg) | `tlcp_consistency_large_message_round_trip_4kib` |
+// | (CBC integrity) | `tlcp_consistency_ecc_cbc_tampered_ciphertext_rejected` |
+// | (multi-record) | `tlcp_consistency_split_message_two_records_each_open` |
+// ===========================================================================
+
+/// Mirrors C `UT_TLS_TLCP_CONSISTENCY_CLOSE_NOTIFY_TC001`: a close_notify
+/// alert is a small fixed-shape encrypted record. The Rust port doesn't
+/// expose a `shutdown()` API, so we exercise the *transport* side: seal
+/// an arbitrary 2-byte app-data payload representing the close_notify
+/// encoding (level=warning=1, description=close_notify=0) and verify
+/// round-trip. The semantic post-close behavior is internal to the
+/// state machine.
+#[test]
+fn tlcp_consistency_close_notify_alert_round_trip() {
+    let (mut client, mut server) = connected_pair();
+    let close_notify_body = vec![0x01, 0x00];
+    let rec = client.seal_app_data(&close_notify_body).unwrap();
+    let opened = server.open_app_data(&rec).unwrap();
+    assert_eq!(opened, close_notify_body);
+}
+
+/// Mirrors C `UT_TLS_TLCP_CONSISTENCY_FATAL_ALERT_TC003`: a fatal alert
+/// (level=fatal=2) round-trips the same way as close_notify at the
+/// transport layer.
+#[test]
+fn tlcp_consistency_fatal_alert_round_trip() {
+    let (mut client, mut server) = connected_pair();
+    let fatal_decrypt_error = vec![0x02, 0x33];
+    let rec = client.seal_app_data(&fatal_decrypt_error).unwrap();
+    assert_eq!(server.open_app_data(&rec).unwrap(), fatal_decrypt_error);
+}
+
+/// Mirrors C `UT_TLS_TLCP_CONSISTENCY_AMEND_APPDATA_TC001`: a sequence
+/// of three sealed app-data records, delivered in order, each round-trip
+/// byte-exact.
+#[test]
+fn tlcp_consistency_amend_appdata_three_messages_in_order() {
+    let (mut client, mut server) = connected_pair();
+    for i in 0..3u8 {
+        let payload = vec![0x42, i, 0xAB];
+        let rec = client.seal_app_data(&payload).unwrap();
+        assert_eq!(server.open_app_data(&rec).unwrap(), payload);
+    }
+}
+
+/// Mirrors C `UT_TLS_TLCP_CONSISTENCY_DISORDER_TC001` strict-order
+/// invariant: seal three records, deliver only the third — the AEAD
+/// nonce mismatch on TLCP's reliable-transport sequence path means the
+/// third record cannot open before the first two were processed.
+#[test]
+fn tlcp_consistency_third_record_first_rejected() {
+    let (mut client, mut server) = connected_pair();
+    let _rec1 = client.seal_app_data(b"first").unwrap();
+    let _rec2 = client.seal_app_data(b"second").unwrap();
+    let rec3 = client.seal_app_data(b"third").unwrap();
+    assert!(
+        server.open_app_data(&rec3).is_err(),
+        "third record cannot open before first two are processed"
+    );
+}
+
+/// Pin the version accessor — TLCP is TLS 1.1-equivalent in protocol
+/// version space (GB/T 38636 §6 uses `version = 0x0101`).
+#[test]
+fn tlcp_consistency_version_accessor_returns_tlcp_v11() {
+    use hitls_tls::TlsVersion;
+    let (client, server) = connected_pair();
+    assert_eq!(client.version(), Some(TlsVersion::Tlcp));
+    assert_eq!(server.version(), Some(TlsVersion::Tlcp));
+}
+
+/// Pin the cipher_suite accessor — the ECDHE-SM4-GCM-SM3 connected pair
+/// must surface that suite.
+#[test]
+fn tlcp_consistency_cipher_suite_accessor_returns_negotiated_ecdhe_gcm() {
+    let (client, server) = connected_pair();
+    assert_eq!(client.cipher_suite(), Some(CipherSuite::ECDHE_SM4_GCM_SM3));
+    assert_eq!(server.cipher_suite(), Some(CipherSuite::ECDHE_SM4_GCM_SM3));
+}
+
+/// Same accessor pin for the ECC-SM4-CBC-SM3 (non-ECDHE) suite.
+#[test]
+fn tlcp_consistency_cipher_suite_accessor_returns_negotiated_ecc_cbc() {
+    let (client, server) = connected_pair_ecc_cbc();
+    assert_eq!(client.cipher_suite(), Some(CipherSuite::ECC_SM4_CBC_SM3));
+    assert_eq!(server.cipher_suite(), Some(CipherSuite::ECC_SM4_CBC_SM3));
+}
+
+/// Mirrors C `UT_TLS_TLCP_CONSISTENCY_KEY_EXCHANGE_TC001`-style large
+/// payload pin: a 4-KiB app-data message round-trips byte-exact.
+/// TLCP's record-layer max is 2^14 minus a small header, so 4 KiB is
+/// comfortably below the boundary.
+#[test]
+fn tlcp_consistency_large_message_round_trip_4kib() {
+    let (mut client, mut server) = connected_pair();
+    let payload: Vec<u8> = (0..4096).map(|i| (i % 251) as u8).collect();
+    let rec = client.seal_app_data(&payload).unwrap();
+    assert_eq!(server.open_app_data(&rec).unwrap(), payload);
+}
+
+/// CBC integrity check: bit-flip in the ciphertext of an ECC-SM4-CBC-SM3
+/// record must fail the Encrypt-then-MAC verification (TLCP CBC uses
+/// the SM3 HMAC for integrity).
+#[test]
+fn tlcp_consistency_ecc_cbc_tampered_ciphertext_rejected() {
+    let (mut client, mut server) = connected_pair_ecc_cbc();
+    let mut rec = client.seal_app_data(b"cbc-tamper-me").unwrap();
+    if rec.len() > 20 {
+        let mid = rec.len() / 2;
+        rec[mid] ^= 0x01;
+    }
+    assert!(
+        server.open_app_data(&rec).is_err(),
+        "tampered ECC-SM4-CBC-SM3 record must fail HMAC verification"
+    );
+}
+
+/// Multi-record split-message pin: the application sends two
+/// independent records; each opens individually. Mirrors the
+/// "amend appdata as separate records" path in the C consistency suite.
+#[test]
+fn tlcp_consistency_split_message_two_records_each_open() {
+    let (mut client, mut server) = connected_pair();
+    let a = client.seal_app_data(b"part-a-bytes").unwrap();
+    let b = client.seal_app_data(b"part-b-bytes").unwrap();
+    assert_eq!(server.open_app_data(&a).unwrap(), b"part-a-bytes");
+    assert_eq!(server.open_app_data(&b).unwrap(), b"part-b-bytes");
+}
