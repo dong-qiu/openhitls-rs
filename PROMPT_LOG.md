@@ -17143,3 +17143,55 @@ Pitfall (codified):
     容忍 codebase 重组, 仍 catch feature 移除
 
 Recorded as DEV_LOG Phase T242.
+
+### T243 — Phase E-3 behaviour-class remaining 2/3 (handshake variants ECDHE/ECC × GCM/CBC) 10 audit pins (Phase E 5 sub-PR 第 3 弹)
+
+> Phase F 完成后完成 Phase E
+
+承接 T242 Phase E-2。
+
+改动:
+  migrated_phase_e_audit_pins.rs 追加 T243 banner + 10 audit pins
+  累计 28 tests in 1 file
+
+10 audit pins (behaviour-class 剩 2/3 ≈ 192/287 rows; 4-cell handshake matrix ECDHE × ECC × GCM × CBC + state-machine specifics):
+  t243_sm4_block_cipher_oid_identity_pin (GM/T 0002 SM4 OID 1.2.156.10197.1.104; 完成 4-OID GM crypto stack)
+  t243_tlcp_integration_tests_target_floor_pin (tlcp.rs ≥ 11 per plan §4 baseline; 紧 T115 ≥ 5 floor)
+  t243_tlcp_record_encryption_uses_sm4_pin (record/encryption_tlcp.rs Sm4/sm4/SM4)
+  t243_tlcp_handshake_codec_source_file_present (handshake/codec_tlcp.rs non-empty)
+  t243_tlcp_ecdhe_key_exchange_source_pin (client_tlcp.rs Ecdhe/ECDHE/ecdhe)
+  t243_tlcp_ecc_key_exchange_source_pin (multi-file scan 4 TLCP sources)
+  t243_tlcp_cert_verify_handling_source_pin (multi-file scan 3 handshake files)
+  t243_tlcp_change_cipher_spec_source_pin (TLCP 跟 TLS 1.2 排序非 1.3)
+  t243_tlcp_finished_message_source_pin (multi-file scan 3 handshake files)
+  t243_audit_phase_e_behaviour_remaining_plan_docs_in_sync (T243 + handshake-variants plan-doc cross-coverage)
+
+关键设计:
+  完成 GM crypto OID stack (SM4 + sm2 curve + sm3 + sm2-with-sm3 = 4 OIDs 从 GM/T 0002/0004/0006/0010)
+  紧 T115 tlcp.rs floor 从 ≥5 到 ≥11 per plan §4 documented baseline
+  Codified 'tighten floor when plan-doc upgrades baseline'
+  5 pins (#3/#6/#7/#8/#9) 用 T242 multi-file multi-anchor scan - 强化该模式为 TLCP source-side audit 的默认
+
+累计:
+  T115 (8) + T242 (10) + T243 (10) = 28 tests
+
+验证:
+  cargo test -p hitls-tls --test migrated_phase_e_audit_pins --all-features  28/0
+  cargo test -p hitls-tls --all-features                                     1700/0 零回归 (was 1690, +10)
+  cargo fmt + cargo clippy --workspace --all-features -D warnings + typos    clean
+
+作用域:
+  同测试文件 +~190 行 (10 pins + banner)
+  0 product code
+  0 新 TODO
+
+沿用方法学:
+  T112 4-tuple + T242 multi-file multi-anchor scan + T246 test-count-floor + T247 anchor-string + T115 test-fn-name cross-pin
+
+新方法学:
+  「tighten floor when plan-doc upgrades baseline」 (codified):
+    plan doc 记 baseline 高于初始 audit pin assert (例: plan §4 称 11 tlcp.rs tests; T115 pin ≥ 5)
+    follow-up sub-PR 紧 floor 到 plan-doc 值
+    Codified: audit-pin floor 应跟 plan-doc 声明而非仅初始实现状态
+
+Recorded as DEV_LOG Phase T243.
