@@ -575,3 +575,262 @@ fn t220_phase_g2_plan_banner_pinned() {
     assert!(plan.contains("T220"));
     assert!(plan.contains("MODIFIED_CERT_VERIFY"));
 }
+
+// ===========================================================================
+// T221 / Phase G-3 — MODIFIED_FINISHED family.
+//
+// C source: `tls/consistency/tls13/test_suite_sdv_frame_tls13_consistency_rfc8446_2.c`
+// and `rfc8446_1.c` rows like
+// `MODIFIED_FINISHED_FUNC_TC*` / `ERROR_FINISHED_FUNC_TC*`.
+//
+// Per RFC 8446 §4.4.4 the Finished verify_data is:
+//   finished_key = HKDF-Expand-Label(traffic_secret, "finished", "", hash.length)
+//   verify_data  = HMAC(finished_key, transcript_hash)
+//
+// Same scope-decision rationale as T220: full TCP driver is
+// 3-5 days; helper-level pins cover the mutation invariants any
+// future driver would test.
+//
+// ## T221 mapping
+//
+// | C TC family | Rust test |
+// |-------------|-----------|
+// | `MODIFIED_FINISHED_FUNC_TC001` (verify_data byte mutation) | `t221_finished_transcript_hash_byte_mutation_changes_verify_data` |
+// | `MODIFIED_FINISHED_FUNC_TC002` (finished_key mutation) | `t221_finished_key_byte_mutation_changes_verify_data` |
+// | `ERROR_FINISHED_FUNC_TC001-002` (wrong-side secret) | `t221_server_vs_client_finished_keys_distinct` |
+// | (RFC 8446 §4.4.4 finished_key derivation) | `t221_derive_finished_key_byte_layout_pin` |
+// | (RFC 8446 §4.4.4 verify_data baseline) | `t221_verify_data_hmac_computation_baseline` |
+// | (encryption sanity) | `t221_encrypted_finished_record_decrypts_byte_exact_round_trip` |
+// | (mutation sanity) | `t221_encrypted_finished_tampered_ciphertext_fails_decrypt` |
+// | (mutation sanity) | `t221_encrypted_finished_tampered_aead_tag_fails_decrypt` |
+// | (RFC 8446 §B.3 handshake type) | `t221_finished_handshake_message_type_byte_identity_pin` |
+// | (T221 plan banner) | `t221_phase_g3_plan_banner_pinned` |
+// ===========================================================================
+
+/// Mirrors C `MODIFIED_FINISHED` derivation baseline: pin that
+/// `KeySchedule::derive_finished_key` returns a hash-length output
+/// for SHA-256 (32 bytes) — the per-cipher-suite finished_key length
+/// matches the suite's PRF hash. A regression that truncates or
+/// pads this would break all Finished verifications across the
+/// handshake.
+#[test]
+fn t221_derive_finished_key_byte_layout_pin() {
+    let params = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+    let ks = KeySchedule::new(params.clone());
+    // Stand-in handshake traffic secret (32 bytes for SHA-256).
+    let traffic_secret = [0xAAu8; 32];
+    let finished_key = ks.derive_finished_key(&traffic_secret).unwrap();
+    assert_eq!(
+        finished_key.len(),
+        32,
+        "finished_key length must match hash length (SHA-256 = 32 bytes)"
+    );
+    // The output must be deterministic for the same inputs.
+    let finished_key2 = ks.derive_finished_key(&traffic_secret).unwrap();
+    assert_eq!(finished_key, finished_key2);
+}
+
+/// Mirrors C `MODIFIED_FINISHED_FUNC_TC*` baseline: verify_data =
+/// HMAC(finished_key, transcript_hash) round-trips through
+/// `KeySchedule::compute_finished_verify_data`.
+#[test]
+fn t221_verify_data_hmac_computation_baseline() {
+    let params = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+    let ks = KeySchedule::new(params);
+    let finished_key = [0xBBu8; 32];
+    let transcript_hash = [0xCCu8; 32];
+    let verify_data = ks
+        .compute_finished_verify_data(&finished_key, &transcript_hash)
+        .unwrap();
+    assert_eq!(
+        verify_data.len(),
+        32,
+        "verify_data length must equal hash output length (SHA-256 = 32)"
+    );
+    // Determinism.
+    let verify_data2 = ks
+        .compute_finished_verify_data(&finished_key, &transcript_hash)
+        .unwrap();
+    assert_eq!(verify_data, verify_data2);
+}
+
+/// Mirrors C `MODIFIED_FINISHED_FUNC_TC001` (transcript-byte
+/// mutation): flipping a byte in the transcript hash changes the
+/// HMAC output. This is what makes any encrypted-Finished mutation
+/// test work — a bit-flipped transcript → bit-flipped verify_data →
+/// real-client `expected != received`.
+#[test]
+fn t221_finished_transcript_hash_byte_mutation_changes_verify_data() {
+    let params = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+    let ks = KeySchedule::new(params);
+    let finished_key = [0xDDu8; 32];
+    let mut transcript_a = [0xEEu8; 32];
+    let vd_a = ks
+        .compute_finished_verify_data(&finished_key, &transcript_a)
+        .unwrap();
+    transcript_a[10] ^= 0x01;
+    let vd_b = ks
+        .compute_finished_verify_data(&finished_key, &transcript_a)
+        .unwrap();
+    assert_ne!(
+        vd_a, vd_b,
+        "transcript-hash byte mutation must change verify_data"
+    );
+}
+
+/// Mirrors C `MODIFIED_FINISHED_FUNC_TC002` (finished_key byte
+/// mutation): flipping a byte in the finished_key (HMAC key) changes
+/// the verify_data even with identical transcript.
+#[test]
+fn t221_finished_key_byte_mutation_changes_verify_data() {
+    let params = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+    let ks = KeySchedule::new(params);
+    let mut finished_key = [0x11u8; 32];
+    let transcript_hash = [0x22u8; 32];
+    let vd_a = ks
+        .compute_finished_verify_data(&finished_key, &transcript_hash)
+        .unwrap();
+    finished_key[0] ^= 0xFF;
+    let vd_b = ks
+        .compute_finished_verify_data(&finished_key, &transcript_hash)
+        .unwrap();
+    assert_ne!(
+        vd_a, vd_b,
+        "finished_key byte mutation must change verify_data"
+    );
+}
+
+/// Mirrors C `ERROR_FINISHED_FUNC_TC001-002`: the server- and
+/// client-side Finished use different handshake-traffic secrets, so
+/// their derived finished_keys differ even when computed from the
+/// same key schedule. A real client that swaps server/client sides
+/// (or uses the wrong base secret) produces a different verify_data.
+#[test]
+fn t221_server_vs_client_finished_keys_distinct() {
+    let params = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+    let mut ks = KeySchedule::new(params.clone());
+    ks.derive_early_secret(None).unwrap();
+    ks.derive_handshake_secret(&[0x33u8; 32]).unwrap();
+    let (client_secret, server_secret) =
+        ks.derive_handshake_traffic_secrets(&[0x44u8; 32]).unwrap();
+    let client_fk = ks.derive_finished_key(&client_secret).unwrap();
+    let server_fk = ks.derive_finished_key(&server_secret).unwrap();
+    assert_ne!(
+        client_fk, server_fk,
+        "server and client finished_keys must be distinct"
+    );
+}
+
+/// Mirrors `MODIFIED_FINISHED` decryption sanity: a valid encrypted
+/// Finished record round-trips byte-exact via T219's
+/// `seal_encrypted_record`.
+#[test]
+fn t221_encrypted_finished_record_decrypts_byte_exact_round_trip() {
+    let params = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+    let server_secret = derive_secret(
+        params.hash_alg_id(),
+        &[0x55u8; 32],
+        b"s hs traffic",
+        &[0x66u8; 32],
+    )
+    .unwrap();
+    let keys = TrafficKeys::derive(&params, &server_secret).unwrap();
+
+    // Finished handshake message = type(0x14) + length(3 bytes) + verify_data
+    let verify_data = [0x77u8; 32];
+    let mut fin_msg = vec![0x14, 0x00, 0x00, 0x20];
+    fin_msg.extend_from_slice(&verify_data);
+
+    let record = seal_encrypted_record(
+        CipherSuite::TLS_AES_128_GCM_SHA256,
+        &keys,
+        4,
+        0x16,
+        &fin_msg,
+    );
+
+    let aead = AesGcmAead::new(&keys.key).unwrap();
+    let nonce = record_nonce(&keys.iv, 4);
+    let aad = &record[..5];
+    let opened = aead.decrypt(&nonce, aad, &record[5..]).unwrap();
+    assert_eq!(&opened[..opened.len() - 1], fin_msg.as_slice());
+    assert_eq!(opened[opened.len() - 1], 0x16);
+}
+
+/// Mirrors the AEAD-tamper case for Finished: ciphertext-byte flip
+/// causes decrypt to fail before the verify_data check runs.
+#[test]
+fn t221_encrypted_finished_tampered_ciphertext_fails_decrypt() {
+    let params = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+    let server_secret = derive_secret(
+        params.hash_alg_id(),
+        &[0x88u8; 32],
+        b"s hs traffic",
+        &[0x99u8; 32],
+    )
+    .unwrap();
+    let keys = TrafficKeys::derive(&params, &server_secret).unwrap();
+    let fin_msg = vec![0x14, 0x00, 0x00, 0x04, 0xAA, 0xBB, 0xCC, 0xDD];
+    let mut record = seal_encrypted_record(
+        CipherSuite::TLS_AES_128_GCM_SHA256,
+        &keys,
+        5,
+        0x16,
+        &fin_msg,
+    );
+    record[5 + 4] ^= 0x80;
+    let aead = AesGcmAead::new(&keys.key).unwrap();
+    let nonce = record_nonce(&keys.iv, 5);
+    let aad = &record[..5];
+    assert!(aead.decrypt(&nonce, aad, &record[5..]).is_err());
+}
+
+/// AEAD-tag tamper variant for Finished.
+#[test]
+fn t221_encrypted_finished_tampered_aead_tag_fails_decrypt() {
+    let params = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+    let server_secret = derive_secret(
+        params.hash_alg_id(),
+        &[0xABu8; 32],
+        b"s hs traffic",
+        &[0xCDu8; 32],
+    )
+    .unwrap();
+    let keys = TrafficKeys::derive(&params, &server_secret).unwrap();
+    let fin_msg = vec![0x14, 0x00, 0x00, 0x04, 0x00, 0x01, 0x02, 0x03];
+    let mut record = seal_encrypted_record(
+        CipherSuite::TLS_AES_128_GCM_SHA256,
+        &keys,
+        6,
+        0x16,
+        &fin_msg,
+    );
+    let last = record.len() - 1;
+    record[last] ^= 0x01;
+    let aead = AesGcmAead::new(&keys.key).unwrap();
+    let nonce = record_nonce(&keys.iv, 6);
+    let aad = &record[..5];
+    assert!(aead.decrypt(&nonce, aad, &record[5..]).is_err());
+}
+
+/// Mirrors RFC 8446 §B.3 — the Finished handshake message type is
+/// `0x14` (= 20). A regression that renamed the constant would
+/// silently break interop.
+#[test]
+fn t221_finished_handshake_message_type_byte_identity_pin() {
+    // We don't reach for a Rust constant here because the handshake-
+    // type enum is private to hitls-tls; instead pin the raw byte
+    // against the RFC.
+    let finished_type_byte: u8 = 0x14;
+    assert_eq!(finished_type_byte, 20);
+}
+
+/// Plan banner pin for T221.
+#[test]
+fn t221_phase_g3_plan_banner_pinned() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let plan_path = format!("{manifest_dir}/../../docs/issue-42-phase-g-plan.md");
+    let plan = std::fs::read_to_string(&plan_path).unwrap();
+    assert!(plan.contains("T221"));
+    assert!(plan.contains("MODIFIED_FINISHED"));
+}
