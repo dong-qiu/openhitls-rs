@@ -696,6 +696,123 @@ fn t248_audit_phase_f_followup4_plan_docs_in_sync() {
     );
 }
 
+// ===========================================================================
+// T249 / Phase F closeout — Full C→Rust test migration parity milestone.
+//
+// Sibling to T200 / T208 / T213 / T218 / T223 / T228 / T236 closeout
+// phases. The recipe is: §N rollup in the plan doc + methodology lineage
+// table + N closeout pin tests + status sync across c-test-migration-plan
+// §12.7 + CLAUDE.md.
+//
+// T249 is **the milestone closeout** for the c-test-migration-plan
+// Phase A-D/F arc. Phase E (`interface_tlcp` trait rewrite) remains
+// the only open phase per the §12.7 status table.
+//
+// Cumulative: T116 (8) + T246 (10) + T247 (10) + T248 (10) + T249 (5) =
+// 43 tests in this file. Phase F total: 45 data-driven (T209-T213) +
+// 43 follow-up (T116 + T246-T249) = 88 audit-pin tests.
+// ===========================================================================
+
+/// T249 closeout pin #1: this-file cumulative count is 43 tests via
+/// fn-prefix matching (T223-codified avoidance of `#[test]` literal
+/// self-count pitfall).
+#[test]
+fn t249_phase_f_followup_cumulative_count_pin() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let path = format!("{manifest_dir}/tests/migrated_phase_f_audit_pins.rs");
+    let body = std::fs::read_to_string(&path).unwrap();
+    let test_fn_count = body
+        .lines()
+        .filter(|l| {
+            l.starts_with("fn t116_")
+                || l.starts_with("fn t246_")
+                || l.starts_with("fn t247_")
+                || l.starts_with("fn t248_")
+                || l.starts_with("fn t249_")
+        })
+        .count();
+    assert_eq!(
+        test_fn_count, 43,
+        "Phase F follow-up + T249 cumulative count: 8 (T116) + 10 (T246) + \
+         10 (T247) + 10 (T248) + 5 (T249) = 43 in this file"
+    );
+}
+
+/// T249 closeout pin #2: §9 methodology lineage table in the Phase F
+/// plan doc spans 5 codified Phase F follow-up anchors.
+#[test]
+fn t249_phase_f_followup_methodology_lineage_pinned() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let plan_path = format!("{manifest_dir}/../../docs/issue-42-phase-f-plan.md");
+    let plan = std::fs::read_to_string(&plan_path).unwrap();
+    assert!(plan.contains("Methodology lineage"));
+    for anchor in ["T116", "T246", "T247", "T248", "T249"] {
+        assert!(
+            plan.contains(anchor),
+            "methodology lineage must reference codified anchor `{anchor}`"
+        );
+    }
+}
+
+/// T249 closeout pin #3: all 5 Phase F follow-up sub-PRs marked
+/// closed in the plan doc §8 table.
+#[test]
+fn t249_phase_f_followup_plan_doc_all_subprs_closed() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let plan_path = format!("{manifest_dir}/../../docs/issue-42-phase-f-plan.md");
+    let plan = std::fs::read_to_string(&plan_path).unwrap();
+    for anchor in ["✅ T116", "✅ T246", "✅ T247", "✅ T248", "✅ T249"] {
+        assert!(
+            plan.contains(anchor),
+            "plan doc must mark `{anchor}` as closed"
+        );
+    }
+}
+
+/// T249 closeout pin #4: Full C→Rust test migration parity milestone.
+/// The plan doc §10 + c-test-migration-plan §12.7 row F + CLAUDE.md
+/// status line must all surface the milestone phrase.
+#[test]
+fn t249_full_c_to_rust_test_migration_parity_milestone_pin() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let plan = std::fs::read_to_string(format!(
+        "{manifest_dir}/../../docs/issue-42-phase-f-plan.md"
+    ))
+    .unwrap();
+    let migration_plan = std::fs::read_to_string(format!(
+        "{manifest_dir}/../../docs/c-test-migration-plan.md"
+    ))
+    .unwrap();
+    let claude_md = std::fs::read_to_string(format!("{manifest_dir}/../../CLAUDE.md")).unwrap();
+    assert!(
+        plan.contains("Full C→Rust test migration parity"),
+        "Phase F plan doc must contain the milestone phrase"
+    );
+    assert!(
+        migration_plan.contains("Full C→Rust test migration parity"),
+        "c-test-migration-plan must reference the milestone phrase in §12.7 row F"
+    );
+    assert!(
+        claude_md.contains("Full C→Rust test migration parity"),
+        "CLAUDE.md status line must surface the milestone phrase"
+    );
+}
+
+/// T249 closeout pin #5: series rollup banner. Phase F total = 45
+/// (T209-T213 data-driven) + 43 (T116+T246-T249 follow-up) = 88
+/// audit-pin tests; issue-42 series total 1 110+ across Phase A-D/F.
+#[test]
+fn t249_phase_f_closeout_banner_pinned() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let plan = std::fs::read_to_string(format!(
+        "{manifest_dir}/../../docs/issue-42-phase-f-plan.md"
+    ))
+    .unwrap();
+    assert!(plan.contains("**88 audit-pin tests**"));
+    assert!(plan.contains("**1 110+ audit-pin"));
+    assert!(plan.contains("Phase E remains the only un-closed phase"));
+}
+
 /// T116 audit pin #8: plan-doc cross-coverage. The Phase F plan doc
 /// (`docs/issue-42-phase-f-plan.md`) must remain the authority for
 /// both the original §7 rollup and the new §8 follow-up section.

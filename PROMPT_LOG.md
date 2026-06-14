@@ -16959,3 +16959,72 @@ Pitfalls (codified):
     在文件系统层防止 workflow 静默丢失 (而非 content 层)
 
 Recorded as DEV_LOG Phase T248.
+
+### T249 — Phase F closeout: T116+T246-T248 series rollup + Full C→Rust test migration parity milestone (Phase F follow-up 5 sub-PR 终弹)
+
+> 请继续 Phase F
+
+Closes T116+T246-T248 Phase F follow-up series.
+
+改动:
+  crates/hitls-tls/tests/migrated_phase_f_audit_pins.rs 追加 T249 banner + 5 closeout pin tests
+    累计 43 tests in 1 file
+  docs/issue-42-phase-f-plan.md
+    §8 表格 5/5 关闭
+    新 §9 series rollup (5-anchor 方法学血脉表 T116→T249 + 43-tests + 88 Phase F 总)
+    新 §10 Full C→Rust test migration parity milestone (Phase A 800 + B 43 + C 46 + D/G/H 133 + F 88 = 1110+ tests; Phase E 唯余)
+  docs/c-test-migration-plan.md §12.7 row F closed (T209-T213 + T116/T246-T249) + milestone phrase
+  CLAUDE.md status line bumped (T115 reserved + Phase F closed + Full C→Rust test migration parity for Phase A-D/F)
+
+5 closeout pin tests:
+  t249_phase_f_followup_cumulative_count_pin (43; fn-prefix 计数避开 #[test] 自计数)
+  t249_phase_f_followup_methodology_lineage_pinned (plan §9 5 个锚点 T116/T246/T247/T248/T249)
+  t249_phase_f_followup_plan_doc_all_subprs_closed (§8 ✅ T116-T249 + 5/5 closed)
+  t249_full_c_to_rust_test_migration_parity_milestone_pin (milestone phrase 必现于 Phase F plan + c-test-migration-plan + CLAUDE.md 三处 - cross-doc 一致性保障)
+  t249_phase_f_closeout_banner_pinned (88 audit-pin + 1110+ + 'Phase E remains the only un-closed phase')
+
+Phase F 总:
+  45 data-driven (T209-T213) + 43 follow-up (T116+T246-T249) = 88 audit-pin tests
+
+issue-42 系列总:
+  Phase A (800) + B (43) + C (46) + D/G/H (133) + F (88) = 1110+ audit-pin tests
+  Phase E reserved for T115+T242-T245
+
+关键设计:
+  cross-doc 一致性 audit pin #4 确保 'Full C→Rust test migration parity' milestone phrase 跨 3 个上游 doc 同步
+  防止 partial-sync 回归 (一个 doc 更新而其它落后)
+  closeout 配方 (T200/T208/T213/T218/T223/T228/T236) 在此扩展为 cross-doc milestone-phrase audit pattern
+
+累计:
+  T116 (8) + T246 (10) + T247 (10) + T248 (10) + T249 (5) = 43 tests
+
+验证:
+  cargo test -p hitls-tls --test migrated_phase_f_audit_pins --all-features  43/0
+  cargo test -p hitls-tls --all-features                                     1672/0 零回归 (was 1667, +5)
+  cargo fmt + cargo clippy --workspace --all-features -D warnings + typos    clean
+
+Pitfall (codified):
+  closeout banner pin 起初 assert '**1 110+ audit-pin tests**' 完整字面量失败
+  markdown 源在 'audit-pin' 与 'tests' 之间有换行 (字面量跨两行)
+  修复: 改 assert 较短子串 '**1 110+ audit-pin' 跨换行点
+  同 T112 '49 deeper TODO anchors' line-break 问题
+
+作用域:
+  encrypted file (this) +~115 行 (5 pins + §8 banner)
+  Phase F plan doc §8/§9/§10 (~85 行)
+  c-test-migration-plan §12.7 row F (扩展)
+  CLAUDE.md status line
+  0 product code
+  0 新 TODO
+
+沿用方法学:
+  T223/T228/T236 closeout 标准配方
+
+新方法学:
+  「cross-doc milestone-phrase consistency audit」 (codified):
+    phase 关闭 milestone 时 (此处 'Full C→Rust test migration parity')
+    closeout pin assert milestone phrase 出现在所有上游 docs (plan + migration-plan + CLAUDE.md)
+    防止 partial-sync 回归
+    扩展 T116 cross-doc status-marker sync 到 milestone 粒度
+
+Recorded as DEV_LOG Phase T249.

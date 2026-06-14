@@ -484,7 +484,7 @@ Phase A 末段连续三次 na-list 对未解决条目的根因假设错误，提
 | **C** PKI malformed fixtures | **closed at T204-T208** (5 sub-PRs, 46 audit-pin tests via `docs/issue-42-phase-c-plan.md`) | 原计划 ~2800 fixture target 经 Phase C plan §3 audit 重新作用域为 audit-pin sampled approach；`migrated_x509_parse.rs` (1 076 fns) + CRL (41) + CSR (13) + T204-T208 (46) ≈ 1176 tests 总覆盖；fixture 镜像 + MANIFEST.sha256 落盘在 `tests/vectors/c-asn1-fixtures/`；deeper "1:1 fixture port" 扩展暂未启动（与 Phase D/G audit-pin 方法学一致） |
 | **D** TLS transcript-mutation | T114 reserved | tlsfuzzer 路径已部分替代（T88–T119 + T141 全量 sweep）；剩 MODIFIED_*_TC 二进制 mutation 待 transcript-hook 设计 |
 | **E** `interface_tlcp` trait 化 | T115 reserved | 未启动 |
-| **F** tlcp/dtls 残余 + 全面回归 | **closed at T209-T213** (5 sub-PRs, 45 audit-pin tests via `docs/issue-42-phase-f-plan.md`) + **T116/T246-T249 follow-up** (5 sub-PRs, ~43 audit-pin tests pinning §7 acceptance via `docs/issue-42-phase-f-plan.md` §8) | 原 §7.3 target ~13000 tests 经 audit-pin methodology rescope (consistent with Phase C / G / H / B 的 audit-pin sample 思路); 实际交付 ~4 300+ workspace tests 含 ~212 audit-pin tests 跨 issue-42 全系列 |
+| **F** tlcp/dtls 残余 + 全面回归 | **✅ closed** at T209-T213 (45 data-driven audit pins) + T116/T246-T249 follow-up (43 audit pins formalising §7 + §8 acceptance via `docs/issue-42-phase-f-plan.md` §9) = **88 audit-pin tests total** | §7.3 target 13000 tests rescope by audit-pin methodology (与 Phase B/C/G/H 一致); 实际交付 ~4 300+ workspace tests 含 ~212 audit-pin tests 跨 issue-42 全系列; **T249 closeout 标志 Full C→Rust test migration parity milestone** (Phase A-D/F 全 closed; 唯余 Phase E `interface_tlcp` trait 化待启动) |
 
 Phase A 收官给 Phase B–F 留下两条新基础设施：
 - `xtask` 24 个 emitter 模块作为 SDV→Rust 自动化模板库
