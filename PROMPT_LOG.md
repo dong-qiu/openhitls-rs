@@ -14733,3 +14733,70 @@ Fixture 复用:
     audit_plan_docs_in_sync 防 plan 漂移
 
 Recorded as DEV_LOG Phase T204.
+
+### T205 — Phase C-2 pkcs12 + pkcs12_util 10 tests (Phase C 5 sub-PR 第 2 弹)
+
+> 我希望你能连续工作，依次完成T204~T208, 每完成1项任务按照定义的提交工作流提交，每项任务的代码确认合入主干后自动开始下一项任务
+
+承接 T204 Phase C-1 CMS。
+
+改动:
+  新 crates/hitls-pki/tests/migrated_pkcs12_negative_parse.rs (~180 行 / 10 tests + decision matrix mod-doc + plan-doc 跨文件 pin)
+
+10 tests:
+  5 个 PARSE_P12_TC003 happy-path 每 fixture 独立密码 binding:
+    parse_p12_1_empty_password           pwd=""
+    parse_p12_2_long_repeat_password     pwd=74×'1'
+    parse_p12_3_very_long_repeat_password pwd=149×'1'
+    parse_p12_4_single_char_password     pwd="1"
+    parse_p12_5_awkward_unicode_password pwd=verbatim @##\#%#\%\%.&&~%*\|sdfgfdsg
+  parse_p12_wrong_password_rejected (msg contains MAC/password/invalid)
+  parse_truncated_der_rejected (前 32 字节)
+  parse_garbage_bytes_rejected (非 DER 字节)
+  parse_tampered_authsafe_rejected (字节 1/3 处 flip)
+  audit_plan_docs_in_sync 跨文件 pin
+
+关键设计:
+  C SDV PARSE_P12_TC003 用 file-fixture 每个 .p12 各自密码 (.data 行声明)
+  区别于 PARSE_P12_TC001 用 inline hex blob + 固定 "123456"
+  Rust 测试沿 file-fixture 路径
+  关键发现: awk -F":" 算 password length 含两端引号 (76 → 74 ones, 151 → 149 ones)
+
+踩坑:
+  1. 初版假设统一 "123456" → p12_1~5 5/5 fail (MAC verify error)
+     fix: 用 PARSE_P12_TC003 .data 行每 fixture 独立 password
+  2. 长度计算 awk 含引号 → 用 tr ":" "\n" | tail | wc -c 减 2 确定 password 真实长度
+  3. chain.p12 fixture 存在但 .data 无对应 TC003 行 → 删除 chain 测试避免猜密码
+
+Feature gate:
+  #![cfg(feature = "pkcs12")] 与 Cargo.toml pkcs12 feature 对齐
+  确保 pki-auth CI matrix `--no-default-features --features pkcs12` 跑过
+  沿用 T204 feature gate 校准教训
+
+验证:
+  cargo test -p hitls-pki --no-default-features --features pkcs12 --test migrated_pkcs12_negative_parse  10/0
+  cargo test -p hitls-pki --tests                                                                       1606/0
+  cargo fmt + cargo clippy --workspace --all-features -D warnings                                       clean
+
+作用域:
+  1 个新测试文件 ~180 行
+  0 product code
+  0 新 TODO
+
+沿用 + 新方法学:
+  沿用 T204 「fixture-driven」+「feature gate 与 Cargo.toml 对齐」+「audit_plan_docs_in_sync 跨文件 pin」
+
+  新「per-fixture password binding」 (codified):
+    PKCS#12 / PEM-encrypted 类 fixtures 每文件需独立密码声明
+    mod-doc 列权威 mapping 表防后人误传统一密码
+
+  新「.data 行的引号字节计数」:
+    awk/tr 字段长度算引号边界
+    password 长度 = field length - 2 (前后引号)
+    必须减
+
+  新「fixture without TC row → drop」:
+    存在 fixture 但 .data 无对应 TC 时不要猜密码
+    直接 drop 测试避免 fixture-driven 误判
+
+Recorded as DEV_LOG Phase T205.
