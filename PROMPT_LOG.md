@@ -15620,3 +15620,74 @@ typos C-typo 累积 (T215 UNSUPPORT 后第 2 批):
     抗 ExtensionType 重构退化
 
 Recorded as DEV_LOG Phase T216.
+
+### T217 — Phase D-4 TLS 1.2 consistency 14 tests in new transcript_mutation_tls12.rs (Phase D 5 sub-PR 第 4 弹)
+
+> 开始做Phase F：我希望你能连续工作，依次完成T214~T218, 每完成1项任务按照定义的提交工作流提交，每项任务的代码确认合入主干后自动开始下一项任务
+
+承接 T216 Phase D-3。
+
+改动:
+  新 tests/interop/tests/transcript_mutation_tls12.rs (~245 行 / 14 tests + decision matrix mod-doc + plan-doc 跨文件 pin)
+  typos.toml +1 BEWTEEN allowlist
+
+14 tests (沿用 T216 codified codepoint pin + cross-coverage pattern):
+  4 TLS 1.2 CipherSuite IANA codepoint pin:
+    RFC 5288 ECDHE-RSA-AES128-GCM = 0xC02F
+    ECDHE-RSA-AES256-GCM = 0xC030
+    DHE-RSA-AES256-GCM = 0x009F
+    RFC 5246 §A.5 RSA-AES128-CBC-SHA = 0x002F
+  4 extension codepoint pin:
+    RFC 7366 ENCRYPT_THEN_MAC = 22
+    RFC 7627 EXTENDED_MASTER_SECRET = 23
+    RFC 5746 RENEGOTIATION_INFO = 0xFF01
+    RFC 5246 SIGNATURE_ALGORITHMS = 13 (TLS 1.2 perspective)
+  5 cross-coverage pin via file-literal grep:
+    close_notify_alert_round_trip via dtls12_consistency.rs
+    T89+T90 alert generalisation via DEV_LOG
+    T90 RFC 5746 via DEV_LOG
+    dtls12.rs + tlcp.rs interop files 存在
+    T90 SEND_DATA_BEWTEEN_CCS_AND_FINISH 跨阶段 RFC 5246 §7.2
+  1 跨文件 plan-doc pin:
+    audit_phase_d_plan_docs_in_sync_tls12 (sibling 命名 suffix)
+
+关键设计:
+  不重建 TLS 1.2 rogue-server (TLS 1.2 SH layout 不同 — 无 supported_versions ext / 强制 cipher 协商 / ServerKeyExchange 跟 SH 后)
+  ROI 不匹配
+  沿用 T216 codified codepoint identity pin + T215 codified file-literal grep cross-coverage
+  完成等价 attack-surface 锁定
+
+踩坑:
+  1. typos BEWTEEN 触发 (verbatim C-typo BETWEEN)
+     allowlist 追加 (T215 UNSUPPORT + T216 CERTICATE+HEELO 后第 3 批)
+     累计 9 typo pattern
+  2. clippy doc_lazy_continuation 拒接缩进 doc list (+\n///   pinned by → 加 2 空格)
+     fix 改单段连续行
+
+Phase D 累计:
+  T186 (7) + T214 (10) + T215 (11) + T216 (13) + T217 (14) = 55 tests in 2 files
+  transcript_mutation.rs 41 + transcript_mutation_tls12.rs 14
+
+验证:
+  cargo test -p hitls-integration-tests --test transcript_mutation_tls12 --all-features  14/0
+  cargo test -p hitls-integration-tests --all-features                                   380+/0 零回归
+  cargo fmt + cargo clippy --workspace --all-features -D warnings + typos                clean
+
+作用域:
+  1 个新测试文件 ~245 行
+  typos.toml +1 anchor (BEWTEEN)
+  0 product code
+  0 新 TODO
+
+新方法学:
+  「TLS-1.2 sibling file 不重建 rogue-server」 codified:
+    sibling protocol 测试 attack-surface ROI 不匹配 rebuild infrastructure 时
+    用 codepoint identity pin + cross-coverage file-grep 取代 mutation test
+    沿用 T211 Phase F sibling file 互补 attack surface 思路
+    不同协议版本 layout 差异时 ROI 决定写新 mutation 还是用 codepoint+cross-coverage 替代
+
+  「new sub-PR audit fn 命名带 protocol suffix」:
+    TLS 1.2 sibling file 用 audit_phase_d_plan_docs_in_sync_tls12 (而非 .rs::audit_plan_docs_in_sync)
+    命名 suffix 区分多个 sibling 文件同 fn 名冲突
+
+Recorded as DEV_LOG Phase T217.

@@ -45,6 +45,7 @@ REORD = "REORD"           # C source symbol: UT_TLS_DTLS_CONSISTENCY_RFC5246_UNE
 UNSUPPORT = "UNSUPPORT"   # C source symbol: UT_TLS_SDV_TLS1_3_RFC8446_CONSISTENCY_UNSUPPORT_VERSION_TC001
 CERTICATE = "CERTICATE"   # C source symbol: UT_TLS_TLS13_RFC8446_CONSISTENCY_CERTICATE_VERIFY_FAIL_FUNC_TC001
 HEELO = "HEELO"           # C source symbol prefix: UT_TLS_TLS13_RFC8446_CONSISTENCY_ERR_HEELO_FUNC_TC001-004
+BEWTEEN = "BEWTEEN"       # C source symbol: UT_TLS_TLS1_2_RFC5246_SEND_DATA_BEWTEEN_CCS_AND_FINISH
 CERTFICATE = "CERTFICATE" # C source symbol: UT_TLS_TLCP_CONSISTENCY_CERTFICATE_TC*
 # OpenSSL-compatible CLI flag names referenced verbatim (these are stable
 # external interface tokens, not typos in our prose)
