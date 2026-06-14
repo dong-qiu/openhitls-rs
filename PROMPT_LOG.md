@@ -17084,3 +17084,62 @@ Recorded as DEV_LOG Phase T249.
     Phase E 采前者作 sister-phase cross-pin
 
 Recorded as DEV_LOG Phase T115.
+
+### T242 — Phase E-2 behaviour-class first 1/3 (GM cert verify + state transitions) 10 audit pins (Phase E 5 sub-PR 第 2 弹)
+
+> Phase F 完成后完成 Phase E
+
+承接 T115 Phase E-1。
+
+改动:
+  migrated_phase_e_audit_pins.rs 追加 T242 banner + 10 audit pins
+  累计 18 tests in 1 file
+
+10 audit pins (behaviour-class 前 1/3 ≈ 95/287 rows):
+  t242_sm2_curve_oid_identity_pin (GM/T 0006 sm2 OID 1.2.156.10197.1.301)
+  t242_sm3_hash_oid_identity_pin (GM/T 0004 sm3 OID 1.2.156.10197.1.401)
+  t242_sm2_with_sm3_sig_oid_identity_pin (GM/T 0010 SM2-with-SM3 sig OID 1.2.156.10197.1.501)
+  t242_tlcp_cipher_suite_gcm_codepoint_pin (ECC_SM4_GCM_SM3=0xE015 + ECDHE_SM4_GCM_SM3=0xE051)
+  t242_tlcp_version_codepoint_pin (TLCP=0x0101 vs TLS 1.2=0x0303 vs TLS 1.3=0x0304)
+  t242_tlcp_handshake_source_files_present (5 文件 connection/handshake/record_tlcp)
+  t242_tlcp_client_uses_sm3_transcript_hash_pin (client_tlcp.rs HashAlgId::Sm3)
+  t242_tlcp_server_uses_sm3_transcript_hash_pin (server_tlcp.rs 对称)
+  t242_tlcp_dual_cert_architecture_source_pin (multi-file multi-anchor 扫描 dual-cert 命名)
+  t242_audit_phase_e_behaviour_class_plan_docs_in_sync (T242 + 'Behaviour-class' + 'GM cert verify')
+
+关键设计:
+  扩展 OID identity pin 家族到全 GM crypto stack (sm2 curve + sm3 hash + sm2-with-sm3 sig)
+  TLCP version codepoint pin 含 disambiguation 三元组 (TLCP vs TLS 1.2/1.3 必互异)
+  client/server SM3 对称 pin (一侧丢失则 audit catch asymmetry)
+  dual-cert 用 multi-file multi-anchor 扫描 (灵活于 refactor 移动 / 仍 catch removal)
+
+累计:
+  T115 (8) + T242 (10) = 18 tests
+
+验证:
+  cargo test -p hitls-tls --test migrated_phase_e_audit_pins --all-features  18/0
+  cargo test -p hitls-tls --all-features                                     1690/0 零回归 (was 1680, +10)
+  cargo fmt + cargo clippy --workspace --all-features -D warnings + typos    clean
+
+Pitfall (codified):
+  pin #9 originally 指向 src/tlcp/config.rs 不存在 (TLCP config 在 connection_tlcp.rs + handshake/codec_tlcp.rs)
+  修复: multi-file scan 探 4 个实际 TLCP 源文件 + 5 个 dual-cert 命名锚点
+  规则:「expected 文件 path 不存在时, audit 改扫 (file, anchor) tuples; 任一组合命中即成功」
+  容忍 codebase 重组, 仍 catch feature 移除
+
+作用域:
+  同测试文件 +~170 行 (10 pins + banner)
+  0 product code
+  0 新 TODO
+
+沿用方法学:
+  T112 4-tuple + T235 cross-crate + T246 test-count-floor + T247 anchor-string + T248 workflow-file-presence + T115 test-fn-name cross-pin
+
+新方法学:
+  「multi-file multi-anchor scan pattern」 (codified):
+    expected 文件可能不存在 (或位移) 时
+    audit 扫 (file, anchor) tuples 集合
+    任一组合命中即成功
+    容忍 codebase 重组, 仍 catch feature 移除
+
+Recorded as DEV_LOG Phase T242.
