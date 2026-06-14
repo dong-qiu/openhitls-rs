@@ -14652,3 +14652,84 @@ Recorded as DEV_LOG Phase T202.
     避免反复 rewrite mod doc
 
 Recorded as DEV_LOG Phase T203.
+
+### T204 — Phase C-1 cms.c + cms_sign.c 首批 (Phase C 5 sub-PR 第 1 弹)
+
+> 我希望你能连续工作，依次完成T204~T208, 每完成1项任务按照定义的提交工作流提交，每项任务的代码确认合入主干后自动开始下一项任务
+
+承接 Phase B 收官 (T203 #44 close)。
+转 Phase C docs/c-test-migration-plan.md §4 PKI malformed-fixture batch。
+
+Phase C 全景 audit:
+  C 源 12 .c 文件 / 459 fn / 7415 .data 行
+  Rust 现有 4 个 migrated_*.rs (~1130 tests) 已覆盖:
+    x509_cert/common/x509 主体 (1076 fns)
+    x509_crl_rfc5280 (32 T187+T202)
+    csr (13 T188+T203)
+  真实缺口: 5 个家族 0 Rust 覆盖 (CMS / PKCS12 / x509_crl 非 RFC5280 / x509_check / x509_vfy)
+  共 260 fn / 1839 rows
+
+5 sub-PR 拆分:
+  plan + C-1  T204 (本 PR)  12 tests
+  C-2         T205           pkcs12 ~12
+  C-3         T206           x509_crl 非 RFC5280 ~10
+  C-4         T207           x509_check + x509_vfy ~18
+  closeout    T208
+
+改动:
+  新 docs/issue-42-phase-c-plan.md (~120 行 完整 inventory + 决策矩阵 + 5 sub-PR 计划 + Out-of-scope + acceptance criteria)
+  新 crates/hitls-pki/tests/migrated_cms_negative_parse.rs (~210 行 / 11 tests + decision matrix table mod-doc + 跨文件 plan-doc pin)
+
+11 tests:
+  cms_parse_attached_p256_ecdsa_succeeds
+  cms_parse_attached_p384_ecdsa_succeeds
+  cms_parse_attached_p521_ecdsa_succeeds
+  cms_parse_attached_rsa_pkcs1_succeeds
+  cms_parse_attached_rsa_pss_succeeds
+  cms_parse_detached_p256_carries_no_content
+  cms_parse_multi_signer_attached_enumerates_all_signers
+  cms_parse_v3_attached_succeeds
+  cms_signeddata_invalid_version_accepted_gap
+  cms_tampered_attached_content_fails_verify
+  audit_plan_docs_in_sync
+
+踩坑:
+  初版加 load_signed_message helper 但未使用 (留作 detached path future use)
+  -D warnings 触发 dead_code
+  fix: 删除 helper (detached test 仅检 encapContentInfo 为 None, 不需 msg.txt)
+
+Fixture 复用:
+  tests/vectors/c-asn1-fixtures/cert/asn1/cms/signeddata/ 已 mirrored 23 文件
+  无需新增 rsync
+
+验证:
+  cargo test -p hitls-pki --test migrated_cms_negative_parse --all-features  11/0
+  cargo test -p hitls-pki --tests                                            458+11+9+32+13+1073/0 全 pass (1596 total)
+  cargo fmt + cargo clippy --workspace --all-features -D warnings            clean
+
+作用域:
+  1 个新 plan doc (~120 行)
+  1 个新测试文件 (~210 行)
+  0 product code
+  1 个 TODO(#42-phase-c)
+
+沿用 + 新方法学:
+  沿用 #46 T195 套路 (audit-first multi-file 系列 + plan doc 内 sub-PR 表 + audit_plan_docs_in_sync 跨文件 pin)
+
+  新「fixture-driven 而非 mutation-driven」 (codified):
+    Phase C 用 raw DER fixture 直接加载 + 测 parse + 字段一致性
+    不同于 Phase B byte patch (CSR/CRL)
+    fixture 已在 tests/vectors/c-asn1-fixtures/ 镜像
+    测试体只读不改
+
+  新「per-algorithm-family enumeration」 (codified):
+    同 TC family 跨算法 (NIST P-256/384/521 + RSA-PKCSv15/PSS) 5 tests per row
+    提供 cipher-coverage matrix 而非单 row
+    后人加新算法时对应一行新增即可
+
+  新「sub-PR 系列起手 = plan doc + 首批 + 跨文件 pin」:
+    沿用 #46 T195 套路
+    起手 PR 必含 audit doc 锁未来 sub-PR 决策
+    audit_plan_docs_in_sync 防 plan 漂移
+
+Recorded as DEV_LOG Phase T204.
