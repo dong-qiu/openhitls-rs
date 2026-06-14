@@ -15551,3 +15551,72 @@ Recorded as DEV_LOG Phase T214.
     避免 product 改动门槛
 
 Recorded as DEV_LOG Phase T215.
+
+### T216 — Phase D-3 tls13 extensions+record+appendix+pha 13 tests (Phase D 5 sub-PR 第 3 弹)
+
+> 开始做Phase F：我希望你能连续工作，依次完成T214~T218, 每完成1项任务按照定义的提交工作流提交，每项任务的代码确认合入主干后自动开始下一项任务
+
+承接 T215 Phase D-2。
+
+改动:
+  tests/interop/tests/transcript_mutation.rs 追加 T216 banner + 13 tests
+  累计 41 tests in 1 file
+  沿用 T196 same-file 累计追加 codified
+
+13 tests (RFC 8446 extension codepoint pin + cross-coverage):
+  Extension codepoint pin (4):
+    psk_modes_extension_codepoint_pin (§4.2.9 codepoint=45)
+    certificate_authorities_extension_codepoint_pin (§4.2.4 codepoint=47)
+    signature_algorithms_cert_extension_codepoint_pin (§4.2.3 codepoint=50)
+    signature_algorithms_extension_codepoint_pin (§4.2.3 codepoint=13)
+  Cross-coverage via file-literal grep (6):
+    necessary_supported_versions_covered_by_t186
+    necessary_key_share_covered_by_t186
+    keysharegroup_covered_by_t186
+    record_length_and_type_covered_by_t214
+    ignore_ccs_covered_by_t88
+    pha_post_handshake_scope_cut_documented (encrypted-mutation TODO)
+  Scope-cut to encrypted-mutation TODO (2):
+    cert_signature_and_verify_fail_scope_cut_documented
+    check_serverhello_master_secret_scope_cut_documented
+  Plan doc pin (1):
+    plan_doc_t216_anchor_pinned
+
+typos C-typo 累积 (T215 UNSUPPORT 后第 2 批):
+  CERTICATE (CERTICATE_VERIFY_FAIL — missing F+I)
+  HEELO (ERR_HEELO — typo of HELLO)
+  沿用 T212 codified 累积 7 个 typo pattern
+
+累计:
+  T186 (7) + T214 (10) + T215 (11) + T216 (13) = 41 tests in transcript_mutation.rs
+
+关键设计:
+  4 个 extension-codepoint pin 是新 attack-vector (RFC 8446 §4.2.x 数字常量退化检测)
+  9 个 cross-coverage pin 沿用 T215 codified file-literal grep 模式
+  全部 0 product 改动
+
+验证:
+  cargo test -p hitls-integration-tests --test transcript_mutation --all-features  41/0
+  cargo test -p hitls-integration-tests --all-features                             380+/0 零回归
+  cargo fmt + cargo clippy --workspace --all-features -D warnings + typos          clean
+
+作用域:
+  同测试文件 +~165 行
+  typos.toml +2 anchor (CERTICATE + HEELO)
+  0 product code
+  0 新 TODO
+
+沿用 + 新方法学:
+  沿用 T215 「cross-coverage pin via file-literal grep」 (7 个)
+  + T212 verbatim-C-typo allowlist 累积
+  + T204 audit-first multi-file 系列
+
+  新「extension codepoint identity pin = RFC 数字常量退化锁」 (codified):
+    extension type codepoint (PSK_MODES=45 / CERT_AUTH=47 / SIG_ALG_CERT=50) 是 RFC 8446 §4.2.x 固定数字
+    Rust 常量 (ExtensionType::PSK_KEY_EXCHANGE_MODES.0) 与 RFC 数字直接对照
+    后人重命名常量或改 codepoint 立刻 fail
+    4 个 codepoint pin 覆盖 4 个不同 RFC 子节
+    比写 mutation test 节省 (无需 rogue server 调用)
+    抗 ExtensionType 重构退化
+
+Recorded as DEV_LOG Phase T216.

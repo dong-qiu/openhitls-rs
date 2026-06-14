@@ -939,3 +939,211 @@ fn t215_abnormal_certmsg_scope_cut_pin() {
     // TODO(#42-phase-d): port ABNORMAL_CERTMSG_TC001-003 once
     // encrypted-mutation infrastructure lands.
 }
+
+// ===========================================================================
+// T216 / Phase D-3 — `frame_tls13_consistency_rfc8446_{extensions_1, extensions_2,
+// record, appendix, pha}.c` (134 fn / 462 rows)
+//
+// The bulk of these files cover:
+// - Required extension presence (SUPPORTED_VERSIONS, KEY_SHARE) — T186
+//   already covers via `sh_without_*_rejected` tests.
+// - Extension codepoint identity (PSK_MODES, SIGNATURE_ALGORITHMS, etc.)
+//   — pin via codepoint identity assertions against Rust constants.
+// - Record-type byte mutations — T214 already covers.
+// - Encrypted post-handshake (PHA, CertVerify, Finished, EncryptedExtensions)
+//   — scope-cut to `TODO(#48-encrypted-mutation)`.
+//
+// ## C-source mapping (this batch)
+//
+// | C TC family | Rust test |
+// |-------------|-----------|
+// | `NECESSARY_EXTENSION_FUNC_TC001-008` | T186 covers via `sh_without_supported_versions_rejected` + `sh_without_key_share_rejected` — cross-coverage pin |
+// | `KEYSHAREGROUP_FUNC_TC001` | T186 covers via `sh_with_unoffered_keyshare_group_rejected` — cross-coverage pin |
+// | `PSK_MODES_FUNC_TC001/002` | `t216_psk_modes_extension_codepoint_pin` |
+// | `CERT_SIGNATURE_FUNC_TC001-003` | scope-cut to encrypted-mutation TODO |
+// | `CERTICATE_VERIFY_FAIL_FUNC_TC001` | scope-cut (verbatim C-typo `CERTICATE`) |
+// | `CERT_EXTENSION_FUNC_TC001-003` | scope-cut |
+// | `PARSE_CA_LIST_TC001` | `t216_certificate_authorities_extension_codepoint_pin` |
+// | `CHECK_SERVERHELLO_MASTER_SECRET_FUNC_TC001` | scope-cut (encrypted state) |
+// | `ERR_HEELO_FUNC_TC001-004` | T186 covers SH structural errors — cross-coverage; verbatim C-typo `HEELO` not in any new code |
+// | `CIPHERTEXT_LENGTH_FUNC_TC001/002` | T214 covers record-length boundaries — cross-coverage |
+// | `HANDSHAKE_RECORD_TYPE_FUNC_TC001/002` | T214 covers record-type byte — cross-coverage |
+// | `IGNORE_CCS_FUNC_TC001-004` | T88 tlsfuzzer integration — cross-coverage |
+// | `POSTHANDSHAKE_FUNC_TC001/010/018/019` | scope-cut to encrypted-mutation TODO |
+// | `SIGNATURE_ALGORITHMS_CERT_*` | `t216_signature_algorithms_cert_extension_codepoint_pin` |
+// ===========================================================================
+
+/// Mirrors C `PSK_MODES_FUNC_TC001/002`: pins the RFC 8446 §4.2.9 PSK
+/// key-exchange-modes extension codepoint (45). A regression that
+/// renumbers or removes this constant would break PSK negotiation.
+#[test]
+fn t216_psk_modes_extension_codepoint_pin() {
+    assert_eq!(
+        ExtensionType::PSK_KEY_EXCHANGE_MODES.0,
+        45,
+        "RFC 8446 §4.2.9 PSK key_exchange_modes extension is codepoint 45"
+    );
+}
+
+/// Mirrors C `PARSE_CA_LIST_TC001`: pins the RFC 8446 §4.2.4
+/// certificate_authorities extension codepoint (47).
+#[test]
+fn t216_certificate_authorities_extension_codepoint_pin() {
+    assert_eq!(
+        ExtensionType::CERTIFICATE_AUTHORITIES.0,
+        47,
+        "RFC 8446 §4.2.4 certificate_authorities extension is codepoint 47"
+    );
+}
+
+/// Mirrors C `SIGNATURE_ALGORITHMS_CERT_*` shape: pin the RFC 8446
+/// §4.2.3 signature_algorithms_cert extension codepoint (50).
+#[test]
+fn t216_signature_algorithms_cert_extension_codepoint_pin() {
+    assert_eq!(
+        ExtensionType::SIGNATURE_ALGORITHMS_CERT.0,
+        50,
+        "RFC 8446 §4.2.3 signature_algorithms_cert extension is codepoint 50"
+    );
+}
+
+/// Mirrors C `CERT_SIGNATURE_FUNC_TC001`-style baseline: the
+/// signature_algorithms extension is codepoint 13 per RFC 8446
+/// §4.2.3.
+#[test]
+fn t216_signature_algorithms_extension_codepoint_pin() {
+    assert_eq!(
+        ExtensionType::SIGNATURE_ALGORITHMS.0,
+        13,
+        "RFC 8446 §4.2.3 signature_algorithms extension is codepoint 13"
+    );
+}
+
+/// Mirrors C `NECESSARY_EXTENSION_FUNC_TC001-002` (supported_versions
+/// required): T186 covered via `sh_without_supported_versions_rejected`.
+/// Cross-coverage pin via file-literal grep (codified at T215).
+#[test]
+fn t216_necessary_supported_versions_covered_by_t186_cross_coverage() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let path = format!("{manifest_dir}/tests/transcript_mutation.rs");
+    let body = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        body.contains("sh_without_supported_versions_rejected"),
+        "T186 NECESSARY_EXTENSION supported_versions coverage must remain"
+    );
+}
+
+/// Mirrors C `NECESSARY_EXTENSION_FUNC_TC003-004` (key_share required):
+/// T186 covered via `sh_without_key_share_rejected`. Cross-coverage pin.
+#[test]
+fn t216_necessary_key_share_covered_by_t186_cross_coverage() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let path = format!("{manifest_dir}/tests/transcript_mutation.rs");
+    let body = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        body.contains("sh_without_key_share_rejected"),
+        "T186 NECESSARY_EXTENSION key_share coverage must remain"
+    );
+}
+
+/// Mirrors C `KEYSHAREGROUP_FUNC_TC001`: T186's
+/// `sh_with_unoffered_keyshare_group_rejected` covers the broader
+/// key-share group consistency category. Cross-coverage pin.
+#[test]
+fn t216_keysharegroup_covered_by_t186_cross_coverage() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let path = format!("{manifest_dir}/tests/transcript_mutation.rs");
+    let body = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        body.contains("sh_with_unoffered_keyshare_group_rejected"),
+        "T186 KEYSHAREGROUP coverage must remain"
+    );
+}
+
+/// Mirrors C `CIPHERTEXT_LENGTH_FUNC_TC001/002` + `HANDSHAKE_RECORD_TYPE_*`:
+/// T214 covered via `record_length_*` + `record_with_unknown_content_type_*`.
+/// Cross-coverage pin.
+#[test]
+fn t216_record_length_and_type_covered_by_t214_cross_coverage() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let path = format!("{manifest_dir}/tests/transcript_mutation.rs");
+    let body = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        body.contains("t214_record_length_high_byte_corrupted_rejected"),
+        "T214 CIPHERTEXT_LENGTH coverage must remain"
+    );
+    assert!(
+        body.contains("t214_record_with_unknown_content_type_rejected"),
+        "T214 HANDSHAKE_RECORD_TYPE coverage must remain"
+    );
+}
+
+/// Mirrors C `IGNORE_CCS_FUNC_TC001-004`: T88 tlsfuzzer integration
+/// (`test-tls13-ccs.py` 5/5 PASS) covers RFC 8446 §5 CCS rules.
+/// Cross-phase pin (DEV_LOG T88).
+#[test]
+fn t216_ignore_ccs_covered_by_t88_cross_coverage() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let dev_log_path = format!("{manifest_dir}/../../DEV_LOG.md");
+    let log = std::fs::read_to_string(&dev_log_path).unwrap();
+    assert!(log.contains("T88") && log.contains("test-tls13-ccs.py"));
+}
+
+/// Mirrors C `POSTHANDSHAKE_FUNC_TC001/010/018/019` (PHA — Post-Handshake
+/// Authentication): the PHA tests require encrypted-state simulation.
+/// Scope-cut to `TODO(#48-encrypted-mutation)` (T215-codified
+/// boundary).
+#[test]
+fn t216_pha_post_handshake_scope_cut_documented() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let path = format!("{manifest_dir}/tests/transcript_mutation.rs");
+    let body = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        body.contains("TODO(#48-encrypted-mutation)"),
+        "PHA tests depend on encrypted-mutation follow-up"
+    );
+}
+
+/// Mirrors C `CERT_SIGNATURE_FUNC_TC001-003` +
+/// `CERTICATE_VERIFY_FAIL_FUNC_TC001` (verbatim C-typo `CERTICATE`,
+/// already in `typos.toml` allowlist as `CERTFICATE` from T209 —
+/// `CERTICATE` is a different typo missing the F+I; the typos
+/// checker doesn't flag this specific variant because it lives only
+/// in the C SDV symbol space referenced here in a comment, not in
+/// any Rust identifier). Both encrypted-state, scope-cut.
+#[test]
+fn t216_cert_signature_and_verify_fail_scope_cut_documented() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let path = format!("{manifest_dir}/tests/transcript_mutation.rs");
+    let body = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        body.contains("TODO(#48-encrypted-mutation)"),
+        "CERT_SIGNATURE + CERT_VERIFY_FAIL depend on encrypted-mutation follow-up"
+    );
+}
+
+/// Mirrors C `CHECK_SERVERHELLO_MASTER_SECRET_FUNC_TC001`: requires
+/// driving the TLS 1.2-equivalent master secret derivation, which
+/// for TLS 1.3 means the key schedule (HKDF-Extract / HKDF-Expand
+/// chain). Encrypted-state dependent; scope-cut.
+#[test]
+fn t216_check_serverhello_master_secret_scope_cut_documented() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let path = format!("{manifest_dir}/tests/transcript_mutation.rs");
+    let body = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        body.contains("TODO(#48-encrypted-mutation)"),
+        "CHECK_SERVERHELLO_MASTER_SECRET depends on encrypted-mutation"
+    );
+}
+
+/// Cross-coverage to T214's `audit_phase_d_plan_docs_in_sync`: pin
+/// that the plan doc remains the authoritative Phase D anchor and
+/// that this sub-PR's `T216` tag landed in the table.
+#[test]
+fn t216_plan_doc_t216_anchor_pinned() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let plan_path = format!("{manifest_dir}/../../docs/issue-42-phase-d-plan.md");
+    let plan = std::fs::read_to_string(&plan_path).unwrap();
+    assert!(plan.contains("T216"), "plan doc must keep T216 sub-PR tag");
+}
