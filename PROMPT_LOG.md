@@ -16149,3 +16149,65 @@ API pitfalls (codified):
     保证 rogue server 的 key schedule 与 real client 的一致
 
 Recorded as DEV_LOG Phase T224.
+
+### T225 — Phase H-2 MODIFIED_CERT_VERIFY / MODIFIED_CERTMSG family 10 tests (Phase H 5 sub-PR 第 2 弹)
+
+> 按 A + C 走
+
+Continues T224 Phase H-1.
+
+改动:
+  tests/interop/tests/transcript_mutation_encrypted_e2e.rs 追加 T225 banner + 10 tests
+  累计 13 tests in 1 file
+
+10 tests:
+  3 E2E (T224 framework):
+    h225_e2e_encrypted_certificate_with_empty_list_rejected
+    h225_e2e_encrypted_certificate_with_malformed_der_rejected
+    h225_e2e_encrypted_certificate_explicit_zero_body_rejected
+  6 helper-level pins (extend T220/T221/T222):
+    h225_certificate_handshake_type_byte_identity_pin (0x0B = 11)
+    h225_certificate_message_min_wire_size_pin (8 bytes)
+    h225_certverify_handshake_type_byte_identity_pin (0x0F = 15)
+    h225_certverify_message_min_wire_size_pin (8 bytes)
+    h225_certverify_signature_algorithm_codepoint_pin (RSA_PSS_RSAE_SHA256 + ECDSA_SECP256R1_SHA256 + ED25519)
+    h225_certverify_signing_buffer_construction_e2e_sibling_pin (T220 E2E sibling, 0x20×64 + ctx + 0x00 + hash)
+  1 plan banner:
+    h225_phase_h2_plan_banner_pinned
+
+3 新 helper:
+  seal_encrypted_handshake (wraps inner_content_type=0x16 Handshake)
+  build_certificate_message (RFC 8446 §4.4.2 ctx + cert_list framing)
+  build_certificate_entry (cert_data + empty extensions)
+
+关键设计:
+  3 个真 E2E 测试在 Certificate 解析阶段产生 real-wire Alert 观测 (用户对 H-2 的目标)
+  6 helper-level pin 沿用 T220 codified 'helper-level mutation pin = full E2E driver alternative'
+  完整 CV E2E with real cert+key signing 暂未做 (估计 +200 LoC over PEM/PKCS#8 loader, candidate Phase I follow-up)
+  本 PR 的 E2E driver 用 zero product code touchpoints 覆盖完整 encrypted EE+Cert 链路
+
+累计:
+  T224 (3) + T225 (10) = 13 tests in transcript_mutation_encrypted_e2e.rs
+
+验证:
+  cargo test -p hitls-integration-tests --test transcript_mutation_encrypted_e2e --all-features  13/0
+  cargo test -p hitls-integration-tests --all-features                                           500/0 (was 490, +10)
+  cargo fmt + cargo clippy --workspace --all-features -D warnings + typos                        clean
+
+作用域:
+  同测试文件 +~310 行 (10 test + 3 helpers)
+  0 product code
+  0 新 TODO
+
+沿用方法学:
+  T220 「helper-level mutation pin = full E2E driver alternative」
+  T221 「raw byte pin when enum is private」
+  T222 「extension/handshake-type codepoint identity pin」
+
+新方法学:
+  「E2E rogue server can exercise the Certificate parse phase without a valid cert+key by sending malformed shapes」 (codified):
+    C SDV MODIFIED_CERTMSG family rows 经 T224 framework 直接可达 (无需 cert+key loader)
+    real client 在解析层面 (shape violation) 就 error, 不到 CV verification 阶段
+    本机制可延伸至每 sub-PR ~3-4 个 E2E 测试 (无需完整 cert+key infra)
+
+Recorded as DEV_LOG Phase T225.

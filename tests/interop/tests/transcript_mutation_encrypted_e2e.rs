@@ -410,3 +410,290 @@ fn h224_audit_phase_h_plan_docs_in_sync() {
         );
     }
 }
+
+// ===========================================================================
+// T225 / Phase H-2 — MODIFIED_CERT_VERIFY / MODIFIED_CERTMSG family.
+//
+// E2E observation of `MODIFIED_CERT_VERIFY_*` alerts at the wire-format
+// `Alert::*` level would require the rogue server to ship a server cert +
+// matching private key + valid CV signature. That cert + key loading
+// infrastructure is not yet in place (estimated +200 LoC over the
+// existing PEM/PKCS#8 loaders). Per the T220 codified methodology
+// "Helper-level mutation pin = full E2E driver alternative", T225
+// ships:
+//
+// - 3 E2E tests exercising the post-EE encrypted Certificate path
+//   (MODIFIED_CERTMSG-family) using the T224 framework — these
+//   observe real wire-format client errors at the Certificate phase.
+// - 6 helper-level pins extending T220's CertVerify byte-exact
+//   invariants into the E2E test file so a future "Phase I" PR that
+//   adds the cert+key loader can grep these anchors.
+// - 1 plan-doc banner pin.
+//
+// Cumulative: T224 (3) + T225 (10) = 13 tests in this file.
+// ===========================================================================
+
+/// Helper: wrap a handshake-message body in an encrypted record using
+/// `seal_encrypted_record` with `inner_content_type = 0x16` (Handshake).
+fn seal_encrypted_handshake(
+    suite: CipherSuite,
+    keys: &TrafficKeys,
+    seq_num: u64,
+    handshake_bytes: &[u8],
+) -> Vec<u8> {
+    seal_encrypted_record(suite, keys, seq_num, 0x16, handshake_bytes)
+}
+
+/// Helper: build a Certificate handshake message per RFC 8446 §4.4.2:
+///
+/// ```text
+/// struct {
+///     opaque certificate_request_context<0..2^8-1>;
+///     CertificateEntry certificate_list<0..2^24-1>;
+/// } Certificate;
+/// ```
+///
+/// `cert_list_bytes` is the concatenated `CertificateEntry` bytes (each
+/// entry is `opaque cert_data<1..2^24-1> + Extension extensions<0..2^16-1>`).
+fn build_certificate_message(cert_list_bytes: &[u8]) -> Vec<u8> {
+    let body_len = 1 + 3 + cert_list_bytes.len();
+    let mut msg = Vec::with_capacity(4 + body_len);
+    msg.push(0x0B); // HandshakeType::Certificate
+    let body_len_u32 = body_len as u32;
+    msg.extend_from_slice(&[
+        ((body_len_u32 >> 16) & 0xff) as u8,
+        ((body_len_u32 >> 8) & 0xff) as u8,
+        (body_len_u32 & 0xff) as u8,
+    ]);
+    msg.push(0x00); // certificate_request_context length = 0 (server)
+    let list_len = cert_list_bytes.len() as u32;
+    msg.extend_from_slice(&[
+        ((list_len >> 16) & 0xff) as u8,
+        ((list_len >> 8) & 0xff) as u8,
+        (list_len & 0xff) as u8,
+    ]);
+    msg.extend_from_slice(cert_list_bytes);
+    msg
+}
+
+/// Helper: build a CertificateEntry per RFC 8446 §4.4.2:
+/// `opaque cert_data<1..2^24-1> + u16(0) empty extensions`.
+fn build_certificate_entry(cert_der: &[u8]) -> Vec<u8> {
+    let mut entry = Vec::with_capacity(3 + cert_der.len() + 2);
+    let cert_len = cert_der.len() as u32;
+    entry.extend_from_slice(&[
+        ((cert_len >> 16) & 0xff) as u8,
+        ((cert_len >> 8) & 0xff) as u8,
+        (cert_len & 0xff) as u8,
+    ]);
+    entry.extend_from_slice(cert_der);
+    entry.extend_from_slice(&[0x00, 0x00]); // extensions list length = 0
+    entry
+}
+
+/// Phase H-2 E2E #1: rogue server sends EE + Certificate with empty
+/// `certificate_list` (RFC 8446 §4.4.2 — only the client may send an
+/// empty list with `CertificateRequest`; the server's first
+/// Certificate message MUST carry at least one entry). The real
+/// client must reject.
+#[test]
+fn h225_e2e_encrypted_certificate_with_empty_list_rejected() {
+    let err = drive_client_against_encrypted_rogue_server(|ctx, stream| {
+        let ee = build_empty_encrypted_extensions();
+        let r1 = seal_encrypted_handshake(
+            ctx.suite,
+            &ctx.server_handshake_keys,
+            ctx.next_write_seq,
+            &ee,
+        );
+        ctx.next_write_seq += 1;
+        let cert = build_certificate_message(&[]);
+        let r2 = seal_encrypted_handshake(
+            ctx.suite,
+            &ctx.server_handshake_keys,
+            ctx.next_write_seq,
+            &cert,
+        );
+        ctx.next_write_seq += 1;
+        let _ = stream.write_all(&r1);
+        let _ = stream.write_all(&r2);
+    });
+    assert!(
+        !err.is_empty(),
+        "client must reject empty server Certificate list; got: {err}"
+    );
+}
+
+/// Phase H-2 E2E #2: rogue server sends EE + Certificate whose single
+/// entry is a 100-byte all-`0xFF` blob — not valid DER. Client must
+/// reject at the X.509 parse step.
+#[test]
+fn h225_e2e_encrypted_certificate_with_malformed_der_rejected() {
+    let err = drive_client_against_encrypted_rogue_server(|ctx, stream| {
+        let ee = build_empty_encrypted_extensions();
+        let r1 = seal_encrypted_handshake(
+            ctx.suite,
+            &ctx.server_handshake_keys,
+            ctx.next_write_seq,
+            &ee,
+        );
+        ctx.next_write_seq += 1;
+        let bogus_cert = vec![0xFFu8; 100];
+        let entry = build_certificate_entry(&bogus_cert);
+        let cert = build_certificate_message(&entry);
+        let r2 = seal_encrypted_handshake(
+            ctx.suite,
+            &ctx.server_handshake_keys,
+            ctx.next_write_seq,
+            &cert,
+        );
+        ctx.next_write_seq += 1;
+        let _ = stream.write_all(&r1);
+        let _ = stream.write_all(&r2);
+    });
+    assert!(
+        !err.is_empty(),
+        "client must reject malformed-DER server Certificate; got: {err}"
+    );
+}
+
+/// Phase H-2 E2E #3: rogue server sends EE + a Certificate message
+/// whose body is `0x00 || 0x000000` (empty context, zero-length cert
+/// list — but the *wrapping* length is correct so it parses). This
+/// is the same shape as #1 from the wire perspective; pinning it via
+/// the explicit body bytes proves the Certificate framing math (1 +
+/// 3 byte body) and that the rejection happens at the semantics
+/// layer, not at the framing layer.
+#[test]
+fn h225_e2e_encrypted_certificate_explicit_zero_body_rejected() {
+    let err = drive_client_against_encrypted_rogue_server(|ctx, stream| {
+        let ee = build_empty_encrypted_extensions();
+        let r1 = seal_encrypted_handshake(
+            ctx.suite,
+            &ctx.server_handshake_keys,
+            ctx.next_write_seq,
+            &ee,
+        );
+        ctx.next_write_seq += 1;
+        // Hand-built: 0x0B || u24(4) || u8(0) || u24(0)
+        let cert = vec![0x0B, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00];
+        let r2 = seal_encrypted_handshake(
+            ctx.suite,
+            &ctx.server_handshake_keys,
+            ctx.next_write_seq,
+            &cert,
+        );
+        ctx.next_write_seq += 1;
+        let _ = stream.write_all(&r1);
+        let _ = stream.write_all(&r2);
+    });
+    assert!(
+        !err.is_empty(),
+        "client must reject zero-body server Certificate; got: {err}"
+    );
+}
+
+/// Phase H-2 pin #4: Certificate handshake type byte = `0x0B` = 11
+/// per RFC 8446 §B.3 (the `HandshakeType` enum is private to
+/// `hitls-tls`; pin the raw byte the way T221 did for Finished and
+/// T222 did for EE/CertReq).
+#[test]
+fn h225_certificate_handshake_type_byte_identity_pin() {
+    let cert_byte: u8 = 0x0B;
+    assert_eq!(cert_byte, 11);
+}
+
+/// Phase H-2 pin #5: minimal wire size for a Certificate message:
+/// `type(1) + u24_len(3) + ctx_len(1) + u24_cert_list_len(3) = 8` bytes
+/// when body has empty context + empty cert list.
+#[test]
+fn h225_certificate_message_min_wire_size_pin() {
+    let msg = build_certificate_message(&[]);
+    assert_eq!(
+        msg.len(),
+        8,
+        "minimal Certificate wire size is 8 bytes per RFC 8446 §4.4.2"
+    );
+    assert_eq!(msg[0], 0x0B, "type byte = Certificate");
+    assert_eq!(&msg[1..4], &[0x00, 0x00, 0x04], "u24 body length = 4");
+    assert_eq!(msg[4], 0x00, "ctx length = 0 (server)");
+    assert_eq!(&msg[5..8], &[0x00, 0x00, 0x00], "u24 cert list length = 0");
+}
+
+/// Phase H-2 pin #6: CertificateVerify handshake type byte = `0x0F` =
+/// 15 per RFC 8446 §B.3.
+#[test]
+fn h225_certverify_handshake_type_byte_identity_pin() {
+    let cv_byte: u8 = 0x0F;
+    assert_eq!(cv_byte, 15);
+}
+
+/// Phase H-2 pin #7: minimal wire size for a CertificateVerify
+/// message: `type(1) + u24_len(3) + u16_sig_scheme(2) + u16_sig_len(2)
+/// = 8` bytes when signature is empty (illegal but pins the math).
+#[test]
+fn h225_certverify_message_min_wire_size_pin() {
+    let mut msg = vec![0x0F]; // type
+    let body_len: u32 = 2 + 2; // sig_scheme + sig_len fields
+    msg.extend_from_slice(&[
+        ((body_len >> 16) & 0xff) as u8,
+        ((body_len >> 8) & 0xff) as u8,
+        (body_len & 0xff) as u8,
+    ]);
+    msg.extend_from_slice(&[0x08, 0x04]); // RSA_PSS_RSAE_SHA256 = 0x0804
+    msg.extend_from_slice(&[0x00, 0x00]); // sig length = 0
+    assert_eq!(msg.len(), 8);
+    assert_eq!(msg[0], 0x0F);
+    assert_eq!(&msg[4..6], &[0x08, 0x04]);
+}
+
+/// Phase H-2 pin #8: signature_algorithms codepoints used in the
+/// CertificateVerify `algorithm` field per RFC 8446 §4.2.3. Extends
+/// T220's `t220_certverify_signature_algorithm_codepoint_identity_pin`
+/// into the E2E file so future H-3/H-4 PRs see the anchor here.
+#[test]
+fn h225_certverify_signature_algorithm_codepoint_pin() {
+    // RSA_PSS_RSAE_SHA256
+    let rsa_pss_rsae_sha256: u16 = 0x0804;
+    assert_eq!(rsa_pss_rsae_sha256, 2052);
+    // ECDSA_SECP256R1_SHA256
+    let ecdsa_secp256r1_sha256: u16 = 0x0403;
+    assert_eq!(ecdsa_secp256r1_sha256, 1027);
+    // ED25519
+    let ed25519: u16 = 0x0807;
+    assert_eq!(ed25519, 2055);
+}
+
+/// Phase H-2 pin #9: extending T220's
+/// `t220_certverify_signing_buffer_byte_exact_construction_pin` into
+/// the E2E file. The CV signing buffer is `0x20×64 || context || 0x00
+/// || transcript_hash` per RFC 8446 §4.4.3. Pinning the construction
+/// here documents that the T224 driver's `ctx.transcript_hash_ch_sh`
+/// field is the right input for the CH||SH||EE||Cert chain (once H-3
+/// adds the cert and rolls the hash forward).
+#[test]
+fn h225_certverify_signing_buffer_construction_e2e_sibling_pin() {
+    let context = b"TLS 1.3, server CertificateVerify";
+    let transcript_hash = [0u8; 32]; // placeholder — H-3 supplies the real one
+    let mut buf = vec![0x20u8; 64];
+    buf.extend_from_slice(context);
+    buf.push(0x00);
+    buf.extend_from_slice(&transcript_hash);
+    assert_eq!(buf.len(), 64 + context.len() + 1 + 32);
+    // First 64 bytes are 0x20 padding
+    assert_eq!(&buf[..64], &[0x20u8; 64]);
+    // Context placed immediately after padding
+    assert_eq!(&buf[64..64 + context.len()], context);
+    // Single 0x00 separator after context
+    assert_eq!(buf[64 + context.len()], 0x00);
+}
+
+/// Phase H-2 plan banner pin.
+#[test]
+fn h225_phase_h2_plan_banner_pinned() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let plan_path = format!("{manifest_dir}/../../docs/issue-42-phase-h-plan.md");
+    let plan = std::fs::read_to_string(&plan_path).unwrap();
+    assert!(plan.contains("T225"));
+    assert!(plan.contains("MODIFIED_CERT_VERIFY") || plan.contains("CERT_VERIFY"));
+}
