@@ -17028,3 +17028,59 @@ Pitfall (codified):
     扩展 T116 cross-doc status-marker sync 到 milestone 粒度
 
 Recorded as DEV_LOG Phase T249.
+
+### T115 — Phase E-1 plan + 8 audit pins for 718-row interface_tlcp + 3-way classification (Phase E 5 sub-PR 第 1 弹)
+
+> Phase F 完成后完成 Phase E
+
+开 Phase E — c-test-migration-plan 中最后一个 open phase, 在 Phase F closeout (T249 Full C→Rust test migration parity milestone for Phase A-D/F) 之后。
+
+发现:
+  c-test-migration-plan §6 target 是手工 3-way classification of 718 interface_tlcp .data rows (40% 行为类 + 50% API 形态 + 10% 豁免)
+  Phase E 用 audit-pin sample rescope (与 Phase C/G/H/B/F-followup 一致)
+  锁定已有 Rust TLCP coverage (tlcp.rs 11 + tlcp_consistency.rs 22 + T199 audit pins + 43 Phase F follow-up) 而非字面 port 718 rows
+
+改动:
+  新建 docs/issue-42-phase-e-plan.md (~190 行, 718-row inventory + 3-way classification + 5-sub-PR split + audit-pin rationale)
+  新建 crates/hitls-tls/tests/migrated_phase_e_audit_pins.rs (~210 行, 8 audit pins)
+
+8 audit pins:
+  t115_c_sdv_interface_tlcp_inventory_pin (718-row 字面量 floor)
+  t115_3way_classification_breakdown_pin (40+50+10=100 + 287+359+72≈718)
+  t115_existing_rust_tlcp_files_present (4 文件: tlcp.rs + tlcp_consistency.rs + migrated_interface_tlcp_audit.rs + migrated_phase_f_audit_pins.rs)
+  t115_existing_tlcp_test_count_floor_pin (tlcp.rs ≥ 5 + tlcp_consistency.rs ≥ 20)
+  t115_migrated_interface_tlcp_audit_t199_cross_pin (4 个 #46-* TODO 锚点)
+  t115_phase_f_followup_tlcp_cross_pin (t246_tlcp_consistency_suite_present + t246_tlcp_integration_tests_present 函数名)
+  t115_tlcp_cipher_suite_codepoint_identity_pin (GB/T 38636 ECC_SM4_CBC_SM3=0xE013 + ECDHE_SM4_CBC_SM3=0xE011)
+  t115_audit_phase_e_plan_docs_in_sync (11-anchor plan-doc cross-coverage)
+
+关键设计:
+  扩展 T235/T246/T247/T248 到 4-axis 审计 (file presence + test-count-floor + anchor-string + workflow-file-presence + test-fn-name)
+  cross-pin 到 Phase F follow-up 测试函数名 (而非仅文件存在性) 是迄今最强 audit-pin 形式
+  权衡: 测试改名破坏审计 (信号 plan-doc 需更新) vs 测试改名静默通过 (假稳定感)
+  Phase E 采前者作 sister-phase (Phase F follow-up) cross-pin
+
+累计:
+  T115 (8) = 8 tests
+
+验证:
+  cargo test -p hitls-tls --test migrated_phase_e_audit_pins --all-features  8/0
+  cargo test -p hitls-tls --all-features                                     1680/0 零回归
+  cargo fmt + cargo clippy --workspace --all-features -D warnings + typos    clean
+
+作用域:
+  2 新文件
+  0 product code
+  0 既有测试改动
+
+沿用方法学:
+  T112 4-tuple + T235 cross-crate + T246 test-count-floor + T247 anchor-string + T248 workflow-file-presence
+
+新方法学:
+  「cross-pin to test function NAMES (not just file presence)」 (codified):
+    通过具体测试 ID 跨文件加紧 audit
+    迄今最强 audit-pin 形式
+    权衡: 测试改名破坏审计 (信号需更新) vs 测试改名静默通过 (假稳定)
+    Phase E 采前者作 sister-phase cross-pin
+
+Recorded as DEV_LOG Phase T115.
