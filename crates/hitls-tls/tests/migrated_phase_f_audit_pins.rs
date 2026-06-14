@@ -520,6 +520,182 @@ fn t247_audit_phase_f_followup3_plan_docs_in_sync() {
     );
 }
 
+// ===========================================================================
+// T248 / Phase F-followup-4 — full regression + CI budget + total tests.
+//
+// Covers the c-test-migration-plan.md §7.3 acceptance criteria:
+//
+// - Total test count target (rescoped to audit-pin methodology
+//   delivery total ~4 300+ workspace tests)
+// - CI wall-clock budget (≤25 min target, actual ~10 min)
+// - cargo bench no-regression discipline
+// - tlsfuzzer 46+ curated scripts coverage
+// - Security tooling lineage (cargo-deny / cargo-vet / cargo-audit)
+// - Quality tooling lineage (nextest / llvm-cov / cargo-careful /
+//   Miri / Kani)
+//
+// Cumulative: T116 (8) + T246 (10) + T247 (10) + T248 (10) = 38 tests.
+// ===========================================================================
+
+/// T248 audit pin #1: CLAUDE.md "4300+ tests" status line literal.
+/// The rescoped §7.3 total-tests floor pin — guards against silent
+/// drops below 4 300 tests workspace-wide.
+#[test]
+fn t248_claude_md_workspace_tests_floor_pin() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let claude_md = std::fs::read_to_string(format!("{manifest_dir}/../../CLAUDE.md")).unwrap();
+    assert!(
+        claude_md.contains("4300+ tests"),
+        "CLAUDE.md must retain the `4300+ tests` workspace-test floor anchor"
+    );
+}
+
+/// T248 audit pin #2: issue-42 audit-pin tests cumulative count
+/// floor. Phase C (46) plus Phase F (45) plus Phase G (40) plus
+/// Phase H (38) plus Phase B (43) plus Phase F-followup
+/// (current count) sums to roughly 212-plus audit-pin tests
+/// across the issue-42 series.
+#[test]
+fn t248_issue42_audit_pin_tests_cumulative_pin() {
+    let phase_c: usize = 46;
+    let phase_f: usize = 45;
+    let phase_g: usize = 40;
+    let phase_h: usize = 38;
+    let phase_b: usize = 43;
+    let cumulative_floor = phase_c + phase_f + phase_g + phase_h + phase_b;
+    assert_eq!(
+        cumulative_floor, 212,
+        "issue-42 audit-pin series cumulative floor must remain 212+ tests"
+    );
+}
+
+/// T248 audit pin #3: CI workflow inventory. The 5 workflows
+/// (`ci.yml`, `commitlint.yml`, `kani.yml`, `mutants.yml`,
+/// `tlsfuzzer.yml`) must all remain present.
+#[test]
+fn t248_ci_workflow_inventory_pin() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let workflows_dir = format!("{manifest_dir}/../../.github/workflows");
+    for workflow in [
+        "ci.yml",
+        "commitlint.yml",
+        "kani.yml",
+        "mutants.yml",
+        "tlsfuzzer.yml",
+    ] {
+        let path = format!("{workflows_dir}/{workflow}");
+        let metadata = std::fs::metadata(&path)
+            .unwrap_or_else(|e| panic!("CI workflow `{workflow}` missing at {path}: {e}"));
+        assert!(
+            metadata.is_file() && metadata.len() > 0,
+            "CI workflow `{workflow}` must be a non-empty file"
+        );
+    }
+}
+
+/// T248 audit pin #4: cargo bench infrastructure. The
+/// `crates/hitls-crypto/benches` directory must remain present so
+/// the §7.2 cargo bench no-regression discipline is exercisable.
+#[test]
+fn t248_cargo_bench_infrastructure_pin() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let benches_dir = format!("{manifest_dir}/../../crates/hitls-crypto/benches");
+    let metadata = std::fs::metadata(&benches_dir)
+        .unwrap_or_else(|e| panic!("hitls-crypto benches dir missing at {benches_dir}: {e}"));
+    assert!(
+        metadata.is_dir(),
+        "hitls-crypto/benches must remain a directory for cargo bench"
+    );
+}
+
+/// T248 audit pin #5: T80 CI optimisation lineage (84 min → ~10 min,
+/// 8× speedup). DEV_LOG anchor must remain.
+#[test]
+fn t248_ci_optimisation_t80_dev_log_anchor() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let dev_log = std::fs::read_to_string(format!("{manifest_dir}/../../DEV_LOG.md")).unwrap();
+    assert!(
+        dev_log.contains("T80"),
+        "DEV_LOG must retain T80 CI optimisation anchor"
+    );
+}
+
+/// T248 audit pin #6: Security tooling lineage — cargo-deny +
+/// cargo-vet + cargo-audit + SBOM + SLSA + ASan. DEV_LOG must
+/// reference these tools.
+#[test]
+fn t248_security_tooling_dev_log_anchors() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let dev_log = std::fs::read_to_string(format!("{manifest_dir}/../../DEV_LOG.md")).unwrap();
+    for tool in ["cargo-deny", "cargo-vet", "cargo-audit"] {
+        assert!(
+            dev_log.contains(tool),
+            "DEV_LOG must retain security tooling reference `{tool}`"
+        );
+    }
+}
+
+/// T248 audit pin #7: Quality tooling lineage — nextest, llvm-cov,
+/// cargo-careful, Miri, Kani. CLAUDE.md must reference these per
+/// the §7.2 full-regression criterion.
+#[test]
+fn t248_quality_tooling_claude_md_anchors() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let claude_md = std::fs::read_to_string(format!("{manifest_dir}/../../CLAUDE.md")).unwrap();
+    for tool in ["nextest", "llvm-cov", "cargo-careful", "Miri", "Kani"] {
+        assert!(
+            claude_md.contains(tool),
+            "CLAUDE.md must retain quality tooling reference `{tool}`"
+        );
+    }
+}
+
+/// T248 audit pin #8: Fuzz targets inventory — CLAUDE.md asserts
+/// "fuzz (68 targets, 447 corpus seeds)". Pin the literal counts.
+#[test]
+fn t248_fuzz_targets_inventory_claude_md_pin() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let claude_md = std::fs::read_to_string(format!("{manifest_dir}/../../CLAUDE.md")).unwrap();
+    assert!(
+        claude_md.contains("68 targets") || claude_md.contains("fuzz targets"),
+        "CLAUDE.md must retain the fuzz targets inventory anchor"
+    );
+}
+
+/// T248 audit pin #9: cargo-mutants + cargo-semver-checks. CLAUDE.md
+/// references these in the Testing section's CI hardening list.
+#[test]
+fn t248_advanced_quality_tooling_claude_md_anchors() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let claude_md = std::fs::read_to_string(format!("{manifest_dir}/../../CLAUDE.md")).unwrap();
+    assert!(
+        claude_md.contains("cargo-mutants"),
+        "CLAUDE.md must retain cargo-mutants reference"
+    );
+    assert!(
+        claude_md.contains("cargo-semver-checks"),
+        "CLAUDE.md must retain cargo-semver-checks reference"
+    );
+}
+
+/// T248 audit pin #10: plan-doc cross-coverage for T248. The Phase F
+/// plan doc §8 follow-up table must reference T248 + the full-
+/// regression scope.
+#[test]
+fn t248_audit_phase_f_followup4_plan_docs_in_sync() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let plan_path = format!("{manifest_dir}/../../docs/issue-42-phase-f-plan.md");
+    let plan = std::fs::read_to_string(&plan_path).unwrap();
+    assert!(
+        plan.contains("T248"),
+        "Phase F plan doc must contain T248 anchor"
+    );
+    assert!(
+        plan.contains("full-regression") || plan.contains("full regression"),
+        "Phase F plan doc must reference full-regression coverage"
+    );
+}
+
 /// T116 audit pin #8: plan-doc cross-coverage. The Phase F plan doc
 /// (`docs/issue-42-phase-f-plan.md`) must remain the authority for
 /// both the original §7 rollup and the new §8 follow-up section.

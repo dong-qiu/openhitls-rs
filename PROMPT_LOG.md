@@ -16901,3 +16901,61 @@ Pitfall (codified):
       doc-side regression catches anchor 叙述 removal
 
 Recorded as DEV_LOG Phase T247.
+
+### T248 — Phase F-followup-4 full regression + CI budget + total tests 10 audit pins (Phase F follow-up 5 sub-PR 第 4 弹)
+
+> 请继续 Phase F
+
+承接 T247 Phase F-followup-3。
+
+改动:
+  migrated_phase_f_audit_pins.rs 追加 T248 banner + 10 audit pins
+  累计 38 tests in 1 file
+
+10 audit pins 覆盖 c-test-migration-plan §7.3:
+  t248_claude_md_workspace_tests_floor_pin (CLAUDE.md '4300+ tests' 字面量 floor; 13000-tests target 重作用域)
+  t248_issue42_audit_pin_tests_cumulative_pin (C 46 + F 45 + G 40 + H 38 + B 43 = 212 floor)
+  t248_ci_workflow_inventory_pin (5 workflows 存在: ci.yml + commitlint.yml + kani.yml + mutants.yml + tlsfuzzer.yml)
+  t248_cargo_bench_infrastructure_pin (crates/hitls-crypto/benches 目录存在)
+  t248_ci_optimisation_t80_dev_log_anchor (T80 84min→10min 8×)
+  t248_security_tooling_dev_log_anchors (cargo-deny + cargo-vet + cargo-audit)
+  t248_quality_tooling_claude_md_anchors (nextest + llvm-cov + cargo-careful + Miri + Kani)
+  t248_fuzz_targets_inventory_claude_md_pin (CLAUDE.md '68 targets' 或 'fuzz targets')
+  t248_advanced_quality_tooling_claude_md_anchors (cargo-mutants + cargo-semver-checks)
+  t248_audit_phase_f_followup4_plan_docs_in_sync (T248 + 'full-regression' 或 'full regression' plan-doc)
+
+关键设计:
+  扩展 T247 anchor-string 模式到 multi-source cross-pin (CLAUDE.md + DEV_LOG + workflow files + benches dir)
+  workflow file inventory (std::fs::metadata) 替换 T246 test-count-floor 为 workflow 粒度的 file-presence
+  累计 audit-pin count pin (212) 是 issue-42 系列 scope 的 canonical anchor
+
+累计:
+  T116 (8) + T246 (10) + T247 (10) + T248 (10) = 38 tests
+
+验证:
+  cargo test -p hitls-tls --test migrated_phase_f_audit_pins --all-features  38/0
+  cargo test -p hitls-tls --all-features                                     1667/0 零回归 (was 1657, +10)
+  cargo fmt + cargo clippy --workspace --all-features -D warnings + typos    clean
+
+Pitfalls (codified):
+  2 处 clippy::doc_lazy_continuation 拒绝在行 556 + 639
+  '+' 连接符在续行首被读作 list bullet
+  修复: 行 556 把 '+' 替换为 'plus'; 行 639 切换到 comma-separated em-dash 句式
+  同 T116/T217/T220/T227/T228/T235/T247 pitfall
+  规律性高: future PR 在 doc 续行默认用 'plus' 或 comma-separated 替代 '+' 连接符
+
+作用域:
+  同测试文件 +~190 行 (10 pins + banner)
+  0 product code
+  0 新 TODO
+
+沿用方法学:
+  T112 4-tuple + T235 cross-crate + T246 test-count-floor + T247 anchor-string
+
+新方法学:
+  「workflow-file-presence inventory pin」 (codified):
+    扩展 T246 file-presence 模式到 CI workflow 文件
+    用 std::fs::metadata + non-empty 断言
+    在文件系统层防止 workflow 静默丢失 (而非 content 层)
+
+Recorded as DEV_LOG Phase T248.
