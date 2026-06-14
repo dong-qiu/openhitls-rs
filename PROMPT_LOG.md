@@ -15393,3 +15393,90 @@ Phase F 总成果:
     减少未来 Phase 收官 reinvent cost (Phase D 收官时直接复用)
 
 Recorded as DEV_LOG Phase T213.
+
+### T214 — Phase D-1 tls13_1.c 首批 10 tests + Phase D plan doc (Phase D 5 sub-PR 第 1 弹)
+
+> 开始做Phase F：我希望你能连续工作，依次完成T214~T218, 每完成1项任务按照定义的提交工作流提交，每项任务的代码确认合入主干后自动开始下一项任务
+
+承接 Phase F 收官 (T213)。
+转 Phase D — TLS 1.2/1.3 consistency / transcript-mutation 系列。
+
+Phase D 全景 audit:
+  C 源 tls/consistency/{tls12,tls13}/
+  TLS 1.3 9 文件 / 333 fn / 1088 rows
+  TLS 1.2 5 文件 / 123 fn / 384 rows
+  共 14 文件 / 456 fn / 1472 rows
+  真实 MODIFIED_*_TC 唯一家族仅 5 (vs plan §5.2 估 500)
+  广义 tls{12,13}_consistency_* attack surface 与 Phase C/F 同量级
+
+关键判断:
+  T186 (#48 Phase 1) 已建 rogue-server framework + ShBuilder + 2 driver
+  Plan §5.1 提议的 #[cfg(feature="test-hooks")] TranscriptMutator feature gate 不采纳
+  (零 product 改动, public API mutation 覆盖等价 attack surface)
+
+5 sub-PR 拆分:
+  plan + D-1  T214 (本 PR tls13_1)      10 tests
+  D-2         T215 tls13_2+cert+kex     ~15
+  D-3         T216 tls13 extensions+其他 ~15
+  D-4         T217 tls12 新文件          ~15
+  closeout    T218
+  估 ~57 tests
+
+改动:
+  新 docs/issue-42-phase-d-plan.md (~140 行)
+  tests/interop/tests/transcript_mutation.rs 追加 T214 banner + 10 tests
+  累计 17 in 1 file
+  沿用 T196 same-file 累计追加 codified
+
+10 tests (record-layer raw byte mutation 而非 ShBuilder fluent):
+  record_length_high_byte_corrupted_rejected (MSGLENGTH_TOOLONG_TC001 高 byte 0xFF)
+  record_length_low_byte_too_small_rejected (TC002 length=1 < payload)
+  record_length_zero_rejected (TC003 length=0)
+  record_with_unknown_content_type_rejected (UNEXPECT_RECODETYPE_TC001 0xFE)
+  record_with_appdata_type_during_handshake_rejected (TC002 0x17)
+  record_with_alert_type_in_place_of_sh_rejected (RECEIVES_OTHER_CCS 边界 0x15)
+  sh_supported_group_not_offered_rejected_gap (NO_SUPPORTED_GROUP fallback)
+  handshake_body_length_too_small_rejected (ZERO_APPMSG_FUNC_TC001 24-bit length=0)
+  ccs_rules_covered_by_t88_cross_coverage (跨 phase pin to T88 DEV_LOG + test-tls13-ccs.py)
+  audit_phase_d_plan_docs_in_sync (跨文件 plan-doc pin)
+
+累计:
+  T186 (7) + T214 (10) = 17 tests in transcript_mutation.rs
+
+验证:
+  cargo test -p hitls-integration-tests --test transcript_mutation --all-features  17/0
+  cargo test -p hitls-integration-tests --all-features                             380+/0 零回归
+  cargo fmt + cargo clippy --workspace --all-features -D warnings + typos          clean
+
+作用域:
+  1 个新 plan doc (~140 行)
+  同测试文件 +~200 行
+  0 product code
+  1 个 TODO(#42-phase-d)
+
+沿用 + 新方法学:
+  沿用 T186 rogue-server framework + ShBuilder (扩展 record-layer raw byte mutation)
+  + T196 same-file 累计追加
+  + T204 audit-first multi-file 系列 + audit_plan_docs_in_sync 跨文件 pin
+  + T201/T212 跨 phase cross-coverage (T88 CCS DEV_LOG 锁)
+  + T206 unsupported-feature gap pin
+  + T209 Phase F 模板复用思路
+
+  新「Plan §X feature-gate 提议可被旧 codified pattern 取代」 (codified):
+    Plan §5.1 「test-hooks feature gate」假设 不需要
+    T186 rogue-server 已证明 public API 覆盖等价 attack surface
+    Phase 起手时复审 plan 提议看 prior codified pattern 是否已涵盖
+    避免重复 invent 增加 product 改动
+
+  新「record-layer raw byte mutation = SH-fluent 之外 attack vector」:
+    ShBuilder fluent 突变 SH 字段
+    record header (offsets 0-4: type/version/length) 必须 raw byte patch
+    文档化偏移配方比 fluent extension 更通用
+    T214 5 个 record-byte test 都用同 offset 配方
+
+  新「verbatim-C-typo 累积 typos.toml 已饱和」:
+    RECODETYPE 是新 typo 但未触发 typos warning (按 word boundary 检, 不在常规字典)
+    验证 T212 codified vocabulary 自洽
+    无需为每个 verbatim C symbol 累加 allowlist
+
+Recorded as DEV_LOG Phase T214.
