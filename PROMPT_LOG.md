@@ -16415,3 +16415,69 @@ Pitfalls (codified):
     后续 closeout pin 每一层独立通过
 
 Recorded as DEV_LOG Phase T228.
+
+### T112 — Phase B-1 plan + 8 audit pins for #44/#45 strict-version + aki-match (Phase B 5 sub-PR 第 1 弹)
+
+> 按 B 走
+
+开 Phase B 系列, 沿用 Phase C/G/H 的 audit-pin 方法学。
+
+发现:
+  5 个 Phase B GitHub issues (#43/#44/#45/#47/#57) 全部 CLOSED
+  49 个 deeper TODO 锚点跨 8+ 文件 (代表 issue 关闭时 deliberately deferred 的真实实现 gap)
+  Phase B 选 audit-pin (lock 当前 lenient/unsupported 行为) + 把真实 crypto 实现 (RSA-PSS PKCS#8 codec / SM2 / Brainpool / P-224 / conf.cnf) 留给 Phase I
+
+改动:
+  新建 docs/issue-42-phase-b-plan.md (~150 行, 49-anchor inventory + 5-sub-PR split)
+  新建 crates/hitls-pki/tests/migrated_phase_b_audit_pins.rs (~210 行, 8 audit pins)
+
+8 audit pins:
+  t112_csr_rfc2986_version_codepoint_pin (RFC 2986 §4.1 version=0=v1)
+  t112_csr_strict_version_anchor_preserved_in_source (#44-strict-version + RFC 2986 reference)
+  t112_csr_lenient_behaviour_documented_via_expect_pattern (parser-stores-corrupted-version-verbatim 断言保留)
+  t112_crl_rfc5280_version_codepoint_pin (RFC 5280 §5.1.2.1 CRL v2 version=1)
+  t112_crl_strict_version_anchor_preserved_in_source (#45-strict-version + RFC 5280 reference)
+  t112_crl_lenient_version_behaviour_documented (Rust parser tolerates invalid version 断言保留)
+  t112_crl_aki_match_anchor_preserved_in_source (#45-aki-match + AKI/AuthorityKeyIdentifier reference)
+  t112_audit_phase_b_plan_docs_in_sync (12-anchor plan-doc cross-coverage)
+
+关键设计:
+  纯 audit-pin (0 product code, 0 新 TODO)
+  每 pin 含 4 元组断言: (a) RFC §号字面量 + (b) codepoint/version byte + (c) 现有 TODO 锚点保留 + (d) plan-doc 权威
+
+49-anchor inventory tally:
+  #44-strict-version = 3
+  #45-strict-version = 3
+  #45-aki-match = 2
+  #47-pkey-* = 10 (T233 端口)
+  #47-genrsa/rsa/conf/sm/keymgmt = 17 (T234 端口)
+  #46/#58/#61 = 14 (T235 端口)
+  = 49 total
+
+累计:
+  T112 (8) = 8 tests in migrated_phase_b_audit_pins.rs
+
+验证:
+  cargo test -p hitls-pki --test migrated_phase_b_audit_pins --all-features  8/0
+  cargo test -p hitls-pki --all-features                                     1640/0 零回归
+  cargo test --workspace --all-features                                      381/1 ignored 零回归
+  cargo fmt + cargo clippy --workspace --all-features -D warnings + typos    clean
+
+Pitfalls (codified):
+  clippy::doc_lazy_continuation 拒绝 '1.' 续行 (read as numbered list item) - 同 T217/T220/T227/T228; 修复用 'equals 1' inline 短语
+  plan-doc 锚点必须避开 markdown 换行 - '49 deeper TODO anchors' 失败 (实际 'TODO' 与 'anchors' 间有 \n), 缩短为 '49 deeper TODO' 跨换行
+
+作用域:
+  2 新文件
+  0 product code
+  0 既有测试改动
+
+沿用方法学:
+  T220 「helper-level mutation pin = full E2E driver alternative」 泛化为 「audit-pin sample = full implementation alternative」 for Phase B
+
+新方法学:
+  「Phase B audit pin = (RFC section + codepoint byte + TODO marker preservation + plan-doc cross-coverage) 4-tuple」 (codified):
+    每个 Phase B 锚点获 4 条 cross-coverage 断言
+    future Phase I PR 有明确 grep + 行为测试 target
+
+Recorded as DEV_LOG Phase T112.
