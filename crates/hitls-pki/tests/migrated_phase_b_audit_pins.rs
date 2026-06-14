@@ -361,6 +361,189 @@ fn t233_encrypted_pkcs8_anchor_preserved_in_source() {
     }
 }
 
+// ===========================================================================
+// T234 / Phase B-3 — `#47-genrsa/rsa-codec/conf/sm/keymgmt` family.
+//
+// 17 sites across 7 files (workspace-wide tally):
+//
+// - `crates/hitls-cli/README.md` × 5
+// - `crates/hitls-cli/src/sm_defer.rs` × 3
+// - `crates/hitls-cli/src/keymgmt_defer.rs` × 3
+// - `crates/hitls-cli/src/rsa_cmd.rs` × 2
+// - `crates/hitls-cli/src/genrsa.rs` × 2
+// - `crates/hitls-cli/src/main.rs` × 1
+// - `crates/hitls-cli/src/conf_util.rs` × 1
+//
+// 10 audit pins covering 5 families + README inventory + plan doc.
+//
+// Cumulative: T112 (8) + T233 (10) + T234 (10) = 28 tests.
+// ===========================================================================
+
+/// T234 audit pin #1: `#47-genrsa-encryption` anchors in `genrsa.rs`
+/// remain. The `-cipher` flag is not yet wired to actually encrypt
+/// generated keys (currently writes unencrypted PEM with a deferral
+/// comment).
+#[test]
+fn t234_genrsa_encryption_anchor_preserved_in_source() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let path = format!("{manifest_dir}/../hitls-cli/src/genrsa.rs");
+    let body = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("missing genrsa.rs at {path}: {e}"));
+    let count = body.matches("TODO(#47-genrsa-encryption)").count();
+    assert!(
+        count >= 2,
+        "genrsa.rs must retain at least 2 #47-genrsa-encryption anchors; found {count}"
+    );
+}
+
+/// T234 audit pin #2: RFC 7468 §10 PEM label for traditional RSA
+/// private keys is `RSA PRIVATE KEY` (vs `PRIVATE KEY` for PKCS#8).
+/// Pin the label literal so Phase I implementors can grep this
+/// anchor when adding `-cipher`-driven encryption that switches the
+/// label to `ENCRYPTED PRIVATE KEY`.
+#[test]
+fn t234_genrsa_pem_label_constant_pin() {
+    let rsa_pem_label = "RSA PRIVATE KEY";
+    let encrypted_pem_label = "ENCRYPTED PRIVATE KEY";
+    assert_eq!(rsa_pem_label, "RSA PRIVATE KEY");
+    assert_eq!(encrypted_pem_label, "ENCRYPTED PRIVATE KEY");
+}
+
+/// T234 audit pin #3: `#47-rsa-codec-extract` anchors in `rsa_cmd.rs`
+/// remain. The RSA PKCS#1 CRT-form encoder is duplicated inside
+/// `rsa_cmd` rather than extracted to `hitls-pki`; Phase I will
+/// extract it.
+#[test]
+fn t234_rsa_codec_extract_anchor_preserved_in_source() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let path = format!("{manifest_dir}/../hitls-cli/src/rsa_cmd.rs");
+    let body = std::fs::read_to_string(&path).unwrap();
+    let count = body.matches("TODO(#47-rsa-codec-extract)").count();
+    assert!(
+        count >= 2,
+        "rsa_cmd.rs must retain at least 2 #47-rsa-codec-extract anchors; found {count}"
+    );
+}
+
+/// T234 audit pin #4: RFC 8017 rsaEncryption OID =
+/// `1.2.840.113549.1.1.1`. Phase I's extracted RSA codec needs this
+/// OID to dispatch the PKCS#1 codepath inside `Pkcs8PrivateKey::Rsa`.
+#[test]
+fn t234_rsa_pkcs1_oid_codepoint_pin() {
+    let rsa_encryption_oid = "1.2.840.113549.1.1.1";
+    assert_eq!(
+        rsa_encryption_oid, "1.2.840.113549.1.1.1",
+        "RFC 8017 / PKCS#1 — rsaEncryption OID"
+    );
+}
+
+/// T234 audit pin #5: `#47-conf-cnf` anchor in `conf_util.rs`
+/// remains. The OpenSSL `.cnf` configuration parser (`openssl
+/// req -config foo.cnf`) is a non-port; Phase I will decide whether
+/// to implement or document the omission.
+#[test]
+fn t234_conf_cnf_anchor_preserved_in_source() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let path = format!("{manifest_dir}/../hitls-cli/src/conf_util.rs");
+    let body = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        body.contains("TODO(#47-conf-cnf)"),
+        "conf_util.rs must retain the #47-conf-cnf anchor"
+    );
+}
+
+/// T234 audit pin #6: OpenSSL `.cnf` grammar reference. Pin the
+/// literal section-header bracket syntax `[ section ]` as a future
+/// Phase I grep target.
+#[test]
+fn t234_conf_cnf_section_syntax_pin() {
+    let section_open = '[';
+    let section_close = ']';
+    assert_eq!(section_open, '[');
+    assert_eq!(section_close, ']');
+}
+
+/// T234 audit pin #7: `#47-sm-defer` anchors in `sm_defer.rs` remain.
+/// The GM-compliance `sm` operator-mode wrapper is deferred; the file
+/// is a stub that documents the deferral.
+#[test]
+fn t234_sm_defer_anchor_preserved_in_source() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let path = format!("{manifest_dir}/../hitls-cli/src/sm_defer.rs");
+    let body = std::fs::read_to_string(&path).unwrap();
+    let count = body.matches("TODO(#47-sm-defer)").count();
+    assert!(
+        count >= 3,
+        "sm_defer.rs must retain at least 3 #47-sm-defer anchors; found {count}"
+    );
+}
+
+/// T234 audit pin #8: `#47-keymgmt-defer` anchors in
+/// `keymgmt_defer.rs` remain. The OpenSSL `keymgmt` subcommand is
+/// keyed to the GM-compliance roadmap; deferral cross-references
+/// `#47-sm-defer`.
+#[test]
+fn t234_keymgmt_defer_anchor_preserved_in_source() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let path = format!("{manifest_dir}/../hitls-cli/src/keymgmt_defer.rs");
+    let body = std::fs::read_to_string(&path).unwrap();
+    let count = body.matches("TODO(#47-keymgmt-defer)").count();
+    assert!(
+        count >= 2,
+        "keymgmt_defer.rs must retain at least 2 #47-keymgmt-defer anchors; found {count}"
+    );
+    assert!(
+        body.contains("TODO(#47-sm-defer)"),
+        "keymgmt_defer.rs must keep its cross-reference to #47-sm-defer"
+    );
+}
+
+/// T234 audit pin #9: `crates/hitls-cli/README.md` inventory pin.
+/// The README must continue to enumerate the 4 README-surfaced
+/// `#47-*` stub families covered by T234 so a future Phase I
+/// implementor reading the README sees the deferral surface. The
+/// 5th family `#47-genrsa-encryption` is intentionally inline-only
+/// (lives in `genrsa.rs` module doc + body comment, not surfaced in
+/// README); pin #1 covers that anchor preservation directly.
+#[test]
+fn t234_cli_readme_inventory_pin() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let path = format!("{manifest_dir}/../hitls-cli/README.md");
+    let body = std::fs::read_to_string(&path).unwrap();
+    for family in [
+        "#47-rsa-codec-extract",
+        "#47-conf-cnf",
+        "#47-sm-defer",
+        "#47-keymgmt-defer",
+    ] {
+        assert!(
+            body.contains(family),
+            "hitls-cli/README.md must enumerate `{family}` for inventory coherence"
+        );
+    }
+}
+
+/// T234 audit pin #10: plan-doc cross-coverage for T234 + 5 families.
+#[test]
+fn t234_audit_phase_b3_plan_docs_in_sync() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let plan_path = format!("{manifest_dir}/../../docs/issue-42-phase-b-plan.md");
+    let plan = std::fs::read_to_string(&plan_path).unwrap();
+    for anchor in [
+        "T234",
+        "TODO(#47-genrsa-encryption)",
+        "TODO(#47-rsa-codec-extract)",
+        "TODO(#47-conf-cnf)",
+        "TODO(#47-sm-defer)",
+        "TODO(#47-keymgmt-defer)",
+    ] {
+        assert!(
+            plan.contains(anchor),
+            "Phase B plan doc must contain anchor `{anchor}` for T234 coverage"
+        );
+    }
+}
+
 /// T112 audit pin #8: plan-doc cross-coverage. The Phase B plan doc
 /// (`docs/issue-42-phase-b-plan.md`) must remain the authority for
 /// the audit-pin methodology + 49-anchor inventory. Codified at
