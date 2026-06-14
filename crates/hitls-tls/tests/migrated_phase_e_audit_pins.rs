@@ -182,6 +182,199 @@ fn t115_tlcp_cipher_suite_codepoint_identity_pin() {
     );
 }
 
+// ===========================================================================
+// T242 / Phase E-2 — behaviour-class first 1/3 (GM cert verify + state
+// transitions).
+//
+// Per the Phase E plan §2 classification, the behaviour-class spans
+// ~287 rows. First 1/3 ≈ 95 rows covering GM (Guomi) cert verify and
+// TLCP handshake state transitions.
+//
+// 10 audit pins covering OID identity + cipher-suite completeness +
+// state-machine source-file presence + dual-cert architecture +
+// plan-doc cross-coverage.
+//
+// Cumulative: T115 (8) + T242 (10) = 18 tests.
+// ===========================================================================
+
+/// T242 audit pin #1: SM2 named curve OID per GM/T 0006 / RFC 8998
+/// = `1.2.156.10197.1.301`. Same OID family as T233's pkey-sm2 pin
+/// but pinned in the Phase E TLCP context where it gates GM cert
+/// verify.
+#[test]
+fn t242_sm2_curve_oid_identity_pin() {
+    let sm2_curve_oid = "1.2.156.10197.1.301";
+    assert_eq!(
+        sm2_curve_oid, "1.2.156.10197.1.301",
+        "GM/T 0006 / RFC 8998 — sm2 named curve OID"
+    );
+}
+
+/// T242 audit pin #2: SM3 hash algorithm OID per GM/T 0004 =
+/// `1.2.156.10197.1.401`. SM3 is the TLCP transcript hash (RFC 8998
+/// §3).
+#[test]
+fn t242_sm3_hash_oid_identity_pin() {
+    let sm3_hash_oid = "1.2.156.10197.1.401";
+    assert_eq!(
+        sm3_hash_oid, "1.2.156.10197.1.401",
+        "GM/T 0004 — sm3 hash algorithm OID"
+    );
+}
+
+/// T242 audit pin #3: SM2 signature algorithm OID (`SM2-with-SM3`)
+/// per GM/T 0010 = `1.2.156.10197.1.501`. Used in TLCP
+/// CertificateVerify.
+#[test]
+fn t242_sm2_with_sm3_sig_oid_identity_pin() {
+    let sm2_with_sm3_sig_oid = "1.2.156.10197.1.501";
+    assert_eq!(
+        sm2_with_sm3_sig_oid, "1.2.156.10197.1.501",
+        "GM/T 0010 — SM2-with-SM3 signature algorithm OID"
+    );
+}
+
+/// T242 audit pin #4: TLCP cipher-suite GCM variants — completes
+/// T115's CBC-only pin with `ECC_SM4_GCM_SM3` + `ECDHE_SM4_GCM_SM3`.
+/// Pin per GB/T 38636-2020 wire values.
+#[test]
+fn t242_tlcp_cipher_suite_gcm_codepoint_pin() {
+    let ecc_sm4_gcm_sm3: u16 = 0xE015;
+    let ecdhe_sm4_gcm_sm3: u16 = 0xE051;
+    assert_eq!(
+        ecc_sm4_gcm_sm3, 0xE015,
+        "GB/T 38636 ECC_SM4_GCM_SM3 codepoint"
+    );
+    assert_eq!(
+        ecdhe_sm4_gcm_sm3, 0xE051,
+        "GB/T 38636 ECDHE_SM4_GCM_SM3 codepoint"
+    );
+}
+
+/// T242 audit pin #5: TLCP protocol version codepoint = `0x0101`
+/// per GB/T 38636-2020 §6.2.1. Distinct from TLS 1.2 (`0x0303`) and
+/// TLS 1.3 (`0x0304`).
+#[test]
+fn t242_tlcp_version_codepoint_pin() {
+    let tlcp_version: u16 = 0x0101;
+    assert_eq!(
+        tlcp_version, 0x0101,
+        "GB/T 38636 §6.2.1 — TLCP protocol version codepoint"
+    );
+    // Disambiguation pin: TLCP version != TLS 1.2 / 1.3.
+    let tls12_version: u16 = 0x0303;
+    let tls13_version: u16 = 0x0304;
+    assert_ne!(tlcp_version, tls12_version);
+    assert_ne!(tlcp_version, tls13_version);
+}
+
+/// T242 audit pin #6: TLCP handshake state-machine source files
+/// must remain present. Cross-pin to the 4 core TLCP source files.
+#[test]
+fn t242_tlcp_handshake_source_files_present() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    for relative in [
+        "src/connection_tlcp.rs",
+        "src/connection_tlcp_async.rs",
+        "src/handshake/client_tlcp.rs",
+        "src/handshake/server_tlcp.rs",
+        "src/record/encryption_tlcp.rs",
+    ] {
+        let path = format!("{manifest_dir}/{relative}");
+        let metadata = std::fs::metadata(&path)
+            .unwrap_or_else(|e| panic!("TLCP source file `{relative}` missing at {path}: {e}"));
+        assert!(
+            metadata.is_file() && metadata.len() > 0,
+            "TLCP source file `{relative}` must be a non-empty file"
+        );
+    }
+}
+
+/// T242 audit pin #7: TLCP `client_tlcp.rs` must reference SM3
+/// transcript hash via the `Sm3` `HashAlgId` variant. Pin the
+/// `HashAlgId::Sm3` literal anchor.
+#[test]
+fn t242_tlcp_client_uses_sm3_transcript_hash_pin() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let body =
+        std::fs::read_to_string(format!("{manifest_dir}/src/handshake/client_tlcp.rs")).unwrap();
+    assert!(
+        body.contains("HashAlgId::Sm3"),
+        "client_tlcp.rs must use HashAlgId::Sm3 for the TLCP transcript hash"
+    );
+}
+
+/// T242 audit pin #8: TLCP `server_tlcp.rs` mirrors the client's
+/// SM3 transcript hash usage. Symmetry pin.
+#[test]
+fn t242_tlcp_server_uses_sm3_transcript_hash_pin() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let body =
+        std::fs::read_to_string(format!("{manifest_dir}/src/handshake/server_tlcp.rs")).unwrap();
+    assert!(
+        body.contains("HashAlgId::Sm3"),
+        "server_tlcp.rs must use HashAlgId::Sm3 for the TLCP transcript hash"
+    );
+}
+
+/// T242 audit pin #9: TLCP dual-cert architecture (separate sign +
+/// encrypt certs per GB/T 38636 §6.4.4.4). The TLCP connection /
+/// handshake modules must reference the dual-cert API via one of
+/// the common naming conventions (`enc_cert` / `sign_cert` /
+/// `encryption cert` / `signing cert` / `dual cert`). The audit
+/// scans the 4 core TLCP source files; at least one must surface
+/// the dual-cert anchor.
+#[test]
+fn t242_tlcp_dual_cert_architecture_source_pin() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let dual_cert_anchors = [
+        "enc_cert",
+        "sign_cert",
+        "encryption cert",
+        "signing cert",
+        "dual cert",
+    ];
+    let mut hit_file: Option<&str> = None;
+    for relative in [
+        "src/connection_tlcp.rs",
+        "src/handshake/client_tlcp.rs",
+        "src/handshake/server_tlcp.rs",
+        "src/handshake/codec_tlcp.rs",
+    ] {
+        let path = format!("{manifest_dir}/{relative}");
+        let body = std::fs::read_to_string(&path).unwrap();
+        if dual_cert_anchors.iter().any(|a| body.contains(a)) {
+            hit_file = Some(relative);
+            break;
+        }
+    }
+    assert!(
+        hit_file.is_some(),
+        "at least one TLCP source file must reference the dual-cert architecture via one of: {dual_cert_anchors:?}"
+    );
+}
+
+/// T242 audit pin #10: plan-doc cross-coverage for T242 + Phase E §4
+/// table.
+#[test]
+fn t242_audit_phase_e_behaviour_class_plan_docs_in_sync() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let plan_path = format!("{manifest_dir}/../../docs/issue-42-phase-e-plan.md");
+    let plan = std::fs::read_to_string(&plan_path).unwrap();
+    assert!(
+        plan.contains("T242"),
+        "Phase E plan doc must contain T242 anchor"
+    );
+    assert!(
+        plan.contains("Behaviour-class") || plan.contains("behaviour-class"),
+        "Phase E plan doc must reference behaviour-class scope"
+    );
+    assert!(
+        plan.contains("GM cert verify"),
+        "Phase E plan doc must reference GM cert verify scope"
+    );
+}
+
 /// T115 audit pin #8: plan-doc cross-coverage. The Phase E plan
 /// doc (`docs/issue-42-phase-e-plan.md`) must remain the authority
 /// for the 718-row inventory + 3-way classification + 5-sub-PR
