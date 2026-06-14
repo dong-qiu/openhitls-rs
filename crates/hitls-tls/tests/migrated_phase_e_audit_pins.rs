@@ -789,6 +789,136 @@ fn t244_audit_phase_e_api_form_plan_docs_in_sync() {
     );
 }
 
+// ===========================================================================
+// T245 / Phase E closeout — Complete C→Rust test migration parity milestone.
+//
+// Sibling to T200 / T208 / T213 / T218 / T223 / T228 / T236 / T249
+// closeout phases. T245 is the **final milestone** for the
+// c-test-migration-plan: it upgrades T249's "Full parity for A-D/F +
+// Phase E pending" to **"Complete parity for all 6 Phase A-F"**.
+//
+// Cumulative: T115 (8) + T242 (10) + T243 (10) + T244 (10) + T245 (5)
+// = 43 tests. issue-42 series total: ~1 153 audit-pin tests.
+// ===========================================================================
+
+/// T245 closeout pin #1: this-file cumulative count is 43 tests via
+/// fn-prefix matching (T223-codified avoidance of `#[test]` literal
+/// self-count pitfall).
+#[test]
+fn t245_phase_e_cumulative_count_pin() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let body = std::fs::read_to_string(format!(
+        "{manifest_dir}/tests/migrated_phase_e_audit_pins.rs"
+    ))
+    .unwrap();
+    let test_fn_count = body
+        .lines()
+        .filter(|l| {
+            l.starts_with("fn t115_")
+                || l.starts_with("fn t242_")
+                || l.starts_with("fn t243_")
+                || l.starts_with("fn t244_")
+                || l.starts_with("fn t245_")
+        })
+        .count();
+    assert_eq!(
+        test_fn_count, 43,
+        "Phase E + T245 closeout cumulative count: 8 (T115) + 10 (T242) + \
+         10 (T243) + 10 (T244) + 5 (T245) = 43 in this file"
+    );
+}
+
+/// T245 closeout pin #2: §8 methodology lineage table in the Phase E
+/// plan doc spans 5 codified Phase E anchors.
+#[test]
+fn t245_phase_e_methodology_lineage_pinned() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let plan_path = format!("{manifest_dir}/../../docs/issue-42-phase-e-plan.md");
+    let plan = std::fs::read_to_string(&plan_path).unwrap();
+    assert!(plan.contains("Methodology lineage"));
+    for anchor in ["T115", "T242", "T243", "T244", "T245"] {
+        assert!(
+            plan.contains(anchor),
+            "methodology lineage must reference codified anchor `{anchor}`"
+        );
+    }
+}
+
+/// T245 closeout pin #3: all 5 Phase E sub-PRs marked closed in the
+/// plan doc §4 table.
+#[test]
+fn t245_phase_e_plan_doc_all_subprs_closed() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let plan_path = format!("{manifest_dir}/../../docs/issue-42-phase-e-plan.md");
+    let plan = std::fs::read_to_string(&plan_path).unwrap();
+    for anchor in ["✅ T115", "✅ T242", "✅ T243", "✅ T244", "✅ T245"] {
+        assert!(
+            plan.contains(anchor),
+            "plan doc must mark `{anchor}` as closed"
+        );
+    }
+}
+
+/// T245 closeout pin #4: **Complete C→Rust test migration parity
+/// milestone** for all 6 Phase A-F. Cross-doc consistency audit
+/// asserting the milestone phrase appears in all 3 upstream docs:
+/// Phase E plan §9 + c-test-migration-plan §12.7 + CLAUDE.md
+/// status line.
+#[test]
+fn t245_complete_c_to_rust_test_migration_parity_milestone_pin() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let phase_e_plan = std::fs::read_to_string(format!(
+        "{manifest_dir}/../../docs/issue-42-phase-e-plan.md"
+    ))
+    .unwrap();
+    let migration_plan = std::fs::read_to_string(format!(
+        "{manifest_dir}/../../docs/c-test-migration-plan.md"
+    ))
+    .unwrap();
+    let claude_md = std::fs::read_to_string(format!("{manifest_dir}/../../CLAUDE.md")).unwrap();
+    let milestone_phrase = "Complete C→Rust test migration parity";
+    assert!(
+        phase_e_plan.contains(milestone_phrase),
+        "Phase E plan doc §9 must surface the Complete parity milestone"
+    );
+    assert!(
+        migration_plan.contains(milestone_phrase),
+        "c-test-migration-plan must surface the Complete parity milestone in §12.7"
+    );
+    assert!(
+        claude_md.contains(milestone_phrase),
+        "CLAUDE.md status line must surface the Complete parity milestone"
+    );
+}
+
+/// T245 closeout pin #5: `docs/tlcp-test-mapping.md` emitted per
+/// Phase E plan §7 acceptance criterion. The doc must contain the
+/// 5 canonical Rust test files referenced from §5
+/// "Cross-phase coverage matrix".
+#[test]
+fn t245_tlcp_test_mapping_doc_emitted() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let path = format!("{manifest_dir}/../../docs/tlcp-test-mapping.md");
+    let body = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("tlcp-test-mapping.md missing at {path}: {e}"));
+    for anchor in [
+        "tlcp.rs",
+        "tlcp_consistency.rs",
+        "migrated_interface_tlcp_audit.rs",
+        "migrated_phase_e_audit_pins.rs",
+        "migrated_phase_f_audit_pins.rs",
+    ] {
+        assert!(
+            body.contains(anchor),
+            "tlcp-test-mapping.md must reference `{anchor}` in the cross-phase coverage matrix"
+        );
+    }
+    // The doc must also surface the 3-class breakdown + the milestone
+    // phrase.
+    assert!(body.contains("3-class breakdown"));
+    assert!(body.contains("Complete C→Rust test migration parity"));
+}
+
 /// T115 audit pin #8: plan-doc cross-coverage. The Phase E plan
 /// doc (`docs/issue-42-phase-e-plan.md`) must remain the authority
 /// for the 718-row inventory + 3-way classification + 5-sub-PR

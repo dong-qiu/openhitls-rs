@@ -17250,3 +17250,80 @@ Recorded as DEV_LOG Phase T243.
     用于审计具体 API 存在性时
 
 Recorded as DEV_LOG Phase T244.
+
+### T245 — Phase E closeout: T115+T242-T244 系列 rollup + Complete C→Rust test migration parity milestone for all 6 Phase A-F (Phase E 5 sub-PR 终弹 + issue-42 系列 final milestone)
+
+> Phase F 完成后完成 Phase E
+
+Closes T115+T242-T244 Phase E series; ALSO closes 整 issue-42 系列 + c-test-migration-plan Phase A-F 弧线。
+
+改动:
+  crates/hitls-tls/tests/migrated_phase_e_audit_pins.rs 追加 T245 banner + 5 closeout pin tests
+    累计 43 tests in 1 file
+  docs/issue-42-phase-e-plan.md
+    §4 表格 5/5 关闭
+    §7 验收项全勾
+    新 §8 series rollup (5-anchor 方法学血脉表 T115→T245 + 43-tests)
+    新 §9 Complete C→Rust test migration parity milestone for ALL 6 Phase A-F (Phase A 800 + B 43 + C 46 + D/G/H 133 + E 43 + F 88 = 1153+ audit-pin tests)
+  新建 docs/tlcp-test-mapping.md (~120 行)
+    3-class breakdown
+    behaviour-class GM cert verify + handshake variants 映射
+    API-form HITLS_CFG_Set* 家族映射
+    exempt 类 rationale
+    5-test-file cross-phase coverage matrix
+  docs/c-test-migration-plan.md §12.7 row E closed at T115+T242-T245 + Complete milestone phrase
+  CLAUDE.md status line bumped (T115 reserved 删除 + Phase E closed + Complete milestone + 'upgraded from T249 Full' 注释保留)
+
+5 closeout pin tests:
+  t245_phase_e_cumulative_count_pin (43; fn-prefix 计数避开 #[test] 自计数)
+  t245_phase_e_methodology_lineage_pinned (plan §8 5 个锚点 T115/T242/T243/T244/T245)
+  t245_phase_e_plan_doc_all_subprs_closed (§4 ✅ T115-T245 + 5/5 closed)
+  t245_complete_c_to_rust_test_migration_parity_milestone_pin (cross-doc 一致性: Complete phrase 必现于 Phase E plan §9 + c-test-migration-plan §12.7 + CLAUDE.md 三处)
+  t245_tlcp_test_mapping_doc_emitted (5 个 test file 引用 + '3-class breakdown' + 'Complete' phrase)
+
+issue-42 系列总:
+  Phase A (800) + B (43) + C (46) + D/G/H (133) + E (43) + F (88) = 1153+ audit-pin tests across ALL 6 Phase A-F
+
+关键设计:
+  tlcp-test-mapping.md = Phase E plan §7 验收 canonical artefact
+    兄弟于 T236 Phase B Phase I roadmap doc emission + T223/T228 layered annotation
+    提供 C SDV facet ↔ Rust pin 交叉引用表
+  layered annotation 保留 T249 'Full' phrase 在 CLAUDE.md 与新 'Complete' upgrade phrase 并存
+    两个 pin (T249 + T245) 独立通过
+
+累计:
+  T115 (8) + T242 (10) + T243 (10) + T244 (10) + T245 (5) = 43 tests
+
+验证:
+  cargo test -p hitls-tls --test migrated_phase_e_audit_pins --all-features  43/0
+  cargo test -p hitls-tls --all-features                                     1715/0 零回归 (was 1710, +5)
+  cargo fmt + cargo clippy --workspace --all-features -D warnings + typos    clean
+
+Pitfall (codified):
+  T249 milestone audit pin assert CLAUDE.md 含 'Full C→Rust test migration parity'
+  T245 closeout 原 REPLACE 该 phrase 为 'Complete C→Rust test migration parity', 破坏 T249 pin
+  修复: T228 layered annotation 模式 (保留两 phrase: 'Complete' + 'upgraded from T249 Full')
+  确认 cross-doc milestone-phrase 模式 (T249+T245) 在 follow-up phase upgrade 时需 layered preservation
+
+作用域:
+  同测试文件 +~140 行 (5 pins + §8 banner)
+  Phase E plan doc §1/§4/§7/§8/§9 (~95 行)
+  新 tlcp-test-mapping.md (~120 行)
+  c-test-migration-plan §12.7 row E (扩展)
+  CLAUDE.md status line
+  0 product code
+  0 新 TODO
+
+沿用方法学:
+  T223/T228/T236/T249 closeout 标准配方
+  T249 cross-doc milestone-phrase + T236 standalone artefact emission
+
+新方法学:
+  「layered milestone upgrade preservation」 (codified):
+    follow-up closeout 升级 milestone phrase 时 (T249 Full → T245 Complete)
+    新 phrase 必须 ADDED 于保留旧 phrase 旁
+    含 'upgraded from' 注释连接两者
+    两 closeout pin 独立通过, 各 literal phrase 仍可 catch
+    扩展 T228 H-RESOLVED layered annotation 模式到 milestone-phrase upgrades
+
+Recorded as DEV_LOG Phase T245.
