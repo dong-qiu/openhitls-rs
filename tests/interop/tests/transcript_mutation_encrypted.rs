@@ -872,7 +872,7 @@ fn t222_encrypted_extensions_handshake_type_byte_identity_pin() {
 }
 
 /// Mirrors C `EncryptedExtensions baseline`: an EE with an empty
-/// extensions list is `0x08 || u24(2) || u16(0)` (8 bytes total).
+/// extensions list is `0x08 || u24(2) || u16(0)` (6 bytes total).
 /// Pin the format math and the AEAD round-trip.
 #[test]
 fn t222_encrypted_extensions_empty_body_round_trip() {
