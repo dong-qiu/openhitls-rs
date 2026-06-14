@@ -16083,3 +16083,69 @@ Closes T219-T222 Phase G series.
     避免保留无注释 TODO 造成 'unresolved' 误读
 
 Recorded as DEV_LOG Phase T223.
+
+### T224 — Phase H-1 plan + encrypted-handshake TCP rogue server framework + 3 baseline E2E (Phase H 5 sub-PR 第 1 弹)
+
+> 按 A + C 走
+
+Opens Phase H series closing the helper-level → full-driver arc Phase G plan §8 left.
+
+改动:
+  新建 docs/issue-42-phase-h-plan.md
+    ~150 行
+    5-sub-PR split T224-T228
+  新建 tests/interop/tests/transcript_mutation_encrypted_e2e.rs
+    ~340 行
+    framework + 3 tests
+
+框架:
+  TCP plumbing (T186 模式)
+  ClientHelloInfo 捕获原始 CH handshake bytes 供 TranscriptHash 输入
+  make_valid_sh 使用 caller 提供的 kx (caller 保留 kx 调 compute_shared_secret, 修复 T186 ShBuilder kx-drop)
+  derive_server_handshake_keys + record_nonce + seal_encrypted_record (T219 私有副本的姊妹拷贝)
+  build_empty_encrypted_extensions (RFC 8446 §4.3.1: 0x08 || u24(2) || u16(0) 共 6 字节)
+  drive_client_against_encrypted_rogue_server 回调驱动:
+    收 CH → 生成 kx → 发 SH → 算 ECDH + TranscriptHash CH||SH → derive server handshake traffic keys → 调用 emit_post_sh 回调
+    callback 拿到 PostShCtx (suite + keys + seq + transcript_hash) 可写 0+ 加密记录
+
+3 baseline tests:
+  h224_baseline_sh_only_client_errors_post_sh — rogue 只发 SH 然后关 → client 必 error
+  h224_baseline_encrypted_ee_decrypts_then_client_aborts_at_cert — KEYSTONE: rogue 发 SH + 有效加密 EE; real client 必先成功解密 EE 再 error expect Cert (证明 AEAD 链路 end-to-end 通)
+  h224_audit_phase_h_plan_docs_in_sync — cross-file plan-doc pin
+
+关键设计:
+  0 product code 改动
+  组合 9 个 hitls-tls 公共 API:
+    TranscriptHash + KeyExchange{generate,public_key_bytes,compute_shared_secret}
+    extensions_codec{build_supported_versions_sh,build_key_share_sh,parse_key_share_ch}
+    codec{decode_client_hello,encode_server_hello,ServerHello}
+    KeySchedule + TrafficKeys + AesGcmAead
+
+API pitfalls (codified):
+  TlsConfig::builder().role().min_version().max_version().verify_peer(false).build() — 非 new() constructor
+  TlsVersion::Tls13 — 非 TLS_1_3
+  TlsClientConnection::new(stream, config) — stream 在前, 返回 conn 直接 (非 Result)
+  TranscriptHash::new 要 hitls_tls::crypt::HashAlgId — 非 hitls_types::HashAlgId (同名兄弟类型)
+  HashOutput derefs to [u8] — 直接传 slice, 非 .as_bytes()
+
+验证:
+  cargo test -p hitls-integration-tests --test transcript_mutation_encrypted_e2e --all-features  3/0
+  cargo test -p hitls-integration-tests --all-features                                           490/0 (was 487, +3)
+  cargo fmt + cargo clippy --workspace --all-features -D warnings + typos                        clean
+
+作用域:
+  2 新文件
+  0 product code
+  0 既有测试改动
+
+新方法学:
+  「TCP rogue server kx must be retained for compute_shared_secret」 (codified):
+    T186's ShBuilder::from_client_hello dropped its generated kx
+    SH-only mutations 没问题
+    但 encrypted path 必须保留 kx 用于 ECDH
+    Phase H 让 caller 传 kx 进来
+  「TranscriptHash input is handshake-message bytes (not record bytes) per RFC 8446 §7.1」 (codified):
+    feed ch_handshake_bytes = record[5..] 然后 sh handshake bytes
+    保证 rogue server 的 key schedule 与 real client 的一致
+
+Recorded as DEV_LOG Phase T224.
