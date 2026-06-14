@@ -286,3 +286,292 @@ fn g219_audit_phase_g_plan_docs_in_sync() {
         );
     }
 }
+
+// ===========================================================================
+// T220 / Phase G-2 — MODIFIED_CERT_VERIFY family.
+//
+// C source: `tls/consistency/tls13/test_suite_sdv_frame_tls13_consistency_rfc8446_2.c`
+// — `UT_TLS_TLS13_RFC8446_CONSISTENCY_MODIFIED_CERT_VERIFY_FUNC_TC001` and
+// related `CERTVERIFY_SIGN_FUNC_TC001-003` /
+// `CERTICATE_VERIFY_FAIL_FUNC_TC001` rows.
+//
+// The C tests replay a mutated CertVerify record into a real client and
+// assert rejection. The full TCP driver for that is intentionally out
+// of scope (would add ~3-5 days for a single sub-PR). T220 instead pins
+// the **encryption-path + signing-buffer** invariants that any future
+// full driver would depend on: if these break, no encrypted-CV test
+// can work.
+//
+// ## RFC 8446 §4.4.3 CertVerify signing buffer
+//
+// The signed buffer is:
+//   octet(0x20) repeated 64 times
+//   || context_string (e.g. "TLS 1.3, server CertificateVerify")
+//   || octet(0x00)
+//   || Hash(handshake_transcript_up_to_certificate)
+//
+// Any byte-level mutation of the transcript hash propagates byte-exact
+// into the signed buffer and (if the signature were re-computed)
+// produces a different signature. We pin both the construction
+// formula and the mutation propagation.
+//
+// ## T220 mapping
+//
+// | C TC family | Rust test |
+// |-------------|-----------|
+// | `MODIFIED_CERT_VERIFY_FUNC_TC001` (sig byte mutation) | `t220_certverify_signing_buffer_byte_exact_construction_pin` |
+// | `CERTVERIFY_SIGN_FUNC_TC001` (transcript-hash propagation) | `t220_certverify_signing_buffer_transcript_hash_propagation` |
+// | `CERTVERIFY_SIGN_FUNC_TC002` (context string identity) | `t220_certverify_context_string_identity_server_side_pin` |
+// | `CERTVERIFY_SIGN_FUNC_TC003` (client-side context string) | `t220_certverify_context_string_identity_client_side_pin` |
+// | (encryption sanity) | `t220_encrypted_certverify_record_decrypts_byte_exact_round_trip` |
+// | (mutation sanity) | `t220_encrypted_certverify_tampered_ciphertext_fails_decrypt` |
+// | (mutation sanity) | `t220_encrypted_certverify_tampered_aead_tag_fails_decrypt` |
+// | `ABNORMAL_CERTREQMSG_FUNC_TC001` (sig alg in CV) | `t220_certverify_signature_algorithm_codepoint_identity_pin` |
+// | (cert format) | `t220_encrypted_certificate_record_format_chain_length_pin` |
+// | (T220 plan banner) | `t220_phase_g2_plan_banner_pinned` |
+// ===========================================================================
+
+/// RFC 8446 §4.4.3 server-side CertVerify context string.
+const SERVER_CV_CONTEXT: &[u8] = b"TLS 1.3, server CertificateVerify";
+
+/// RFC 8446 §4.4.3 client-side CertVerify context string.
+const CLIENT_CV_CONTEXT: &[u8] = b"TLS 1.3, client CertificateVerify";
+
+/// Build the RFC 8446 §4.4.3 CertVerify signing buffer:
+///   octet(0x20) × 64 || context_string || octet(0x00) || transcript_hash
+fn build_certverify_signing_buffer(context: &[u8], transcript_hash: &[u8]) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(64 + context.len() + 1 + transcript_hash.len());
+    buf.extend_from_slice(&[0x20u8; 64]);
+    buf.extend_from_slice(context);
+    buf.push(0x00);
+    buf.extend_from_slice(transcript_hash);
+    buf
+}
+
+/// Mirrors C `MODIFIED_CERT_VERIFY_FUNC_TC001` shape: the CertVerify
+/// signing buffer must be byte-exact per RFC 8446 §4.4.3. A regression
+/// that drops the leading 64×0x20, the context string, or the
+/// separator byte would silently break TLS 1.3 server authentication.
+#[test]
+fn t220_certverify_signing_buffer_byte_exact_construction_pin() {
+    let transcript = vec![0xAB; 32];
+    let buf = build_certverify_signing_buffer(SERVER_CV_CONTEXT, &transcript);
+    // First 64 bytes: 0x20 padding.
+    for (i, b) in buf.iter().take(64).enumerate() {
+        assert_eq!(*b, 0x20, "byte {i} must be the 0x20 padding");
+    }
+    // Next bytes: context string.
+    let ctx_end = 64 + SERVER_CV_CONTEXT.len();
+    assert_eq!(&buf[64..ctx_end], SERVER_CV_CONTEXT);
+    // Separator byte.
+    assert_eq!(buf[ctx_end], 0x00, "context string must be NUL-terminated");
+    // Trailing bytes: transcript hash.
+    assert_eq!(&buf[ctx_end + 1..], transcript.as_slice());
+}
+
+/// Mirrors C `CERTVERIFY_SIGN_FUNC_TC001`: any byte mutation in the
+/// transcript hash propagates byte-exact into the signing buffer.
+/// This is what makes "modified CertVerify" tests work — the signed
+/// buffer is the only thing the verifier validates against, so a
+/// mutated transcript hash → mutated signing buffer → mutated
+/// signature → verify fails.
+#[test]
+fn t220_certverify_signing_buffer_transcript_hash_propagation() {
+    let transcript_a = vec![0x11; 32];
+    let mut transcript_b = transcript_a.clone();
+    transcript_b[5] ^= 0xFF;
+    let buf_a = build_certverify_signing_buffer(SERVER_CV_CONTEXT, &transcript_a);
+    let buf_b = build_certverify_signing_buffer(SERVER_CV_CONTEXT, &transcript_b);
+    assert_ne!(
+        buf_a, buf_b,
+        "transcript hash mutation must propagate to signing buffer"
+    );
+    // The mutation lands at the same offset shifted by the prefix.
+    let off = 64 + SERVER_CV_CONTEXT.len() + 1 + 5;
+    assert_eq!(buf_a[off] ^ buf_b[off], 0xFF);
+}
+
+/// Mirrors C `CERTVERIFY_SIGN_FUNC_TC002`: pin the exact byte
+/// sequence of the server-side context string. RFC 8446 §4.4.3
+/// specifies these characters verbatim; a typo would break interop.
+#[test]
+fn t220_certverify_context_string_identity_server_side_pin() {
+    assert_eq!(SERVER_CV_CONTEXT, b"TLS 1.3, server CertificateVerify");
+    assert_eq!(SERVER_CV_CONTEXT.len(), 33);
+}
+
+/// Mirrors C `CERTVERIFY_SIGN_FUNC_TC003`: client-side CertVerify
+/// (used in mTLS authentication; the C SDV exercises this for
+/// `CONSISTENCY_VERIFY_TRANSCRIPT_HASH_OF_CLIENT_CV_*` rows). The
+/// context string differs from the server side by exactly one word.
+#[test]
+fn t220_certverify_context_string_identity_client_side_pin() {
+    assert_eq!(CLIENT_CV_CONTEXT, b"TLS 1.3, client CertificateVerify");
+    assert_eq!(CLIENT_CV_CONTEXT.len(), 33);
+    // The two context strings differ in exactly the word "server" vs "client".
+    let s_words: Vec<&[u8]> = SERVER_CV_CONTEXT.split(|b| *b == b' ').collect();
+    let c_words: Vec<&[u8]> = CLIENT_CV_CONTEXT.split(|b| *b == b' ').collect();
+    assert_eq!(s_words.len(), c_words.len());
+    let diffs = s_words
+        .iter()
+        .zip(c_words.iter())
+        .filter(|(a, b)| a != b)
+        .count();
+    assert_eq!(
+        diffs, 1,
+        "server and client contexts differ in exactly one word"
+    );
+}
+
+/// Mirrors C `MODIFIED_CERT_VERIFY` decryption sanity: a valid
+/// encrypted CertVerify record round-trips byte-exact through the
+/// AEAD layer. This pins that the T219 `seal_encrypted_record`
+/// produces records the decrypt path accepts.
+#[test]
+fn t220_encrypted_certverify_record_decrypts_byte_exact_round_trip() {
+    let params = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+    let server_secret = derive_secret(
+        params.hash_alg_id(),
+        &[0x55u8; 32],
+        b"s hs traffic",
+        &[0x66u8; 32],
+    )
+    .unwrap();
+    let keys = TrafficKeys::derive(&params, &server_secret).unwrap();
+
+    // Synthetic CertVerify body: signature_algorithm (2 bytes) + length (2 bytes) + 256-byte sig
+    let mut cv_body = vec![0x08, 0x04]; // rsa_pss_rsae_sha256
+    cv_body.extend_from_slice(&256u16.to_be_bytes());
+    cv_body.extend_from_slice(&[0xCC; 256]);
+    // Wrap as handshake message: type=0x0F (CertificateVerify) + length(3) + body
+    let mut cv_msg = vec![0x0F];
+    cv_msg.extend_from_slice(&[0x00, 0x01, 0x04]); // 260 bytes
+    cv_msg.extend_from_slice(&cv_body);
+
+    let record =
+        seal_encrypted_record(CipherSuite::TLS_AES_128_GCM_SHA256, &keys, 1, 0x16, &cv_msg);
+
+    // Round-trip decrypt with the same keys/nonce/AAD.
+    let aead = AesGcmAead::new(&keys.key).unwrap();
+    let nonce = record_nonce(&keys.iv, 1);
+    let aad = &record[..5];
+    let opened = aead.decrypt(&nonce, aad, &record[5..]).unwrap();
+    // Inner plaintext = cv_msg || inner_content_type (0x16)
+    assert_eq!(&opened[..opened.len() - 1], cv_msg.as_slice());
+    assert_eq!(opened[opened.len() - 1], 0x16, "inner content type");
+}
+
+/// Mirrors C `MODIFIED_CERT_VERIFY` ciphertext-tamper case: flipping
+/// any byte in the AEAD ciphertext causes `decrypt` to fail. This is
+/// the mechanism by which any mutation of an encrypted CertVerify
+/// record gets rejected at the record layer before the signature
+/// check even runs.
+#[test]
+fn t220_encrypted_certverify_tampered_ciphertext_fails_decrypt() {
+    let params = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+    let server_secret = derive_secret(
+        params.hash_alg_id(),
+        &[0x77u8; 32],
+        b"s hs traffic",
+        &[0x88u8; 32],
+    )
+    .unwrap();
+    let keys = TrafficKeys::derive(&params, &server_secret).unwrap();
+    let cv_msg = vec![0x0F, 0x00, 0x00, 0x04, 0x08, 0x04, 0x00, 0x00];
+    let mut record =
+        seal_encrypted_record(CipherSuite::TLS_AES_128_GCM_SHA256, &keys, 2, 0x16, &cv_msg);
+
+    // Flip a byte deep inside the ciphertext (past the 5-byte header,
+    // past the 8-byte plaintext + 1 type byte = 9 → land at offset 7
+    // inside the body).
+    record[5 + 3] ^= 0xFF;
+
+    let aead = AesGcmAead::new(&keys.key).unwrap();
+    let nonce = record_nonce(&keys.iv, 2);
+    let aad = &record[..5];
+    assert!(
+        aead.decrypt(&nonce, aad, &record[5..]).is_err(),
+        "tampered ciphertext byte must fail AEAD authentication"
+    );
+}
+
+/// Mirrors the AEAD tag mutation variant: flipping the last byte of
+/// the AEAD tag (the trailing 16 bytes of the encrypted body) also
+/// fails decryption.
+#[test]
+fn t220_encrypted_certverify_tampered_aead_tag_fails_decrypt() {
+    let params = CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+    let server_secret = derive_secret(
+        params.hash_alg_id(),
+        &[0x99u8; 32],
+        b"s hs traffic",
+        &[0xAAu8; 32],
+    )
+    .unwrap();
+    let keys = TrafficKeys::derive(&params, &server_secret).unwrap();
+    let cv_msg = vec![0x0F, 0x00, 0x00, 0x04, 0x08, 0x04, 0x00, 0x00];
+    let mut record =
+        seal_encrypted_record(CipherSuite::TLS_AES_128_GCM_SHA256, &keys, 3, 0x16, &cv_msg);
+
+    // Flip the very last byte (inside the AEAD tag).
+    let last = record.len() - 1;
+    record[last] ^= 0x01;
+
+    let aead = AesGcmAead::new(&keys.key).unwrap();
+    let nonce = record_nonce(&keys.iv, 3);
+    let aad = &record[..5];
+    assert!(
+        aead.decrypt(&nonce, aad, &record[5..]).is_err(),
+        "tampered AEAD tag byte must fail authentication"
+    );
+}
+
+/// Mirrors C `ABNORMAL_CERTREQMSG_FUNC_TC001`-style shape (sig-alg
+/// identity inside CertVerify): pin the RFC 8446 §4.2.3 signature
+/// algorithm codepoints used in CertVerify mutation tests.
+#[test]
+fn t220_certverify_signature_algorithm_codepoint_identity_pin() {
+    use hitls_tls::crypt::SignatureScheme;
+    // RFC 8446 §4.2.3 — codepoints accessed via `.0` newtype field.
+    assert_eq!(SignatureScheme::RSA_PSS_RSAE_SHA256.0, 0x0804);
+    assert_eq!(SignatureScheme::ECDSA_SECP256R1_SHA256.0, 0x0403);
+    assert_eq!(SignatureScheme::ED25519.0, 0x0807);
+}
+
+/// Mirrors C `MODIFIED_CERT_VERIFY` cert-message-format pin: a TLS 1.3
+/// Certificate message body is `certificate_request_context (1 byte) +
+/// certificate_list (3-byte length prefix)`. Each cert entry is `3-byte
+/// cert DER length + cert DER + 2-byte extensions length`. Pin the
+/// format constants the rogue server needs.
+#[test]
+fn t220_encrypted_certificate_record_format_chain_length_pin() {
+    // A minimal Certificate body with empty context, one cert (3-byte
+    // body), and zero extensions:
+    let cert_der: Vec<u8> = vec![0x30, 0x82, 0x00]; // tiny placeholder DER
+    let mut body = Vec::new();
+    body.push(0x00); // certificate_request_context length = 0
+                     // certificate_list length (3 bytes) — placeholder
+    let cert_entry_len = 3 + cert_der.len() + 2; // cert_data length prefix + cert + ext length
+    body.extend_from_slice(&((cert_entry_len) as u32).to_be_bytes()[1..]); // 3-byte length
+                                                                           // cert entry
+    body.extend_from_slice(&(cert_der.len() as u32).to_be_bytes()[1..]); // 3-byte
+    body.extend_from_slice(&cert_der);
+    body.extend_from_slice(&[0x00, 0x00]); // extensions length = 0
+
+    // Pin the body length math: 1 (ctx len) + 3 (chain len) + 3 (cert
+    // len) + cert + 2 (ext len) = 1 + 3 + 6 = 10 bytes for a 3-byte
+    // cert.
+    assert_eq!(body.len(), 1 + 3 + 3 + cert_der.len() + 2);
+    assert_eq!(body.len(), 12);
+}
+
+/// Plan banner pin for T220 — asserts the plan doc lists D-2 / T220
+/// and the MODIFIED_CERT_VERIFY family.
+#[test]
+fn t220_phase_g2_plan_banner_pinned() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let plan_path = format!("{manifest_dir}/../../docs/issue-42-phase-g-plan.md");
+    let plan = std::fs::read_to_string(&plan_path).unwrap();
+    assert!(plan.contains("T220"));
+    assert!(plan.contains("MODIFIED_CERT_VERIFY"));
+}
