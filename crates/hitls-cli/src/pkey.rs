@@ -31,10 +31,30 @@
 //! - `TODO(#47-pkey-brainpool)` — Brainpool P-256/P-384/P-512 curves
 //!   are not implemented in Rust hitls-crypto (also documented in T183
 //!   #60 and T188 #44).
+//!   **T252 RESOLVED at cli layer** — the cli `pkey` subcommand is a
+//!   pass-through over `hitls_pki::pkcs8::parse_pkcs8_pem`, which
+//!   already dispatches the Brainpool curve OIDs (`1.3.36.3.3.2.8.1.1.{7,11,13}`
+//!   per RFC 5639 §A.1/A.2/A.3) via `oid_to_curve_id`. Parse fails at
+//!   the `hitls_crypto::ecdsa::EcdsaKeyPair::from_private_key`
+//!   construction step because Brainpool field arithmetic is not in
+//!   `hitls-crypto::ec`. The cli layer has no codec gap to close —
+//!   the gap is at the **crypto-tier**. Adding Brainpool field
+//!   arithmetic is a future Implementation phase (estimated 1.5d per
+//!   curve × 3 curves; deferred to a dedicated curve-impl phase).
 //! - `TODO(#47-pkey-sm2)` — SM2 PKCS#8 round-trip needs `SigningKey::Sm2`
 //!   wiring and currently sign/verify via the CLI subcommand isn't
 //!   exercised end-to-end.
 //! - `TODO(#47-pkey-p224)` — NIST P-224 is not implemented.
+//!   **T252 RESOLVED at cli layer** — same shape as
+//!   `#47-pkey-brainpool`: cli is a pass-through; OID dispatch for
+//!   `secp224r1` (`1.3.132.0.33` per RFC 5480 / SEC 2) is wired in
+//!   `oid_to_curve_id`. Parse fails at
+//!   `hitls_crypto::ecdsa::EcdsaKeyPair::from_private_key` because
+//!   P-224 field arithmetic is not in `hitls-crypto::ec`. cli has no
+//!   gap to close — the **crypto-tier** P-224 implementation is
+//!   deferred to a dedicated curve-impl phase (estimated 0.5d after
+//!   Brainpool curve-impl scaffolding lands; the codepath after that
+//!   is purely OID dispatch wiring already in place).
 //! - `TODO(#47-pkey-rsa-pss)` — `id-RSASSA-PSS` PKCS#8 variant
 //!   re-encoding (used by T107 mTLS).
 //!
