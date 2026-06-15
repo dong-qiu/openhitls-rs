@@ -97,6 +97,15 @@ Counts are the `Generation summary` footer of each generated file
 > `check_integrity` success / tampered-HMAC / missing-file). The C per-algorithm
 > `CRYPT_CMVP_Selftest*(alg)` granularity + invalid-id rows are API-surface (the
 > Rust port aggregates self-tests; no public per-algorithm entry point).
+> **codecs (J-5)** is the EAL decoder-**provider** framework (`(void)` bodies,
+> ignored path args) → API-surface (Rust has no provider concept); the underlying
+> Base64 / PEM codec is migrated byte-exact via RFC 4648 §10 canonical vectors
+> (the standard the C bsl/codecs Base64 implements) + a PEM round-trip in
+> `crates/hitls-utils/tests/migrated_codecs.rs` (6 pins). **bsl** SAL families
+> (file/socket/time/atomic/dl/uio/list/hash/err/log) are C system / memory-model
+> layers replaced by the Rust std library (architecturally N/A); the bsl codec
+> primitives (asn1 / oid / base64 / pem / hex) are natively covered in
+> `hitls-utils`.
 
 RSA migrates the signature **verify** families from
 `test_suite_sdv_eal_rsa_sign_verify.data`: `VERIFY_PKCSV15_FUNC_TC001`

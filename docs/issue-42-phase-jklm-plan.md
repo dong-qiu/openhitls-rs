@@ -64,7 +64,7 @@ Phase A–I 在 **crypto / pki(部分)/ tls-tlcp-dtls(audit-pin)** 三域达成 
 | ✅ J-2 | ✅ T256 | round-trip pins（byte-exact **blocked**） | **5 delivered** | Privacy Pass `VECTOR_TEST_TC001` byte-exact 被实现缺口阻塞（Rust privpass 无 EMSA-PSS/salt/hooks）→ na-list Structural Gap + 用 C vector RSA-2048 密钥跑 round-trip（SM9/T158 法）；未来 I-phase 解锁字节级 |
 | ✅ J-3 | ✅ T257 | round-trip pins（byte-exact **blocked**） | **3 delivered** | SPAKE2+ `SPAKE2PLUS_TC001` byte-exact 阻塞（Rust 只支持 1/14 suite + 无 x/y 标量注入）→ na-list Structural Gap + 用 P-256 向量 (w0,w1,L) 跑 round-trip（SM9/T158 法）；未来 I-phase 解锁 |
 | ✅ J-4 | ✅ T258 | integration pins | **4 delivered** | CMVP 是 `(void)` FIPS 自检框架（无数据驱动 KAT）→ 迁移为集成 pin：`FipsModule::run_self_tests()` 聚合 KAT+PCT + `check_integrity` 成功/篡改/缺失；C 逐算法 `Selftest*` 粒度 = API-surface |
-| J-5 | T259 | `xtask/src/codecs.rs` | ~15 | ASN.1 decode 正/负面 |
+| ✅ J-5 | ✅ T259 | byte-exact RFC 4648 + PEM round-trip | **6 delivered** | codecs = EAL decoder-provider 框架 → N/A；bsl Base64/PEM 数据行空 → 用 RFC 4648 §10 规范向量字节级迁移 + PEM round-trip（`hitls-utils/tests/migrated_codecs.rs`） |
 | closeout | T260 | bsl audit-pin + 系列收尾 | ~15 | bsl 内存层走 audit-pin；`migrated_bsl_audit.rs` |
 
 ### 2.2 验收
