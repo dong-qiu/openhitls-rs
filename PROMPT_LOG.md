@@ -17602,3 +17602,45 @@ issue-42 系列总:
     codify audit-pin → implementation arc 可在 layer boundary 自然落地 (非每个原 TODO 站点)
 
 Recorded as DEV_LOG Phase T254.
+
+### T255 — Phase J-1: OTP (HOTP RFC 4226 / TOTP RFC 6238) C→Rust KAT 迁移（首个 hitls-auth 迁移，开启 Phase J）
+
+> 开始 Phase J
+
+按 `docs/issue-42-phase-jklm-plan.md` 开启 Phase J —— 把 Phase A 的 xtask 字节级迁移扩展到此前未纳入计划的 C 测试类（auth / cmvp / codecs / bsl）。OTP 是第一个（J-1）。
+
+工作内容：
+  新 emitter `xtask/src/otp.rs` + main.rs 的 `otp` dispatch arm，源 `auth/otp/test_suite_sdv_otp.data`
+  产出 `crates/hitls-auth/tests/migrated_otp.rs` —— 52 个字节级测试
+
+迁移的 5 个族（52 = 字节级）：
+  GEN_HOTP_API_TC001        10  Hotp::generate(counter)         RFC 4226 Appendix D SHA-1
+  GEN_TOTP_API_TC001        18  Totp::generate(timestamp)       RFC 6238 Appendix B SHA-1/256/512, period 30
+  GEN_TOTP_API_TC002         1  Totp::generate                  custom start-offset + 120s step
+  VALIDATE_HOTP_API_TC001   20  Hotp::verify                    success/mismatch
+  VALIDATE_TOTP_API_TC002    3  Totp::verify                    validWindow 在数据行内（=0）
+
+API-surface（计数不迁，32）：
+  VALIDATE_TOTP_API_TC001   24  C ctx 默认 validWindow 不在数据行 —— 无法字节级复现
+  INIT/SET_CRYPTO_CB/CTX_CTRL 8 EAL ctx CRUD
+
+关键修复（parser 约定）：
+  C `.data` 把期望 OTP 引号化为十进制串（"755224"），恰好是合法 even-length hex，
+  被 parser 存成 Arg::Hex；emitter 把字节重新 lowercase-hex 编码还原原始十进制数字
+  （每个 nibble 都是十进制 0-9），再 parse u32 与 Rust API 返回值比较。
+
+零新增产品代码 —— hitls_auth::otp 实现本就 RFC-correct，52/52 首次通过（本轮未触发 I-phase 飞轮）。
+
+验证：
+  cargo test -p hitls-auth --all-features --test migrated_otp     52/0 首次通过
+  cargo run -p xtask -- migrate-c-tests --algo otp --check        up-to-date（drift 门）
+  cargo clippy -p hitls-auth --all-features --all-targets -D warnings + -p xtask   clean
+  cargo fmt --all --check                                          clean
+
+na-list tally → 3251 emitted（OTP 52/32/0/0/84, Total 3251/3804/240/7/6578）
+
+新方法学：
+  「decimal-as-hex recovery」—— 当 C `.data` 引号化的十进制字段恰好是合法 hex 时，
+  重新编码 parser 的 Arg::Hex 字节即可还原原始十进制串
+
+Recorded as DEV_LOG Phase T255.

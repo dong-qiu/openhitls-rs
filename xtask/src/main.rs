@@ -13,6 +13,7 @@ mod kem;
 mod mac;
 mod mldsa;
 mod mlkem;
+mod otp;
 mod parser;
 mod rsa;
 mod sha3;
@@ -293,9 +294,14 @@ fn migrate(
             workspace_root()?.join("crates/hitls-pki/tests/migrated_x509_parse.rs"),
             x509::emit_x509_kat,
         ),
+        "otp" => (
+            vec![c_root.join("auth/otp/test_suite_sdv_otp.data")],
+            workspace_root()?.join("crates/hitls-auth/tests/migrated_otp.rs"),
+            otp::emit_otp_kat,
+        ),
         other => {
             return Err(format!(
-                "algo '{other}' not yet supported. Available: sha2, hmac, cmac, aes, curve25519, dsa, dh, sm4, sm2, sm9, mldsa, mlkem, sha3, md5, sha1, sm3, hkdf, pbkdf2, scrypt, kdf-tls12, gcm, aes-ccm, aes-kw, gmac, chacha-poly, siphash, cbc-mac, frodokem, mceliece, drbg, ecc, rsa, bn, x509-parse, hpke, slhdsa, xmss"
+                "algo '{other}' not yet supported. Available: sha2, hmac, cmac, aes, curve25519, dsa, dh, sm4, sm2, sm9, mldsa, mlkem, sha3, md5, sha1, sm3, hkdf, pbkdf2, scrypt, kdf-tls12, gcm, aes-ccm, aes-kw, gmac, chacha-poly, siphash, cbc-mac, frodokem, mceliece, drbg, ecc, rsa, bn, x509-parse, hpke, slhdsa, xmss, otp"
             )
             .into());
         }
