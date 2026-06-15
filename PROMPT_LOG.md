@@ -17821,3 +17821,20 @@ harness note：driver 重排 cipher list 让 SH 选 AES-128-GCM（Phase H seal_e
 M-2（cert+私钥 loader → MODIFIED_CERT_VERIFY wire alerts）建立在本 capture 基建之上。
 
 Recorded as DEV_LOG Phase T276.
+
+### T277 — Phase L 评估：已由 Phase I (CLI) 基本达成，无需实现
+
+> 请继续Phase L
+
+Phase L ground-truth survey 结论：apps/CLI 对齐 + #43/#47 已基本由 Phase I (T189–T254) 完成：
+  #43 完成：enc.rs（52.7K，97 测试）支持 AEAD + 非 AEAD CBC/CTR/CFB + PBKDF2（OpenSSL enc 兼容），含 CLI 级 run() encrypt→decrypt round-trip
+  #47 大部分完成：genrsa.rs(T189) / rsa_cmd.rs(T191) / conf_util.rs 已实现；keymgmt + sm 是刻意 deferral（GM operator mode，README 有 rationale + defer 守门测试）
+  apps/ 是 C-app-helper API 单测（SplitString/ProcDnName，非 CLI golden-output；Rust 用 clap+std 无 1:1）；apps conf SplitString KAT 已迁在 conf_util.rs（ut_split_func_tc001_* 覆盖全部 C 行）
+
+无实质剩余 Phase L 工作；强行做会是冗余测试。处置记录在 plan §4（原计划保留作历史参考）。
+
+真正剩余开放项（超出 Phase L "CLI 对齐"范畴）：keymgmt/sm CLI（已文档化 deferral）+ Brainpool/P-224 曲线算术（Phase I crypto-tier deferral）。
+
+docs-only 变更，无代码。这是继 Phase K 之后第二个被 Phase I 提前关闭的 plan 阶段 —— plan 的 K/L 估计早于 T189–T254 的 CLI 工作。
+
+Recorded as DEV_LOG Phase T277.

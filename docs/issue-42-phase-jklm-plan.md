@@ -120,8 +120,22 @@ Phase A–I 在 **crypto / pki(部分)/ tls-tlcp-dtls(audit-pin)** 三域达成 
 
 ## 4. Phase L — apps/CLI 对齐 + 关闭 #43/#47（T269–T275）
 
-**核心判断**：apps/ 1078 行测 CLI 子命令端到端。#43（enc 非 AEAD + PBKDF2）、#47（5 个缺失
-子命令 rsa/keymgmt/conf/genrsa/key/sm）**仍 open** —— 必须**先实现再测**，是本计划最大实现工作量。
+> **⏸️ Phase L 评估结论（2026-06-15，ground-truth survey）**：实测 Phase L 的目标**已由 Phase I
+> （T189–T254 的 CLI 实现 + cli-layer closure）基本达成**，无实质剩余工作，故不另起 L 子 PR。证据：
+> (1) **#43 已完成** —— `crates/hitls-cli/src/enc.rs`（52.7K，97 测试）已支持 AEAD（GCM/ChaCha/SM4-GCM）
+> **+ 非 AEAD CBC/CTR/CFB + PBKDF2**（10000 iters，OpenSSL `enc` 兼容格式），含 `run()` CLI 级
+> encrypt→decrypt round-trip 测试（`cbc_file_roundtrip` 等）；(2) **#47 大部分完成** —— `genrsa.rs`（T189）
+> / `rsa_cmd.rs`（T191）/ `conf_util.rs` 均已实现；`keymgmt` + `sm` 是**刻意 deferral**（GM-compliance
+> operator mode，T191/T194，README 有 rationale section + `keymgmt_defer.rs`/`sm_defer.rs` 守门测试）；
+> (3) **apps/ 测试是 C-app-helper API 单测**（`HITLS_APP_SplitString` / `CFG_ProcDnName` 等内部 C 函数，
+> 非 CLI golden-output；Rust 用 clap + std 无 1:1），且 apps `conf` 的 SplitString KAT 行**已迁移**在
+> `conf_util.rs`（`ut_split_func_tc001_*` 覆盖全部 C 行）。**真正剩余的开放项**：keymgmt/sm CLI（已文档化
+> deferral）+ Brainpool/P-224 曲线算术（Phase I crypto-tier deferral，多天工作）—— 均非 Phase L
+> "CLI 对齐"范畴。下方 §4.1 原计划保留作历史参考。
+
+**核心判断（已过时，2026-06-15 修订见上）**：apps/ 1078 行测 CLI 子命令端到端。#43（enc 非 AEAD +
+PBKDF2）、#47（5 个缺失子命令 rsa/keymgmt/conf/genrsa/key/sm）**仍 open**（← 此前提基于 pre-Phase-I
+状态，已被 T189–T254 推翻）。
 
 ### 4.1 子 PR 拆分
 
