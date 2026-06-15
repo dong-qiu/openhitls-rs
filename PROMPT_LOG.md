@@ -17700,3 +17700,34 @@ Recorded as DEV_LOG Phase T256.
   cargo fmt --all --check                                                         clean
 
 Recorded as DEV_LOG Phase T257.
+
+### T258 — Phase J-4: CMVP (FIPS 140 自检 + 完整性) 集成迁移
+
+> 在J-1的任务完成合入后，依次完成J Phase剩下的子 PR
+
+C CMVP 套件是空数据行 + (void) 测试体 —— 非数据驱动 KAT，测的是 EAL CMVP 自检框架：
+  SELFTEST_TC*  : 逐算法 CRYPT_CMVP_Selftest*(alg)==true，MAX/-1==false
+  INTEGRITY_TC* : CMVP_CheckIntegrity 成功 / 篡改或缺失文件失败
+
+Rust hitls_crypto::fips 在聚合层暴露自检：
+  FipsModule::run_self_tests() 跑内部 KAT+PCT（SHA-256/HMAC-SHA256/AES-128-GCM/HMAC-DRBG/HKDF/ECDSA-P256/entropy）
+  check_integrity(path, key, expected_hmac)
+
+迁移为集成 pin（镜像 CMVP 套件的功能意图），新建 crates/hitls-crypto/tests/migrated_cmvp.rs（feature-gated fips），4 个 pin：
+  selftest_aggregate_passes_module_operational（PreOperational→run_self_tests Ok→Operational）
+  integrity_check_success（已知 temp 文件 + 已知 key 的 HMAC-SHA256 → Ok；映射 INTEGRITY_TC001）
+  integrity_check_tampered_hmac_fails（翻转 1 字节 → Err；映射 INTEGRITY_TC002-006）
+  integrity_check_missing_file_fails（不存在路径 → Err）
+
+C 的逐算法 Selftest* 粒度 + 非法 id 行 → API-surface（Rust 聚合自检，无 public 逐算法入口）
+
+零新增产品代码（FipsModule::{run_self_tests, check_integrity} 已存在）
+
+验证：
+  cargo test -p hitls-crypto --features fips --test migrated_cmvp     4/0
+  cargo clippy -p hitls-crypto --features fips --tests -D warnings    clean
+  cargo fmt --all --check                                             clean
+
+方法学：对 (void) 框架型 C 测试（无数据驱动 KAT）做 integration-pin 迁移（区别于 byte-exact xtask 与 T256/T257 round-trip）
+
+Recorded as DEV_LOG Phase T258.
