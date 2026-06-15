@@ -86,9 +86,17 @@ Counts are the `Generation summary` footer of each generated file
 | **Total** | **3251** | **3804** | **240** | **7** | **6578** |
 
 > **Phase J onward**: the per-algorithm table above was originally the Phase A
-> (crypto) deliverable. Phase J extends the same `xtask` byte-exact migration
-> to the previously-unplanned C test categories (`auth` / `cmvp` / `codecs`).
-> OTP is the first (Phase J-1).
+> (crypto) deliverable. Phase J extends the migration to the previously-unplanned
+> C test categories (`auth` / `cmvp` / `codecs` / `bsl`). Only **OTP (J-1)** is a
+> clean byte-exact `xtask` win (52 tests). The rest are not data-driven KATs:
+> Privacy Pass (J-2) + SPAKE2+ (J-3) byte-exact are blocked on implementation
+> gaps → round-trip pins + Structural-gap rows (see below); **CMVP (J-4)** is a
+> `(void)` FIPS self-test framework with no data-driven vectors → migrated as
+> integration pins (`crates/hitls-crypto/tests/migrated_cmvp.rs`, 4 pins:
+> `FipsModule::run_self_tests()` aggregate KAT+PCT → Operational, +
+> `check_integrity` success / tampered-HMAC / missing-file). The C per-algorithm
+> `CRYPT_CMVP_Selftest*(alg)` granularity + invalid-id rows are API-surface (the
+> Rust port aggregates self-tests; no public per-algorithm entry point).
 
 RSA migrates the signature **verify** families from
 `test_suite_sdv_eal_rsa_sign_verify.data`: `VERIFY_PKCSV15_FUNC_TC001`
