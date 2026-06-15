@@ -82,7 +82,13 @@ Counts are the `Generation summary` footer of each generated file
 | SLH-DSA | 317 | 32 | 0 | 0 | 349 |
 | XMSS | 84 | 4 | 0 | 0 | 88 |
 | SM9 | 8 | 30 | 0 | 0 | 38 |
-| **Total** | **3199** | **3772** | **240** | **7** | **6494** |
+| OTP (HOTP/TOTP) | 52 | 32 | 0 | 0 | 84 |
+| **Total** | **3251** | **3804** | **240** | **7** | **6578** |
+
+> **Phase J onward**: the per-algorithm table above was originally the Phase A
+> (crypto) deliverable. Phase J extends the same `xtask` byte-exact migration
+> to the previously-unplanned C test categories (`auth` / `cmvp` / `codecs`).
+> OTP is the first (Phase J-1).
 
 RSA migrates the signature **verify** families from
 `test_suite_sdv_eal_rsa_sign_verify.data`: `VERIFY_PKCSV15_FUNC_TC001`
@@ -461,6 +467,26 @@ since it's migrated above`) + 1 `KEYEX_API_TC002` row (NULL-pointer
 rejection — Rust's borrow checker forbids NULL refs at compile time,
 no runtime check to migrate). `KEYEX_API_TC001` migrated in T159 via
 the I158 `Sm9MasterKey::compute_share_key` API.
+
+OTP (T255, Phase J-1) migrates the HOTP (RFC 4226) / TOTP (RFC 6238) families
+from `auth/otp/test_suite_sdv_otp.data` — the **first `hitls-auth` migration**,
+opening Phase J (the previously-unplanned `auth` / `cmvp` / `codecs` categories).
+The C `.data` quotes the expected OTP as a *decimal* string (`"755224"`); since
+that is also valid even-length hex, the xtask parser stores it as `Arg::Hex`, so
+the emitter re-encodes those bytes as lowercase hex to recover the original
+decimal digits (every nibble was a decimal 0-9) and parses the `u32` the Rust
+`Hotp::generate` / `Totp::generate` returns. Migrated families: `GEN_HOTP` (10,
+`Hotp::generate`), `GEN_TOTP_TC001` (18, `Totp::generate`, period 30),
+`GEN_TOTP_TC002` (1, custom start-offset + step folded into the timestamp
+argument), `VALIDATE_HOTP` (20, `Hotp::verify` success/mismatch),
+`VALIDATE_TOTP_TC002` (3, `Totp::verify` with the validWindow carried *in the
+data row*, window == 0). **Zero new production code** — the OTP impl was already
+RFC-correct, all 52 pass first run. `VALIDATE_TOTP_TC001` (24) routes to
+API-surface: the C ctx supplies a *default* validWindow absent from the data
+row (so several rows accept window-adjacent OTPs), which a byte-exact migration
+cannot reproduce without hardcoding a magic number not in the vector — the
+generate side already pins the exact crypto for those times. The 8
+`INIT_API` / `SET_CRYPTO_CB_API` / `CTX_CTRL_API` rows are EAL ctx CRUD.
 
 The `kat-nonce` hook now also covers **ML-DSA** sign (I137): `SIGNDATA_TC001`
 emits `MlDsaKeyPair::sign_with_rnd(msg, seed) == sign` (ML-DSA Emitted 45 → 105,
