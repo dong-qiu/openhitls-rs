@@ -17541,3 +17541,64 @@ Phase I cli-layer 锚点关闭进度:
     codify DRY 跨 crate 边界 for crypto codecs
 
 Recorded as DEV_LOG Phase T253.
+
+### T254 — Phase I-6 + Phase I closeout: zeroize fix + cli-layer deferral + final milestone (Phase I 5 sub-PR 终弹)
+
+> 请继续完成Phase I
+
+Closes T250+T251+T252+T253 Phase I-1 ~ I-4+I-5.
+
+三路工作:
+  (1) Zeroize 修复 (T253 AI review HIGH 项): encode_rsa_pkcs1_der 中间 secret Vec<u8> (d_be/p_be/q_be/dp/dq/qinv) 包 Zeroizing<Vec<u8>>; n_be/e_be 公开模数/指数保持裸值
+  (2) Phase I-6 cli-layer deferral upgrade for TLS hardening: 同 T252/T253 I-4 模式, 认识 TlsConfig::try_build 加固是独立 ~1d Implementation phase
+  (3) Phase I closeout: roadmap §1 → Complete + §4 series rollup 表 + §5 milestone + CLAUDE.md status + 新 migrated_phase_i_closeout_pins.rs (5 closeout pins)
+
+5 closeout pin tests:
+  t254_phase_i_roadmap_doc_status_complete (roadmap §1 + 'Phase I closes at the cli-layer' 短语)
+  t254_phase_i_methodology_lineage_pinned (§4 lineage 5 anchors T250-T254)
+  t254_phase_i_series_rollup_table (4 PR # + '5 sub-PRs' 字面)
+  t254_complete_cli_layer_phase_i_closure_milestone (cross-doc: milestone 短语于 roadmap §5 + CLAUDE.md)
+  t254_phase_b_audit_pin_file_preserved (Phase B 文件存在 + 3 anchor 家族字面量)
+
+Phase I 5-sub-PR 终态:
+  26 anchors 用 real product code 关 (11 wired T250 RSA-PSS encoder + T251 SM2 dispatch + T253 RSA codec extract; 15 cli-layer deferral)
+  23 anchors 标 crypto-tier deferrals 留 future Implementation phases (Brainpool ~4.5d + P-224 ~0.5d + PBES2 CLI UX ~0.5d + genrsa cipher CLI UX ~0.5d + TlsConfig::try_build hardening ~1.0d + SNI/custom-ext)
+
+issue-42 系列总:
+  Phase A (800) + B (43) + C (46) + D/G/H (133) + E (43) + F (88) + I (7) = 1160+ audit-pin tests
+  13 phases A-I closed at codified milestones
+
+关键设计:
+  T254 codify 'cli-layer scope as Phase I closure boundary'
+    cli-layer closes; crypto-tier deeper implementation 留 future Implementation phase
+    Phase B → Phase I audit-pin → implementation arc 的 canonical conclusion
+  layered RESOLVED annotation 方法学 (T223/T228 codified through T250-T254) 保留 49 个字面 TODO 字符串作 historical grep 锚点
+
+验证:
+  cargo test -p hitls-pki --test migrated_phase_i_closeout_pins  5/0
+  cargo test -p hitls-pki --all-features                         1680/0 零回归 (was 1675, +5)
+  cargo test -p hitls-cli ut_pkey_t250                           1/0 (T250 RSA-PSS 仍通过)
+  cargo test -p hitls-cli ut_pkey_t251                           1/0 (T251 SM2 仍通过)
+  clippy --workspace -D warnings + typos                         clean
+
+作用域:
+  1 product code file (hitls-pki pkcs8/mod.rs zeroize +~10 行)
+  1 新 test file (~125 行, 5 closeout pins)
+  2 doc updates (roadmap §1/§3/§4/§5 ~85 行 + CLAUDE.md status)
+  0 new TODO
+
+沿用方法学:
+  T250/T251 layered RESOLVED annotation
+  T252 cli-layer deferral
+  T253 extract refactor
+  T223/T228 closeout 标准配方
+  T249/T245 cross-doc milestone-phrase consistency
+
+新方法学:
+  「cli-layer scope as Phase I closure boundary」 (codified):
+    Phase I scope 精确是 cli-layer 胶水
+    crypto-tier 深层实现 (curve arithmetic / 完整 PBES2 UX / TlsConfig::try_build hardening) 是独立 future Implementation phase
+    cli-layer scope closure 是 audit-pin → implementation arc 的 canonical milestone
+    codify audit-pin → implementation arc 可在 layer boundary 自然落地 (非每个原 TODO 站点)
+
+Recorded as DEV_LOG Phase T254.
