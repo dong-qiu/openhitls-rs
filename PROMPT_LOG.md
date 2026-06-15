@@ -17427,3 +17427,60 @@ Phase I 累计:
     适用于 Brainpool / P-224 (T252) 等场景: 加 OID 入 oid_to_curve_id + 加 enum 变体 + impl 曲线运算
 
 Recorded as DEV_LOG Phase T251.
+
+### T252 — Phase I-3 Brainpool + NIST P-224 cli-layer deferral upgrade (Phase I 5 sub-PR 第 3 弹, scope-cut option b)
+
+> 按 option (b) 走 — scope-cut to cli-layer deferral upgrade
+
+承接 T250+T251 Phase I-1/I-2.
+
+Scope-cut 缘由:
+  完整 Brainpool/P-224 curve arithmetic 实现 ~2 天, 数千行 product code
+  Phase I 真实 scope 是 cli-layer 胶水, 非 crypto-arithmetic
+  curve OID dispatch 已在 hitls-pki::pkcs8 经 oid_to_curve_id wire 好 (RFC 5639 brainpool + RFC 5480 secp224r1)
+  parse_pkcs8_pem 经 parse_ec_curve_oid + EcdsaKeyPair::from_private_key dispatch
+  gap 在 hitls-crypto field arithmetic 层, 非 cli/pki codec 层
+
+改动:
+  crates/hitls-cli/src/pkey.rs 模块 doc
+    line 31-33 (Brainpool) + line 37 (P-224) 加 'T252 RESOLVED at cli layer' 注释
+    解释 cli-layer pass-through 架构
+    指向 hitls-crypto curve-impl deferral (Brainpool 1.5d × 3 + P-224 0.5d after scaffolding)
+    2 个 TODO(#47-pkey-brainpool) + TODO(#47-pkey-p224) 字面量保留 (per T223/T228)
+
+Phase I 累计:
+  T250 (1 test) + T251 (1 test) + T252 (0 tests; doc upgrade)
+  = 2 implementation tests + 1 deferral upgrade
+  Phase I anchors closed at cli layer: 8/49 (3 rsa-pss + 3 sm2 + 1 brainpool + 1 p224)
+
+关键设计:
+  cli-layer deferral upgrade 是 documentation-only RESOLVED 变体
+  原 TODO 在 cli 层 RESOLVED — cli 合理无 codec 缺口, 实际缺口在更深一层 (hitls-crypto)
+  避开 2+ 天 curve arithmetic 工作, 精确 scope cli 层贡献
+  与 T250/T251 layered RESOLVED 注释模式区别:
+    T250/T251 wired 实际 product code (encode_rsa_pss_pkcs8_der + encode_ec_pkcs8_der dispatch)
+    T252 仅更新文档, 但合理关闭 cli 锚点 (因 cli 层确无代码需改)
+
+验证:
+  cargo test -p hitls-pki --test migrated_phase_b_audit_pins  43/0 (Phase B 审计 pins 继续通过)
+  2 TODO(#47-pkey-brainpool) + TODO(#47-pkey-p224) 锚点保留
+  cargo fmt + cargo clippy --workspace --all-features -D warnings + typos clean
+
+作用域:
+  1 product code file +~20 行 (2 docblock annotation upgrades)
+  0 product code logic 改动
+  0 new TODO
+  2 cli #47-pkey-* 锚点保留
+
+沿用方法学:
+  T250/T251 layered RESOLVED annotation
+
+新方法学:
+  「cli-layer deferral upgrade as documentation-only RESOLVED variant」 (codified):
+    TODO 锚点在 cli-layer 文档, 实际 gap 在更深一层 (crypto-tier 字段算术)
+    cli RESOLVED 注释精确 scope cli 层贡献为 pass-through
+    指向更深一层的 deferral
+    codify Phase I cli-layer scope 与 future Implementation phases (更深 crypto-tier) 之间的桥
+    cli 锚点合理关闭 — 因 cli 层无代码需改
+
+Recorded as DEV_LOG Phase T252.
