@@ -28,6 +28,15 @@
 //! - `TODO(#47-pkey-encrypted-pkcs8)` — `-passin <pass>` / `-passout
 //!   <pass>` for PBES2 (PBKDF2 + AES) encrypted PKCS#8 is not yet
 //!   implemented. The C `UT_HITLS_APP_ENCKEY_TC*` family relies on this.
+//!   **T253 cli-layer deferral upgrade** — the PBES2 codec (RFC 8018
+//!   §A.4 `PBES2` + §A.2 `PBKDF2`) is fully implemented in
+//!   `hitls_pki::pkcs8::encrypted` via
+//!   `decrypt_pkcs8_pem(pem, password)` and `encrypt_pkcs8_pem(pki,
+//!   password)`. The cli gap is **CLI flag UX wiring** (adding
+//!   `-passin` / `-passout` to the `Pkey` clap command + plumbing
+//!   through `run_with_out`), not a crypto codec gap. Deferred to a
+//!   focused UX-only PR; the `hitls_pki::pkcs8::encrypted::*` public
+//!   API is already callable today.
 //! - `TODO(#47-pkey-brainpool)` — Brainpool P-256/P-384/P-512 curves
 //!   are not implemented in Rust hitls-crypto (also documented in T183
 //!   #60 and T188 #44).
@@ -250,45 +259,16 @@ fn encode_rsa_pss_pkcs8_der(
     Ok(encode_pkcs8_der_via_pem(&oid, &pkcs1_der))
 }
 
-// Helper extracted from `encode_rsa_pkcs8_der` so both that function and
-// `encode_rsa_pss_pkcs8_der` can share the PKCS#1 inner build.
+// T253 Phase I-5 RESOLVED — RSA PKCS#1 inner DER encoding now lives in
+// `hitls_pki::pkcs8::encode_rsa_pkcs1_der`. The T250 local copy was
+// extracted as the canonical home; this thin wrapper preserves the
+// pkey.rs call-site shape (Box<dyn Error> error type) while delegating
+// to the shared codec.
 fn encode_rsa_pkcs1_inner_der(
     key: &hitls_crypto::rsa::RsaPrivateKey,
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    use hitls_bignum::BigNum;
-
-    let n_be = key.n_bytes();
-    let e_be = key.e_bytes();
-    let d_be = key.d_bytes();
-    let p_be = key.p_bytes();
-    let q_be = key.q_bytes();
-
-    let d = BigNum::from_bytes_be(&d_be);
-    let p = BigNum::from_bytes_be(&p_be);
-    let q = BigNum::from_bytes_be(&q_be);
-    let one = BigNum::from_u64(1);
-    let p_minus_1 = p.sub(&one);
-    let q_minus_1 = q.sub(&one);
-    let (_, dp_bn) = d.div_rem(&p_minus_1)?;
-    let (_, dq_bn) = d.div_rem(&q_minus_1)?;
-    let dp = dp_bn.to_bytes_be();
-    let dq = dq_bn.to_bytes_be();
-    let qinv = q.mod_inv(&p)?.to_bytes_be();
-
-    let mut enc = Encoder::new();
-    enc.write_integer(&[0]);
-    enc.write_integer(&n_be);
-    enc.write_integer(&e_be);
-    enc.write_integer(&d_be);
-    enc.write_integer(&p_be);
-    enc.write_integer(&q_be);
-    enc.write_integer(&dp);
-    enc.write_integer(&dq);
-    enc.write_integer(&qinv);
-    let body = enc.finish();
-    let mut wrap = Encoder::new();
-    wrap.write_sequence(&body);
-    Ok(wrap.finish())
+    hitls_pki::pkcs8::encode_rsa_pkcs1_der(key)
+        .map_err(|e| format!("RSA PKCS#1 encode: {e:?}").into())
 }
 
 // T250 Phase I-1 — RSA-PSS SPKI. Same SPKI shape as rsaEncryption but

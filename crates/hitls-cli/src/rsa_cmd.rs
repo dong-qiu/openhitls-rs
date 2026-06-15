@@ -196,49 +196,17 @@ fn print_rsa_text(key: &hitls_crypto::rsa::RsaPrivateKey) {
 /// Encode an RSA private key as a PEM-wrapped PKCS#1 `RSAPrivateKey`
 /// DER (RFC 8017 §A.1.2). Label: `RSA PRIVATE KEY`.
 ///
-/// **NOTE**: This is the **third** inlined instance of this encoder
-/// (also in `genrsa.rs` T189 and `pkey.rs` T190). Per the T190
-/// sub-PR-cross-reuse note, the shared codec should be extracted to
-/// `hitls-pki::pkcs8::encode_rsa_pkcs1_der` after the #47 series
-/// closes. `TODO(#47-rsa-codec-extract)` tracks the refactor.
+/// T253 Phase I-5 RESOLVED — formerly the third inlined copy of the
+/// RSA PKCS#1 CRT-form encoder (also in `genrsa.rs` T189 and `pkey.rs`
+/// T190). The shared codec now lives at
+/// `hitls_pki::pkcs8::encode_rsa_pkcs1_der`; this function just wraps
+/// the DER in a PEM block. Historical anchor preserved for Phase B
+/// audit-pin coverage: formerly `TODO(#47-rsa-codec-extract)`.
 fn encode_rsa_pkcs1_pem(
     key: &hitls_crypto::rsa::RsaPrivateKey,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    use hitls_bignum::BigNum;
-    use hitls_utils::asn1::Encoder;
-
-    let n_be = key.n_bytes();
-    let e_be = key.e_bytes();
-    let d_be = key.d_bytes();
-    let p_be = key.p_bytes();
-    let q_be = key.q_bytes();
-
-    let d = BigNum::from_bytes_be(&d_be);
-    let p = BigNum::from_bytes_be(&p_be);
-    let q = BigNum::from_bytes_be(&q_be);
-    let one = BigNum::from_u64(1);
-    let p_minus_1 = p.sub(&one);
-    let q_minus_1 = q.sub(&one);
-    let (_, dp_bn) = d.div_rem(&p_minus_1)?;
-    let (_, dq_bn) = d.div_rem(&q_minus_1)?;
-    let dp = dp_bn.to_bytes_be();
-    let dq = dq_bn.to_bytes_be();
-    let qinv = q.mod_inv(&p)?.to_bytes_be();
-
-    let mut enc = Encoder::new();
-    enc.write_integer(&[0]);
-    enc.write_integer(&n_be);
-    enc.write_integer(&e_be);
-    enc.write_integer(&d_be);
-    enc.write_integer(&p_be);
-    enc.write_integer(&q_be);
-    enc.write_integer(&dp);
-    enc.write_integer(&dq);
-    enc.write_integer(&qinv);
-    let body = enc.finish();
-    let mut wrap = Encoder::new();
-    wrap.write_sequence(&body);
-    let der = wrap.finish();
+    let der = hitls_pki::pkcs8::encode_rsa_pkcs1_der(key)
+        .map_err(|e| format!("RSA PKCS#1 encode: {e:?}"))?;
     Ok(hitls_utils::pem::encode("RSA PRIVATE KEY", &der))
 }
 

@@ -511,6 +511,57 @@ fn parse_small_int(bytes: &[u8]) -> u32 {
 
 // ===== Encoding helpers =====
 
+/// T253 Phase I-5 — Encode an RSA private key as a PKCS#1 `RSAPrivateKey`
+/// DER (RFC 8017 §A.1.2). The CRT form is emitted (n, e, d, p, q, dp, dq,
+/// qinv). This is the canonical PKCS#1 inner-DER used as:
+///
+/// - The body of a PKCS#8 PrivateKeyInfo (wrap with `rsaEncryption` or
+///   `id-RSASSA-PSS` AlgorithmIdentifier; see T250).
+/// - The body of a PEM-wrapped `-----BEGIN RSA PRIVATE KEY-----` block
+///   (the traditional OpenSSL form).
+///
+/// Extracted from the third inlined copy across `hitls-cli/src/pkey.rs`
+/// (T190), `genrsa.rs` (T189), and `rsa_cmd.rs` (T191) — the Phase I-5
+/// refactor closes `TODO(#47-rsa-codec-extract)`.
+pub fn encode_rsa_pkcs1_der(
+    key: &hitls_crypto::rsa::RsaPrivateKey,
+) -> Result<Vec<u8>, CryptoError> {
+    use hitls_bignum::BigNum;
+
+    let n_be = key.n_bytes();
+    let e_be = key.e_bytes();
+    let d_be = key.d_bytes();
+    let p_be = key.p_bytes();
+    let q_be = key.q_bytes();
+
+    let d = BigNum::from_bytes_be(&d_be);
+    let p = BigNum::from_bytes_be(&p_be);
+    let q = BigNum::from_bytes_be(&q_be);
+    let one = BigNum::from_u64(1);
+    let p_minus_1 = p.sub(&one);
+    let q_minus_1 = q.sub(&one);
+    let (_, dp_bn) = d.div_rem(&p_minus_1)?;
+    let (_, dq_bn) = d.div_rem(&q_minus_1)?;
+    let dp = dp_bn.to_bytes_be();
+    let dq = dq_bn.to_bytes_be();
+    let qinv = q.mod_inv(&p)?.to_bytes_be();
+
+    let mut enc = Encoder::new();
+    enc.write_integer(&[0]);
+    enc.write_integer(&n_be);
+    enc.write_integer(&e_be);
+    enc.write_integer(&d_be);
+    enc.write_integer(&p_be);
+    enc.write_integer(&q_be);
+    enc.write_integer(&dp);
+    enc.write_integer(&dq);
+    enc.write_integer(&qinv);
+    let body = enc.finish();
+    let mut wrap = Encoder::new();
+    wrap.write_sequence(&body);
+    Ok(wrap.finish())
+}
+
 /// Encode an Ed25519 seed as a PKCS#8 DER PrivateKeyInfo.
 pub fn encode_ed25519_pkcs8_der(seed: &[u8; 32]) -> Vec<u8> {
     // The privateKey is OCTET STRING wrapping the seed
