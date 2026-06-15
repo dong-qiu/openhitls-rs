@@ -17644,3 +17644,32 @@ na-list tally → 3251 emitted（OTP 52/32/0/0/84, Total 3251/3804/240/7/6578）
   重新编码 parser 的 Arg::Hex 字节即可还原原始十进制串
 
 Recorded as DEV_LOG Phase T255.
+
+### T256 — Phase J-2: Privacy Pass (RFC 9578 Type 2) round-trip 迁移 + byte-exact 结构性缺口（blocked）
+
+> 在J-1的任务完成合入后，依次完成J Phase剩下的子 PR
+
+字节级迁移被真实实现缺口阻塞：
+  C VECTOR_TEST_TC001 是 RFC 9474 RSABSSA（EMSA-PSS 编码 + stubbed RNG 注入固定 nonce/salt/blind）
+  Rust hitls_auth::privpass 是简化版 blind-RSA：直接盲化 SHA-256(token_input)，无 EMSA-PSS / 无 salt /
+    无 RFC 9577 TokenChallenge wire codec / nonce·blind 内部 getrandom
+  → C 的 request/response/token 字节不可复现 → 记入 na-list Structural Gap（unblock = 未来 I-phase：
+    EMSA-PSS RSABSSA + kat-nonce 确定性 nonce/salt/blind hooks + TokenChallenge 序列化）
+
+可迁移的部分（SM9/T158 round-trip 方法学）：
+  用 C vector 真实的 RSA-2048 密钥（n/d/e 从 VECTOR_TEST_TC001 的 ski PKCS#8 提取）+ challenge 字节
+  驱动 Rust Issuer/Client/verify 全流程端到端
+  新建手写测试 crates/hitls-auth/tests/migrated_privpass.rs（feature-gated privpass），5 个 round-trip + 负面 pin：
+    roundtrip_verifies / blinded_element_size / tampered_rejected / wrong_challenge_rejected / wrong_pubkey_rejected
+  证明 C vector 的密钥材料可被 Rust port 使用
+
+零新增产品代码（privpass 是非默认 feature；round-trip 管线已存在，lib 测试用合成 1024-bit 密钥，本次加真实 2048-bit vector 密钥）
+
+验证：
+  cargo test -p hitls-auth --features privpass --test migrated_privpass     5/0
+  cargo clippy -p hitls-auth --features privpass --all-targets -D warnings   clean
+  cargo fmt --all --check                                                     clean
+
+新方法学：「byte-exact blocked → 迁移 vector 的密钥材料（round-trip）+ 文档化 crypto-construction 缺口」
+
+Recorded as DEV_LOG Phase T256.
