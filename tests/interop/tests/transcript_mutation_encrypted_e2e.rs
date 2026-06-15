@@ -1507,3 +1507,229 @@ fn m276_audit_phase_m_plan_docs_in_sync() {
     assert!(plan.contains("Phase M"));
     assert!(plan.contains("wire") || plan.contains("Alert") || plan.contains("alert"));
 }
+
+// ===========================================================================
+// Phase M-2 (T278) — MODIFIED_CERT_VERIFY → true wire-level Alert.
+//
+// M-1 captured the client's alert but only for AEAD-layer mutations (the EE
+// record). M-2 drives the rogue server one flight deeper — it emits a real,
+// valid signed Certificate + CertificateVerify so the client's
+// CertificateVerify *signature* check is reached, then mutates the CV
+// signature and observes the resulting `decrypt_error(51)` alert (RFC 8446
+// §6.2, the alert codified by T99 for CV signature failure).
+//
+// How the client is made to verify CV without a real PKI: `verify_peer(true)`
+// turns ON CertificateVerify signature verification (client.rs gates it on
+// verify_peer), while an accept-all `cert_verify_callback` overrides the
+// chain/hostname result (cert_verify.rs §"let it decide") so the self-signed
+// `make_ecdsa_server_identity` cert sails through chain validation — leaving
+// the CV signature as the only thing that can fail. Mutating it is therefore a
+// clean isolation of the MODIFIED_CERT_VERIFY semantics.
+//
+// Zero product code: composes the same public server-side encoders/signers the
+// real server uses (`encode_certificate`, `select_signature_scheme_for_cert`,
+// `sign_certificate_verify`, `encode_certificate_verify`) — T186/T219
+// rogue-server-as-public-API-composition methodology.
+// ===========================================================================
+
+use hitls_integration_tests::make_ecdsa_server_identity;
+use hitls_tls::config::CertVerifyCallback;
+use hitls_tls::crypt::SignatureScheme;
+use hitls_tls::handshake::codec::{
+    encode_certificate, encode_certificate_verify, CertificateEntry, CertificateMsg,
+    CertificateVerifyMsg,
+};
+use hitls_tls::handshake::signing::{select_signature_scheme_for_cert, sign_certificate_verify};
+use std::sync::Arc;
+
+/// How to corrupt the server's CertificateVerify before sending it.
+#[derive(Clone, Copy)]
+enum CvMutation {
+    /// Flip the last signature byte (valid DER, wrong signature).
+    FlipSigByte,
+    /// Zero the entire signature.
+    ZeroSig,
+}
+
+/// Drive a real client through SH → encrypted EE → encrypted Certificate →
+/// encrypted (mutated) CertificateVerify, and capture the alert the client
+/// sends when CV signature verification fails. The client is configured with
+/// `verify_peer(true)` + an accept-all cert callback so the *only* thing that
+/// can fail is the CV signature.
+fn drive_m2_cert_verify(mutate: CvMutation) -> Option<CapturedAlert> {
+    let (cert_chain, server_key) = make_ecdsa_server_identity();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let rogue = thread::spawn(move || -> Option<CapturedAlert> {
+        let (mut stream, _) = listener.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut info = capture_client_hello(&mut stream);
+        if let Some(pos) = info.offered_ciphers.iter().position(|c| {
+            CipherSuiteParams::from_suite(*c)
+                .map(|p| p.key_len == 16)
+                .unwrap_or(false)
+        }) {
+            info.offered_ciphers.swap(0, pos);
+        }
+        let (group, client_pub) = info.offered_key_shares[0].clone();
+        let kx = KeyExchange::generate(group).expect("kx");
+
+        let mut sh_random = [0u8; 32];
+        for (i, b) in sh_random.iter_mut().enumerate() {
+            *b = (i as u8).wrapping_add(0x42);
+        }
+        let sh_bytes = make_valid_sh(&info, &kx, sh_random);
+        if stream.write_all(&make_handshake_record(&sh_bytes)).is_err() {
+            return None;
+        }
+
+        let dhe = kx.compute_shared_secret(&client_pub).expect("ECDH");
+        let mut transcript = TranscriptHash::new(HashAlgId::Sha256);
+        transcript.update(&info.ch_handshake_bytes).expect("ch");
+        transcript.update(&sh_bytes).expect("sh");
+        let ch_sh_hash = transcript.current_hash().expect("hash");
+
+        let suite = info.offered_ciphers[0];
+        let (_ss, server_keys) = derive_server_handshake_keys(suite, &dhe, &ch_sh_hash);
+        let client_keys = derive_client_handshake_keys(suite, &dhe, &ch_sh_hash);
+        let mut seq = 0u64;
+
+        // (1) EncryptedExtensions
+        let ee = build_empty_encrypted_extensions();
+        if stream
+            .write_all(&seal_encrypted_record(suite, &server_keys, seq, 0x16, &ee))
+            .is_err()
+        {
+            return None;
+        }
+        seq += 1;
+        transcript.update(&ee).expect("ee");
+
+        // (2) Certificate (the rogue server's self-signed identity)
+        let cert_struct = CertificateMsg {
+            certificate_request_context: vec![],
+            certificate_list: cert_chain
+                .iter()
+                .map(|d| CertificateEntry {
+                    cert_data: d.clone(),
+                    extensions: vec![],
+                })
+                .collect(),
+        };
+        let cert_msg = encode_certificate(&cert_struct);
+        if stream
+            .write_all(&seal_encrypted_record(
+                suite,
+                &server_keys,
+                seq,
+                0x16,
+                &cert_msg,
+            ))
+            .is_err()
+        {
+            return None;
+        }
+        seq += 1;
+        transcript.update(&cert_msg).expect("cert");
+
+        // (3) CertificateVerify — sign correctly over CH..Cert, then mutate.
+        let scheme = select_signature_scheme_for_cert(
+            &server_key,
+            &[SignatureScheme::ECDSA_SECP256R1_SHA256],
+            false,
+        )
+        .expect("select scheme");
+        let cv_hash = transcript.current_hash().expect("cv hash");
+        let mut sig =
+            sign_certificate_verify(&server_key, scheme, &cv_hash, true).expect("sign cv");
+        match mutate {
+            CvMutation::FlipSigByte => {
+                if let Some(b) = sig.last_mut() {
+                    *b ^= 0x01;
+                }
+            }
+            CvMutation::ZeroSig => sig.iter_mut().for_each(|b| *b = 0),
+        }
+        let cv = CertificateVerifyMsg {
+            algorithm: scheme,
+            signature: sig,
+        };
+        let cv_msg = encode_certificate_verify(&cv);
+        if stream
+            .write_all(&seal_encrypted_record(
+                suite,
+                &server_keys,
+                seq,
+                0x16,
+                &cv_msg,
+            ))
+            .is_err()
+        {
+            return None;
+        }
+
+        capture_client_alert(&mut stream, &client_keys)
+    });
+
+    let stream = TcpStream::connect(addr).expect("connect");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    stream
+        .set_write_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    let accept_all: CertVerifyCallback = Arc::new(|_info| Ok(()));
+    let client_config = TlsConfig::builder()
+        .role(TlsRole::Client)
+        .min_version(TlsVersion::Tls13)
+        .max_version(TlsVersion::Tls13)
+        .verify_peer(true)
+        .cert_verify_callback(accept_all)
+        .build();
+    let mut conn = TlsClientConnection::new(stream, client_config);
+    let _ = conn
+        .handshake()
+        .expect_err("rogue server with a bad CertVerify must not let handshake succeed");
+    rogue.join().ok().flatten()
+}
+
+/// Phase M-2: a flipped CertificateVerify signature byte (record decrypts
+/// fine; the *signature* is wrong) must make the client reject CV and send a
+/// fatal `decrypt_error(51)` on the wire — NOT `bad_record_mac` (the AEAD
+/// succeeded). RFC 8446 §6.2 + T99 CV alert mapping.
+#[test]
+fn m278_tampered_cert_verify_sig_client_sends_decrypt_error() {
+    let (level, desc) =
+        drive_m2_cert_verify(CvMutation::FlipSigByte).expect("client must send a CV-failure alert");
+    assert_eq!(level, 2, "CV signature failure is fatal (level 2)");
+    assert_eq!(
+        desc, ALERT_DECRYPT_ERROR,
+        "RFC 8446 §6.2: CertificateVerify signature failure → decrypt_error(51)"
+    );
+}
+
+/// Phase M-2: a fully zeroed CertificateVerify signature likewise fails
+/// verification → `decrypt_error(51)`.
+#[test]
+fn m278_zeroed_cert_verify_sig_client_sends_decrypt_error() {
+    let (level, desc) =
+        drive_m2_cert_verify(CvMutation::ZeroSig).expect("client must send a CV-failure alert");
+    assert_eq!(level, 2);
+    assert_eq!(desc, ALERT_DECRYPT_ERROR);
+}
+
+/// Phase M-2 audit pin: the Phase M plan records M-2 / MODIFIED_CERT_VERIFY.
+#[test]
+fn m278_audit_phase_m_plan_records_m2() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let plan_path = format!("{manifest_dir}/../../docs/issue-42-phase-jklm-plan.md");
+    let plan = std::fs::read_to_string(&plan_path).expect("phase jklm plan doc");
+    assert!(plan.contains("M-2"));
+    assert!(plan.contains("MODIFIED_CERT_VERIFY"));
+}

@@ -17838,3 +17838,34 @@ Phase L ground-truth survey 结论：apps/CLI 对齐 + #43/#47 已基本由 Phas
 docs-only 变更，无代码。这是继 Phase K 之后第二个被 Phase I 提前关闭的 plan 阶段 —— plan 的 K/L 估计早于 T189–T254 的 CLI 工作。
 
 Recorded as DEV_LOG Phase T277.
+
+### T278 — Phase M-2: MODIFIED_CERT_VERIFY → 真 wire-level decrypt_error Alert
+
+> 请按照 C → A → B → D 的顺序依次完成
+
+WP-C 第二弹（承接 M-1 wire-alert 基建）。把 client 驱动深一程：rogue server 发**有效签名**的 Certificate + CertVerify 让 client 到达 CV 签名校验，再篡改 CV 签名观测 alert。
+
+关键洞察（如何在无真实 PKI 下到达 CV）：
+  verify_peer(true) 打开 CV 签名校验（client.rs 按 verify_peer gate）
+  accept-all cert_verify_callback 覆盖链/hostname 结果（cert_verify.rs 回调返回值替换链结果）
+  → 自签 make_ecdsa_server_identity cert 过链校验，只剩 CV 签名可失败
+
+扩展 transcript_mutation_encrypted_e2e.rs 的 drive_m2_cert_verify(CvMutation)：
+  rogue server 建 CH..SH transcript，派生 server+client handshake keys
+  发 加密 EE → 加密 Certificate(encode_certificate) → 加密 CertVerify(select_signature_scheme_for_cert + sign_certificate_verify over CH..Cert hash，签名被篡改)
+  用 M-1 capture_client_alert 捕获 client alert
+3 个测试：
+  m278_tampered_cert_verify_sig_client_sends_decrypt_error（翻转 CV 签名尾字节 → AEAD 解密正常所以不是 bad_record_mac；签名校验失败 → decrypt_error(51)，RFC 8446 §6.2 + T99）
+  m278_zeroed_cert_verify_sig_...（清零签名 → 同）
+  m278_audit_phase_m_plan_records_m2
+
+零新增产品代码（复用 server 端 public 编码/签名 API；T186/T219 方法学 + make_ecdsa_server_identity）。
+
+验证：
+  cargo test -p hitls-integration-tests --test transcript_mutation_encrypted_e2e   44/0（41+3）
+  cargo clippy -p hitls-integration-tests --tests -D warnings                       clean
+  cargo fmt --all --check                                                           clean
+
+M-3（MODIFIED_FINISHED wire alerts）建立在同一 valid-handshake-up-to-CV 基底上。
+
+Recorded as DEV_LOG Phase T278.

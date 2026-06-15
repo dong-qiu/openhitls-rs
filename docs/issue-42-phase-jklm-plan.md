@@ -166,7 +166,7 @@ custom-alert 并入各 E2E）。这是把 audit-pin 升级为真 wire-format `Al
 | # | T | 来源（H §8） | 估计 | 做法 |
 |---|---|---|---:|---|
 | ✅ plan + M-1 | ✅ T276 | client wire-level Alert capture（H §8 #4 keystone） | **3 delivered** | rogue server 派生 client handshake keys + 读取并解密 client 的加密 alert（跳过 middlebox-compat CCS）→ 把 E2E 断言从"client errored"收紧到具体 `Alert{level,desc}`；tampered EE tag/ciphertext → client 发 fatal `bad_record_mac`/`decrypt_error`。零产品代码 |
-| M-2 | T277 | rogue-server cert + 私钥加载器 → `MODIFIED_CERT_VERIFY_*` 真 wire Alert | ~12 | PEM→DER→PKCS#8 签 CertVerify（+~200 LoC）让 client 过 cert 校验，再观测 CV 阶段 alert |
+| ✅ M-2 | ✅ T278 | rogue-server cert + 签 CertVerify → `MODIFIED_CERT_VERIFY_*` 真 wire Alert | **3 delivered** | rogue server 用 `make_ecdsa_server_identity` 自签 cert + `sign_certificate_verify` 发**有效签名**的 Certificate+CertVerify；client `verify_peer(true)` + accept-all `cert_verify_callback`（绕过链校验、保留 CV 签名校验）；翻转/清零 CV 签名 → 捕获 `decrypt_error(51)`。零产品代码（复用 server 端 public 编码/签名 API） |
 | M-3 | T278 | `MODIFIED_FINISHED_*` 真 wire Alert | ~12 | Finished MAC 校验阶段观测 |
 | M-4 | T279 | DTLS 1.3 UDP rogue server（RFC 9147 §4） | ~10 | epoch+seq 加密统一头 |
 | M-5 | T280 | 0-RTT 接受 E2E + PSK 预热（T119 deferred PSK_ONLY） | ~10 | early-data 路径 |
