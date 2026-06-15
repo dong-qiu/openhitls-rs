@@ -527,12 +527,17 @@ pub fn encode_rsa_pkcs1_der(
     key: &hitls_crypto::rsa::RsaPrivateKey,
 ) -> Result<Vec<u8>, CryptoError> {
     use hitls_bignum::BigNum;
+    use zeroize::Zeroizing;
 
+    // T254 — wrap RSA secret components in `Zeroizing` so the heap
+    // allocations holding `d`, `p`, `q`, `dp`, `dq`, `qinv` are wiped
+    // on drop. The returned DER (the function's output) still contains
+    // the secret material — caller's responsibility to zeroize.
     let n_be = key.n_bytes();
     let e_be = key.e_bytes();
-    let d_be = key.d_bytes();
-    let p_be = key.p_bytes();
-    let q_be = key.q_bytes();
+    let d_be = Zeroizing::new(key.d_bytes());
+    let p_be = Zeroizing::new(key.p_bytes());
+    let q_be = Zeroizing::new(key.q_bytes());
 
     let d = BigNum::from_bytes_be(&d_be);
     let p = BigNum::from_bytes_be(&p_be);
@@ -542,9 +547,9 @@ pub fn encode_rsa_pkcs1_der(
     let q_minus_1 = q.sub(&one);
     let (_, dp_bn) = d.div_rem(&p_minus_1)?;
     let (_, dq_bn) = d.div_rem(&q_minus_1)?;
-    let dp = dp_bn.to_bytes_be();
-    let dq = dq_bn.to_bytes_be();
-    let qinv = q.mod_inv(&p)?.to_bytes_be();
+    let dp = Zeroizing::new(dp_bn.to_bytes_be());
+    let dq = Zeroizing::new(dq_bn.to_bytes_be());
+    let qinv = Zeroizing::new(q.mod_inv(&p)?.to_bytes_be());
 
     let mut enc = Encoder::new();
     enc.write_integer(&[0]);
