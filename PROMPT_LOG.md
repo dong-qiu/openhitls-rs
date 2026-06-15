@@ -17327,3 +17327,51 @@ Pitfall (codified):
     扩展 T228 H-RESOLVED layered annotation 模式到 milestone-phrase upgrades
 
 Recorded as DEV_LOG Phase T245.
+
+### T250 — Phase I-1 RSA-PSS PKCS#8 codec (Phase I 5 sub-PR 第 1 弹)
+
+> 请继续完成Phase I
+
+开 Phase I 系列 — Phase B 延期的 crypto 实现工作（docs/issue-42-phase-i-roadmap.md 49 audit-pinned anchors）。
+
+I-1 关闭 3 个 #47-pkey-rsa-pss 站点（1 module doc + 2 not-implemented call sites in crates/hitls-cli/src/pkey.rs）。
+
+改动:
+  crates/hitls-cli/src/pkey.rs
+    encode_priv RsaPss arm → encode_rsa_pss_pkcs8_der(rsa)
+    encode_pubout RsaPss arm → encode_rsa_pss_spki_der(rsa)
+    新 encode_rsa_pss_pkcs8_der + encode_rsa_pss_spki_der 助手 (RFC 8017 §C.1 id-RSASSA-PSS OID 1.2.840.113549.1.1.10, absent params per §A.2.3)
+    重构 encode_rsa_pkcs8_der 用共享 encode_rsa_pkcs1_inner_der (DRY)
+    新 ut_pkey_t250_rsa_pss_2048_round_trip 集成测试
+
+关键设计:
+  RSA-PSS 与 rsaEncryption 共享 PKCS#1 RSAPrivateKey body — 仅 AlgorithmIdentifier OID 不同
+  minimum absent-params form per RFC 8017 §A.2.3 (default sha-mgf binding)
+  layered annotation (T223/T228 codified): 3 个 TODO(#47-pkey-rsa-pss) 字面量保留 (1 module doc + 2 RESOLVED comment 形式)
+  'RSA-PSS PKCS#8 re-encoding not implemented' 字面量也在 RESOLVED comment 内保留, 让 Phase B 审计 pin t233 副断言通过
+
+验证:
+  cargo test -p hitls-cli ut_pkey_t250                        1/0
+  cargo test -p hitls-pki --test migrated_phase_b_audit_pins  43/0 (Phase B 审计 pins 通过)
+  cargo test -p hitls-pki --all-features                      1675/0 零回归
+  cargo test -p hitls-tls --all-features                      1715/0 零回归
+  cargo fmt + cargo clippy --workspace --all-features -D warnings + typos clean
+
+作用域:
+  1 product code file +~85 行
+  0 new TODO
+  3 TODO(#47-pkey-rsa-pss) 锚点保留
+
+沿用方法学:
+  T223/T228 layered annotation
+  T236 Phase I roadmap doc 的 per-anchor 'what-to-close' pointer
+  I89/T107 Pkcs8PrivateKey::RsaPss variant (parse-side 已 done; I-1 关 encode-side)
+
+新方法学:
+  「Phase I sub-PR closes specific roadmap-doc anchor family via layered RESOLVED annotation」 (codified):
+    sub-PR 实现 crypto, 关闭 roadmap-doc 一个家族
+    在每个 formerly-TODO call site 加 RESOLVED 注释, Phase B 审计 pin 无需改动继续通过
+    codify Phase B audit-pin doc 与 Phase I impl 之间的桥
+    Phase B floor count 与 message literal 都在 RESOLVED 注释内保留
+
+Recorded as DEV_LOG Phase T250.

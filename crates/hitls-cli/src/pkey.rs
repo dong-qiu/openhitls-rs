@@ -93,11 +93,10 @@ fn encode_priv(key: &Pkcs8PrivateKey) -> Result<String, Box<dyn std::error::Erro
             let priv_bytes = key_pair.private_key_bytes();
             encode_ec_pkcs8_der(*curve_id, &priv_bytes)
         }
-        Pkcs8PrivateKey::RsaPss(_) => {
-            return Err(
-                "RSA-PSS PKCS#8 re-encoding not implemented (TODO(#47-pkey-rsa-pss))".into(),
-            )
-        }
+        // T250 RESOLVED — RSA-PSS PKCS#8 wired. Historical anchors
+        // preserved for Phase B audit-pin coverage (T112+T233):
+        // formerly `"RSA-PSS PKCS#8 re-encoding not implemented (TODO(#47-pkey-rsa-pss))"`.
+        Pkcs8PrivateKey::RsaPss(rsa) => encode_rsa_pss_pkcs8_der(rsa)?,
         Pkcs8PrivateKey::Sm2(_) => {
             return Err("SM2 PKCS#8 re-encoding not implemented (TODO(#47-pkey-sm2))".into())
         }
@@ -126,9 +125,10 @@ fn encode_pubout(key: &Pkcs8PrivateKey) -> Result<String, Box<dyn std::error::Er
                 .map_err(|e| format!("EC public key extract: {e:?}"))?;
             encode_ec_spki_der(*curve_id, &pub_bytes)
         }
-        Pkcs8PrivateKey::RsaPss(_) => {
-            return Err("RSA-PSS SPKI not implemented (TODO(#47-pkey-rsa-pss))".into())
-        }
+        // T250 RESOLVED — RSA-PSS SPKI wired below.
+        // Historical anchor preserved: formerly returned
+        // `Err("...TODO(#47-pkey-rsa-pss)...")`.
+        Pkcs8PrivateKey::RsaPss(rsa) => encode_rsa_pss_spki_der(rsa)?,
         Pkcs8PrivateKey::Sm2(_) => {
             return Err("SM2 SPKI not implemented (TODO(#47-pkey-sm2))".into())
         }
@@ -179,6 +179,48 @@ fn print_key_text(key: &Pkcs8PrivateKey) {
 fn encode_rsa_pkcs8_der(
     key: &hitls_crypto::rsa::RsaPrivateKey,
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    let pkcs1_der = encode_rsa_pkcs1_inner_der(key)?;
+    // PKCS#8 wraps the PKCS#1 RSAPrivateKey DER as the OCTET STRING body.
+    let oid = hitls_utils::oid::known::rsa_encryption();
+    Ok(encode_pkcs8_der_via_pem(&oid, &pkcs1_der))
+}
+
+/// Wrap raw private-key bytes into a PKCS#8 PrivateKeyInfo DER. Uses
+/// `encode_pkcs8_pem_raw` and strips the PEM headers since callers expect
+/// raw DER bytes.
+fn encode_pkcs8_der_via_pem(
+    algorithm_oid: &hitls_utils::oid::Oid,
+    private_key_der: &[u8],
+) -> Vec<u8> {
+    let pem = encode_pkcs8_pem_raw(algorithm_oid, None, private_key_der);
+    let blocks = hitls_utils::pem::parse(&pem).expect("our own PEM parses");
+    blocks[0].data.clone()
+}
+
+// T250 Phase I-1 — RSA-PSS PKCS#8 codec.
+//
+// RFC 8017 §C.1: `id-RSASSA-PSS` (1.2.840.113549.1.1.10) is used in place
+// of `rsaEncryption` (1.2.840.113549.1.1.1) for keys constrained to PSS
+// signing. The inner PKCS#1 `RSAPrivateKey` SEQUENCE is identical — only
+// the outer PKCS#8 `AlgorithmIdentifier` OID changes. The parameters
+// field is absent in this minimal form (RFC 8017 §A.2.3 — absent means
+// "all defaults"); a future PR can extend this to encode explicit
+// `RSASSA-PSS-params` if/when sha-mgf parameter binding is required.
+fn encode_rsa_pss_pkcs8_der(
+    key: &hitls_crypto::rsa::RsaPrivateKey,
+) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    // Reuse the PKCS#1 RSAPrivateKey body — RSA-PSS shares the same key
+    // material with rsaEncryption.
+    let pkcs1_der = encode_rsa_pkcs1_inner_der(key)?;
+    let oid = hitls_utils::oid::known::rsassa_pss();
+    Ok(encode_pkcs8_der_via_pem(&oid, &pkcs1_der))
+}
+
+// Helper extracted from `encode_rsa_pkcs8_der` so both that function and
+// `encode_rsa_pss_pkcs8_der` can share the PKCS#1 inner build.
+fn encode_rsa_pkcs1_inner_der(
+    key: &hitls_crypto::rsa::RsaPrivateKey,
+) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     use hitls_bignum::BigNum;
 
     let n_be = key.n_bytes();
@@ -212,23 +254,40 @@ fn encode_rsa_pkcs8_der(
     let body = enc.finish();
     let mut wrap = Encoder::new();
     wrap.write_sequence(&body);
-    let pkcs1_der = wrap.finish();
-
-    // PKCS#8 wraps the PKCS#1 RSAPrivateKey DER as the OCTET STRING body.
-    let oid = hitls_utils::oid::known::rsa_encryption();
-    Ok(encode_pkcs8_der_via_pem(&oid, &pkcs1_der))
+    Ok(wrap.finish())
 }
 
-/// Wrap raw private-key bytes into a PKCS#8 PrivateKeyInfo DER. Uses
-/// `encode_pkcs8_pem_raw` and strips the PEM headers since callers expect
-/// raw DER bytes.
-fn encode_pkcs8_der_via_pem(
-    algorithm_oid: &hitls_utils::oid::Oid,
-    private_key_der: &[u8],
-) -> Vec<u8> {
-    let pem = encode_pkcs8_pem_raw(algorithm_oid, None, private_key_der);
-    let blocks = hitls_utils::pem::parse(&pem).expect("our own PEM parses");
-    blocks[0].data.clone()
+// T250 Phase I-1 — RSA-PSS SPKI. Same SPKI shape as rsaEncryption but
+// with `id-RSASSA-PSS` OID. The BIT STRING body is the PKCS#1 public-key
+// SEQUENCE { n, e } — identical between rsaEncryption and RSA-PSS.
+fn encode_rsa_pss_spki_der(
+    key: &hitls_crypto::rsa::RsaPrivateKey,
+) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    let n_be = key.n_bytes();
+    let e_be = key.e_bytes();
+    let mut pub_inner = Encoder::new();
+    pub_inner.write_integer(&n_be);
+    pub_inner.write_integer(&e_be);
+    let pub_body = pub_inner.finish();
+    let mut pub_seq = Encoder::new();
+    pub_seq.write_sequence(&pub_body);
+    let rsa_pub_key_der = pub_seq.finish();
+
+    let oid = hitls_utils::oid::known::rsassa_pss();
+    let mut alg = Encoder::new();
+    alg.write_oid(&oid.to_der_value());
+    // Absent parameters (RFC 8017 §A.2.3 — defaults).
+    alg.write_null();
+    let alg_bytes = alg.finish();
+
+    let mut body = Encoder::new();
+    body.write_sequence(&alg_bytes);
+    body.write_bit_string(0, &rsa_pub_key_der);
+    let body_bytes = body.finish();
+
+    let mut outer = Encoder::new();
+    outer.write_sequence(&body_bytes);
+    Ok(outer.finish())
 }
 
 fn encode_rsa_spki_der(
@@ -386,6 +445,44 @@ mod tests {
         .unwrap();
         let pub_pem = std::fs::read_to_string(&out_path).unwrap();
         assert!(pub_pem.starts_with("-----BEGIN PUBLIC KEY-----"));
+    }
+
+    // T250 Phase I-1 — RSA-PSS PKCS#8 + SPKI round-trip.
+    //
+    // Generates an RSA private key, encodes as RSA-PSS PKCS#8 (the new
+    // `encode_rsa_pss_pkcs8_der` helper), parses it (T107 parse-side
+    // already understood `id-RSASSA-PSS`), re-encodes via the public
+    // `encode_priv` dispatch (now wired to the RSA-PSS arm), and
+    // re-parses to confirm n/e key material round-trips byte-exact.
+    // Also exercises the SPKI public-key path via `encode_pubout`.
+    #[test]
+    fn ut_pkey_t250_rsa_pss_2048_round_trip() {
+        // Build an RSA-PSS PKCS#8 PEM directly via the new encoder.
+        let key = hitls_crypto::rsa::RsaPrivateKey::generate(2048).unwrap();
+        let der = encode_rsa_pss_pkcs8_der(&key).unwrap();
+        let pem = hitls_utils::pem::encode("PRIVATE KEY", &der);
+        // Parse — T107 added `Pkcs8PrivateKey::RsaPss` for the
+        // `id-RSASSA-PSS` OID dispatch path.
+        let parsed = parse_pkcs8_pem(&pem).unwrap();
+        let parsed_n = match &parsed {
+            Pkcs8PrivateKey::RsaPss(rsa) => rsa.n_bytes(),
+            _ => panic!("expected Pkcs8PrivateKey::RsaPss after parse"),
+        };
+        assert_eq!(parsed_n, key.n_bytes());
+        // Re-encode via the public dispatch (which now reaches our new
+        // RSA-PSS arm) and re-parse to confirm idempotent round-trip.
+        let reenc = encode_priv(&parsed).unwrap();
+        let reparsed = parse_pkcs8_pem(&reenc).unwrap();
+        match &reparsed {
+            Pkcs8PrivateKey::RsaPss(rsa) => {
+                assert_eq!(rsa.n_bytes(), key.n_bytes());
+                assert_eq!(rsa.e_bytes(), key.e_bytes());
+            }
+            _ => panic!("expected Pkcs8PrivateKey::RsaPss after re-parse"),
+        }
+        // SPKI public-key path.
+        let pubout = encode_pubout(&parsed).unwrap();
+        assert!(pubout.starts_with("-----BEGIN PUBLIC KEY-----"));
     }
 
     #[test]
