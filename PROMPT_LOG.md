@@ -17484,3 +17484,60 @@ Phase I 累计:
     cli 锚点合理关闭 — 因 cli 层无代码需改
 
 Recorded as DEV_LOG Phase T252.
+
+### T253 — Phase I-4 PBES2 cli-layer deferral + I-5 RSA codec extract (Phase I 5 sub-PR 第 4 弹)
+
+> 请继续完成Phase I
+
+承接 T250+T251+T252 Phase I-1/I-2/I-3.
+
+两路工作:
+  I-5 RSA codec extract — 纯 refactor 把 RSA PKCS#1 CRT 编码器从 3 处 inlined 副本 (pkey.rs T250 / rsa_cmd.rs T191 / genrsa.rs T189) 提取到 hitls_pki::pkcs8::encode_rsa_pkcs1_der 一个 canonical public 助手
+  I-4 cli-layer deferral upgrade — 认识到 PBES2 codec (RFC 8018 §A.4 + §A.2 PBKDF2) 早已在 hitls_pki::pkcs8::encrypted 中完整实现 (decrypt_pkcs8_pem + encrypt_pkcs8_pem 今天就可调用), 所以 cli gap 是 CLI flag UX wiring, 非 crypto codec gap
+
+改动:
+  hitls-pki Cargo.toml +hitls-bignum dep
+  hitls-pki/src/pkcs8/mod.rs +pub fn encode_rsa_pkcs1_der (~50 行)
+  3 cli 文件更新:
+    pkey.rs encode_rsa_pkcs1_inner_der 改 thin wrapper 委托 hitls-pki + RESOLVED doc for #47-pkey-encrypted-pkcs8
+    rsa_cmd.rs encode_rsa_pkcs1_pem 40-line inline → 4-line PEM-wrap + RESOLVED doc for #47-rsa-codec-extract
+    genrsa.rs encode_rsa_private_key_pem 同等折叠 + RESOLVED doc for #47-genrsa-encryption
+
+Phase I cli-layer 锚点关闭进度:
+  11/49 = 3 rsa-pss + 3 sm2 + 1 brainpool + 1 p224 + 2 encrypted-pkcs8 + 2 genrsa-encryption + 2 rsa-codec-extract
+  Phase B 锚点 layered annotation 模式全保留
+
+关键设计:
+  I-5 证明 extract refactor 可行: 一个 canonical 家 in hitls-pki + 3 处 thin 调用方 wrapper
+  I-4 证明 cli-layer deferral upgrade 模式 (T252 codified) 推广到 UX gaps 非仅 crypto-tier gaps
+    PBES2 codec 已在 hitls-pki, 加 -passin / -passout 是 focused UX-only PR, 无 codec 依赖
+
+验证:
+  cargo build -p hitls-cli + hitls-pki --all-features                          clean
+  cargo test -p hitls-cli ut_pkey_t250                                          1/0 (T250 RSA-PSS 仍通过)
+  cargo test -p hitls-cli ut_pkey_t251                                          1/0 (T251 SM2 仍通过)
+  cargo test -p hitls-cli rsa                                                   33 passed 2 ignored
+  cargo test -p hitls-cli genrsa                                                18 passed 2 ignored
+  cargo test -p hitls-pki --test migrated_phase_b_audit_pins                    43/0 (Phase B 审计 pins 通过)
+  cargo fmt + cargo clippy --workspace --all-features -D warnings + typos clean
+
+作用域:
+  5 文件 (hitls-pki Cargo.toml + hitls-pki pkcs8/mod.rs + 3 hitls-cli)
+  +~90 行 (canonical helper) -~80 行 (3 inlined copies 折叠)
+  0 new TODO
+  6 cli #47-* 锚点保留
+
+沿用方法学:
+  T250/T251 layered RESOLVED annotation
+  T252 cli-layer deferral upgrade
+
+新方法学:
+  「extract refactor as canonical helper + thin caller wrappers」 (codified):
+    多个 caller 共享 inline 编码器副本时
+    提取到最深合适 crate (此处 hitls-pki) 的 public 助手
+    替换 inline 副本为 thin wrapper
+    caller-specific error type (Box<dyn Error>) 经 map_err 保留
+    consolidate codec 逻辑于一处
+    codify DRY 跨 crate 边界 for crypto codecs
+
+Recorded as DEV_LOG Phase T253.
