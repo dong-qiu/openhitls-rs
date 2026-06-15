@@ -17756,3 +17756,39 @@ byte-exact 迁移：新建 crates/hitls-utils/tests/migrated_codecs.rs，6 个 p
 方法学：当 C SDV 数据行为空且 EAL 框架为 provider-N/A 时，用规范标准（RFC 4648）迁移 byte-exact codec 层
 
 Recorded as DEV_LOG Phase T259.
+
+### T260 — Phase J closeout: bsl (ASN.1 + OID) 覆盖 + Phase J 系列收尾
+
+> 在J-1的任务完成合入后，依次完成J Phase剩下的子 PR
+
+bsl 大部分是系统/内存模型层，无 Rust 对应（SAL file/socket/time/atomic/dl + uio/list/hash/err/log = std 替代，架构性 N/A；obj OID FUNC 行是 (void)）
+两个数据驱动的 bsl 检查迁入 crates/hitls-utils/tests/migrated_bsl.rs，4 个 pin：
+  asn1_nested_sequence_max_depth_decode（bsl/asn1 内联 DER 300D...020101 = 6 层嵌套 SEQUENCE → INTEGER 1）
+  asn1_truncated_sequence_rejected（负面）
+  oid_rsa_encryption_der_roundtrip（OID 1.2.840.113549.1.1.1 ↔ 规范 DER 2a864886f70d010101）
+  oid_from_arcs_encodes_canonical（多字节 base-128 arc 编码 840/113549）
+
+Phase J 系列收尾（T255–T260，6 子 PR）：
+  T255 OTP（52 byte-exact，唯一干净 xtask win）
+  T256 Privacy Pass（5 round-trip + 结构性缺口）
+  T257 SPAKE2+（3 round-trip + 结构性缺口）
+  T258 CMVP（4 集成 pin）
+  T259 codecs（6 byte-exact RFC 4648 + PEM）
+  T260 bsl（4）
+  = 74 测试，跨 hitls-auth / hitls-crypto / hitls-utils，零新增产品代码
+  2 个结构性缺口文档化（Privacy Pass EMSA-PSS、SPAKE2+ 多 suite + 标量注入），留给未来 I-phase
+
+Phase J 方法学：
+  (a) 数据驱动有向量 → byte-exact（xtask OTP / RFC 4648 codecs）
+  (b) byte-exact 被实现缺口阻塞 → round-trip 迁密钥材料（Privacy Pass/SPAKE2+，SM9/T158 法）
+  (c) (void) 框架套件 → 集成 pin（CMVP）
+  (d) EAL provider / SAL / 内存模型层 → 架构性 N/A 文档化
+
+验证：
+  cargo test -p hitls-utils --test migrated_bsl     4/0
+  cargo clippy -p hitls-utils --tests -D warnings    clean
+  cargo fmt --all --check                            clean
+
+Phase J 完成；按计划下一阶段是 Phase K（PKI 深度 fixture）
+
+Recorded as DEV_LOG Phase T260.

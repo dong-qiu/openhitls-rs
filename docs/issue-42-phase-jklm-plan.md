@@ -65,13 +65,15 @@ Phase A–I 在 **crypto / pki(部分)/ tls-tlcp-dtls(audit-pin)** 三域达成 
 | ✅ J-3 | ✅ T257 | round-trip pins（byte-exact **blocked**） | **3 delivered** | SPAKE2+ `SPAKE2PLUS_TC001` byte-exact 阻塞（Rust 只支持 1/14 suite + 无 x/y 标量注入）→ na-list Structural Gap + 用 P-256 向量 (w0,w1,L) 跑 round-trip（SM9/T158 法）；未来 I-phase 解锁 |
 | ✅ J-4 | ✅ T258 | integration pins | **4 delivered** | CMVP 是 `(void)` FIPS 自检框架（无数据驱动 KAT）→ 迁移为集成 pin：`FipsModule::run_self_tests()` 聚合 KAT+PCT + `check_integrity` 成功/篡改/缺失；C 逐算法 `Selftest*` 粒度 = API-surface |
 | ✅ J-5 | ✅ T259 | byte-exact RFC 4648 + PEM round-trip | **6 delivered** | codecs = EAL decoder-provider 框架 → N/A；bsl Base64/PEM 数据行空 → 用 RFC 4648 §10 规范向量字节级迁移 + PEM round-trip（`hitls-utils/tests/migrated_codecs.rs`） |
-| closeout | T260 | bsl audit-pin + 系列收尾 | ~15 | bsl 内存层走 audit-pin；`migrated_bsl_audit.rs` |
+| ✅ closeout | ✅ T260 | bsl ASN.1/OID pins + 系列收尾 | **4 delivered** | bsl SAL/uio/list/hash/err/log = std-replaced N/A；2 个数据驱动 bsl 检查（asn1 max-depth nested-SEQUENCE + OID DER round-trip）迁入 `hitls-utils/tests/migrated_bsl.rs` + Phase J series rollup |
 
-### 2.2 验收
-- [ ] `xtask --algo {otp,privpass,pake,cmvp,codecs}` 全部 `--check` 入 CI
-- [ ] `hitls-auth/tests/migrated_*.rs` 全绿；`*_API_TC*`（ctx CRUD）按既定约定路由 API-surface 并计数
-- [ ] na-list 追加 5 个新算法的 per-algo tally 行
-- [ ] DEV_LOG **T255–T260**
+### 2.2 验收 ✅ Phase J 完成（2026-06-15，T255–T260 全合入）
+- [x] 6 个子 PR 合入 main（#336/#337/#338/#339/#340 + closeout）：**74 测试**跨 `hitls-auth` / `hitls-crypto` / `hitls-utils`，**零新增产品代码**
+- [x] OTP 走 xtask `--algo otp`（唯一 byte-exact xtask 算法；其余分类不适用 emitter，见下）
+- [x] na-list 追加 OTP per-algo tally 行 + Phase-J note（privpass/spake2plus/cmvp/codecs/bsl 的分类口径）
+- [x] DEV_LOG **T255–T260** + PROMPT_LOG 全部记录
+
+**实际口径 vs 原估**：原计划假设 5 类都能走 xtask byte-exact，实测 C 源决定了不同口径——只有 **OTP (J-1)** 是干净 byte-exact xtask win；**codecs (J-5)** 经 RFC 4648 规范向量也拿到 byte-exact；**Privacy Pass (J-2) / SPAKE2+ (J-3)** byte-exact 被实现缺口阻塞 → round-trip + 2 个 na-list Structural Gap（留给未来 I-phase）；**CMVP (J-4)** 是 `(void)` 自检框架 → 集成 pin；**bsl** 大部分是 SAL/内存层 → std-replaced N/A。这印证了务实双轨方法学：能字节级则字节级，否则 round-trip / 集成 pin / 文档化 N/A。
 
 > **预期飞轮**：迁移可能暴露 HOTP/TOTP 截断算法、SPAKE2+ 标量约定、Privacy Pass 序列化的
 > byte-level 分歧（参照 Phase A 的 27 个 I-phase 飞轮）。每发现一个开 I-phase。
