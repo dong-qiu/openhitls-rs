@@ -17375,3 +17375,55 @@ I-1 关闭 3 个 #47-pkey-rsa-pss 站点（1 module doc + 2 not-implemented call
     Phase B floor count 与 message literal 都在 RESOLVED 注释内保留
 
 Recorded as DEV_LOG Phase T250.
+
+### T251 — Phase I-2 SM2 PKCS#8 codec (Phase I 5 sub-PR 第 2 弹)
+
+> 请继续完成Phase I
+
+承接 T250 Phase I-1.
+
+I-2 关闭 3 个 #47-pkey-sm2 站点。
+
+改动:
+  crates/hitls-cli/src/pkey.rs
+    encode_priv Sm2 arm → encode_ec_pkcs8_der(EccCurveId::Sm2Prime256, &priv_bytes) (Sm2KeyPair::private_key_bytes())
+    encode_pubout Sm2 arm → encode_ec_spki_der(EccCurveId::Sm2Prime256, &pub_bytes) (Sm2KeyPair::public_key_bytes())
+    新 ut_pkey_t251_sm2_round_trip 集成测试
+
+关键设计:
+  SM2 复用既有 encode_ec_pkcs8_der + encode_ec_spki_der 助手 (NIST 曲线已 codified)
+    通过 EccCurveId::Sm2Prime256 路由
+  EC PKCS#8 codec 早已知 sm2_curve OID dispatch
+  Form 1 (canonical: ec_public_key OID + sm2_curve 参数) 编码; parse-side I89 ba677cc6 接受 Form 1+2
+  layered RESOLVED annotation (T250 codified): 3 个 TODO(#47-pkey-sm2) 锚点保留 (含 "SM2 PKCS#8 re-encoding not implemented" + "SM2 SPKI not implemented" 字面量)
+
+Phase I 累计:
+  T250 (1 test) + T251 (1 test) = 2 implementation tests
+  Phase I anchors closed: 6/49 (3 #47-pkey-rsa-pss + 3 #47-pkey-sm2)
+
+验证:
+  cargo test -p hitls-cli ut_pkey_t251                        1/0
+  cargo test -p hitls-pki --test migrated_phase_b_audit_pins  43/0
+  cargo test -p hitls-cli pkey::tests                         34/0
+  cargo test -p hitls-pki --all-features                      1675/0 零回归
+  cargo test -p hitls-tls --all-features                      1715/0 零回归
+  cargo fmt + cargo clippy --workspace --all-features -D warnings + typos clean
+
+作用域:
+  1 product code file +~35 行
+  0 new TODO
+  3 TODO(#47-pkey-sm2) 锚点保留
+
+沿用方法学:
+  T250 layered RESOLVED annotation
+  I89/ba677cc6 SM2 Form 2 parse-side
+  T107 PSS-OID parse-side dispatch
+
+新方法学:
+  「reuse existing crypto codec via curve_id dispatch」 (codified):
+    新曲线只是新 OID + 复用现有曲线家族时, 通过 EccCurveId enum 路由
+    100% 复用 PKCS#8/SPKI/EC machinery
+    EccCurveId 是单点 dispatch
+    适用于 Brainpool / P-224 (T252) 等场景: 加 OID 入 oid_to_curve_id + 加 enum 变体 + impl 曲线运算
+
+Recorded as DEV_LOG Phase T251.
