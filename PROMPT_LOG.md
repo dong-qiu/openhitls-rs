@@ -17731,3 +17731,28 @@ C 的逐算法 Selftest* 粒度 + 非法 id 行 → API-surface（Rust 聚合自
 方法学：对 (void) 框架型 C 测试（无数据驱动 KAT）做 integration-pin 迁移（区别于 byte-exact xtask 与 T256/T257 round-trip）
 
 Recorded as DEV_LOG Phase T258.
+
+### T259 — Phase J-5: codecs / bsl Base64 + PEM 原语迁移（byte-exact RFC 4648 + PEM round-trip）
+
+> 在J-1的任务完成合入后，依次完成J Phase剩下的子 PR
+
+C codecs 是 EAL decoder-provider 框架（(void) 体 + 忽略 path 参数）→ 架构性 N/A（Rust 无 provider 概念；解码能力原生在 hitls_utils::{pem, base64}）
+C bsl/base64 + bsl/pem 是空数据行（向量内联在 .c）；其实现的标准是 RFC 4648
+
+byte-exact 迁移：新建 crates/hitls-utils/tests/migrated_codecs.rs，6 个 pin：
+  base64_encode_rfc4648 + base64_decode_rfc4648（RFC 4648 §10 规范向量 ""/f/fo/foo/foob/fooba/foobar ↔ Zg==…Zm9vYmFy，双向字节级；独立第三方 KAT）
+  base64_roundtrip_all_pad_lengths（长度 0–24，覆盖 3 种 padding）
+  base64_decode_invalid_char_rejected
+  pem_encode_parse_roundtrip（PEM→DER 解码，codecs provider PEM→ASN1 的 Rust 对应）
+  pem_parse_multiple_blocks
+
+零新增产品代码（base64::{encode,decode} + pem::{encode,parse} 已存在）
+
+验证：
+  cargo test -p hitls-utils --test migrated_codecs     6/0
+  cargo clippy -p hitls-utils --tests -D warnings      clean
+  cargo fmt --all --check                              clean
+
+方法学：当 C SDV 数据行为空且 EAL 框架为 provider-N/A 时，用规范标准（RFC 4648）迁移 byte-exact codec 层
+
+Recorded as DEV_LOG Phase T259.
