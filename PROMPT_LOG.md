@@ -17792,3 +17792,32 @@ Phase J 方法学：
 Phase J 完成；按计划下一阶段是 Phase K（PKI 深度 fixture）
 
 Recorded as DEV_LOG Phase T260.
+
+### T276 — Phase M-1: client wire-level Alert capture（Phase H §8 #4 keystone）；Phase K 评估已由 Phase C 覆盖 → pivot 到 M
+
+> 继续 Phase K
+
+Phase K ground-truth survey 结论：PKI 深度 fixture 已基本由 Phase C 达成（fixture 镜像存在 1316 文件；migrated_x509_parse 1073/1588 byte-exact，剩余跳过是刻意/真难；扩 sig-alg map flywheel recover 0 行；无独立 cms/pkcs12/crl fixture 目录）→ 深度 1:1 低收益。用户决策 pivot 到 Phase M。Phase K 处置记录在 plan §3。
+
+Phase M-1 关闭 Phase H §8 still-pending 第 4 项（"E2E 只断言 client errored，未钉具体 Alert::* variant"）。
+扩展 tests/interop/tests/transcript_mutation_encrypted_e2e.rs：
+  derive_client_handshake_keys（KeySchedule client 半边）
+  capture_client_alert（读 client 响应记录，跳过 middlebox-compat CCS 0x14，用 client handshake key 在 seq 0 解密 0x17 记录，取内层 Alert{level,desc}）
+  drive_client_capture_wire_alert（rogue-server driver，经 thread join 返回捕获的 alert）
+3 个新测试：
+  m276_tampered_ee_tag_client_sends_bad_record_mac（翻 EE AEAD tag → client 发 fatal bad_record_mac/decrypt_error）
+  m276_tampered_ee_ciphertext_...（翻密文字节 → 同）
+  m276_audit_phase_m_plan_docs_in_sync
+把 Phase H "client errored somehow" 收紧为 "client 发了具体 fatal 解密失败 alert" —— C SDV MODIFIED_*_TC 金标准。
+harness note：driver 重排 cipher list 让 SH 选 AES-128-GCM（Phase H seal_encrypted_record 硬假设 key_len 16；CH transcript 原始字节不动）。
+
+零新增产品代码（复用 public KeySchedule/TrafficKeys/AesGcmAead；T186/T219 方法学）。
+
+验证：
+  cargo test -p hitls-integration-tests --test transcript_mutation_encrypted_e2e   41/0（38 旧 + 3 新）
+  cargo clippy -p hitls-integration-tests --tests -D warnings                       clean
+  cargo fmt --all --check                                                           clean
+
+M-2（cert+私钥 loader → MODIFIED_CERT_VERIFY wire alerts）建立在本 capture 基建之上。
+
+Recorded as DEV_LOG Phase T276.

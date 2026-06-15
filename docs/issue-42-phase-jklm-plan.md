@@ -82,6 +82,18 @@ Phase A–I 在 **crypto / pki(部分)/ tls-tlcp-dtls(audit-pin)** 三域达成 
 
 ## 3. Phase K — PKI 深度 fixture 1:1（T261–T268）
 
+> **⏸️ Phase K 评估结论（2026-06-15，ground-truth survey）**：实测 Phase K 的目标**已由 Phase C
+> 基本达成**，深度 1:1 移植低收益，故 **pivot 到 Phase M**（用户决策）。证据：(1) fixture 镜像已存在
+> （`tests/vectors/c-asn1-fixtures/` 1316 文件 + MANIFEST，Phase C 建好了 K-1 的基建）；(2)
+> `migrated_x509_parse.rs` 已 1073/1588 byte-exact，剩余 515 跳过项是**刻意的**（390 API-surface =
+> 负面/无 Rust 对应）或**真的难**（56 unknown = header/Hex-ambiguous DN 行；69 unsupported =
+> dotted-OID DN 属性 + 严格性 gap）——试过最明显的 flywheel（扩 sig-alg OID map）recover **0 行**；
+> (3) C testdata 无独立 cms/pkcs12/crl fixture 目录（0 文件），现有 Phase C 测试已用 decision matrix
+> 移植代表性族，"1:1 port"多为冗余变体。Phase K 若要做仅剩 fiddly 低价值工作，故搁置。下方 §3.1
+> 原计划保留作未来参考。
+
+
+
 **核心判断**：Phase C 把 §4.3 的 ~2800 fixture 目标降级为 46 audit-pin。本阶段**真正落地
 计划 §4.1-4.3 的 fixture 镜像 + rstest 参数化加载器**，对最大的 `x509_cert.data`(2298) 和
 负面解析子树做 1:1 字节级移植。
@@ -139,8 +151,8 @@ custom-alert 并入各 E2E）。这是把 audit-pin 升级为真 wire-format `Al
 
 | # | T | 来源（H §8） | 估计 | 做法 |
 |---|---|---|---:|---|
-| plan + M-1 | T276 | rogue-server cert + 私钥加载器 | ~10 | PEM→DER→PKCS#8 签 CertVerify（+~200 LoC over 现有 loader） |
-| M-2 | T277 | `MODIFIED_CERT_VERIFY_*` 真 wire Alert | ~12 | CV 签名校验阶段观测 `decrypt_error` |
+| ✅ plan + M-1 | ✅ T276 | client wire-level Alert capture（H §8 #4 keystone） | **3 delivered** | rogue server 派生 client handshake keys + 读取并解密 client 的加密 alert（跳过 middlebox-compat CCS）→ 把 E2E 断言从"client errored"收紧到具体 `Alert{level,desc}`；tampered EE tag/ciphertext → client 发 fatal `bad_record_mac`/`decrypt_error`。零产品代码 |
+| M-2 | T277 | rogue-server cert + 私钥加载器 → `MODIFIED_CERT_VERIFY_*` 真 wire Alert | ~12 | PEM→DER→PKCS#8 签 CertVerify（+~200 LoC）让 client 过 cert 校验，再观测 CV 阶段 alert |
 | M-3 | T278 | `MODIFIED_FINISHED_*` 真 wire Alert | ~12 | Finished MAC 校验阶段观测 |
 | M-4 | T279 | DTLS 1.3 UDP rogue server（RFC 9147 §4） | ~10 | epoch+seq 加密统一头 |
 | M-5 | T280 | 0-RTT 接受 E2E + PSK 预热（T119 deferred PSK_ONLY） | ~10 | early-data 路径 |

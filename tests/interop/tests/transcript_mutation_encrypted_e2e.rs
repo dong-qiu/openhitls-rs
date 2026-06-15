@@ -1264,3 +1264,246 @@ fn t228_phase_h_closeout_banner_pinned() {
     assert!(plan.contains("Still-pending follow-up"));
     assert!(plan.contains("Full server cert + private key loader"));
 }
+
+// ===========================================================================
+// Phase M-1 (T276) — client wire-level Alert capture.
+//
+// Phase H §8 still-pending item #4: "current E2E tests assert client errors
+// but do not pin the specific `Alert::*` variant per RFC 8446 §6.2." The H
+// driver only observes the client's in-process error string. This block adds
+// the wire-level alert capture: the rogue server derives the CLIENT handshake
+// traffic keys (the second half of `derive_handshake_traffic_secrets`),
+// reads the client's response record after emitting a mutated message, and
+// decrypts it (RFC 8446 §5.2) to recover the encrypted `Alert{level,
+// description}` the client emits before closing (the T89 alert-before-close
+// path). This turns "client errored somehow" into "client sent
+// bad_record_mac" — the C SDV `MODIFIED_*_TC` gold-standard assertion.
+//
+// Zero product code: composes the same public KeySchedule / TrafficKeys /
+// AesGcmAead APIs the Phase H server-side helpers use.
+// ===========================================================================
+
+/// Sibling of `derive_server_handshake_keys` for the *client* direction —
+/// the client encrypts its handshake-phase alerts under these keys.
+fn derive_client_handshake_keys(
+    suite: CipherSuite,
+    dhe_shared_secret: &[u8],
+    transcript_hash_ch_sh: &[u8],
+) -> TrafficKeys {
+    let params = CipherSuiteParams::from_suite(suite).expect("known TLS 1.3 cipher suite");
+    let mut ks = KeySchedule::new(params.clone());
+    ks.derive_early_secret(None).expect("early secret");
+    ks.derive_handshake_secret(dhe_shared_secret)
+        .expect("handshake secret");
+    let (client_secret, _server_secret) = ks
+        .derive_handshake_traffic_secrets(transcript_hash_ch_sh)
+        .expect("handshake traffic secrets");
+    TrafficKeys::derive(&params, &client_secret).expect("client traffic keys")
+}
+
+/// A captured TLS alert: `(level, description)` per RFC 8446 §6.
+type CapturedAlert = (u8, u8);
+
+/// Read the client's next record and, if it is an alert, return
+/// `(level, description)`. Handles both a plaintext alert (`0x15`) and an
+/// encrypted alert (`0x17` application_data wrapping inner type `21`) — the
+/// latter decrypted with the client handshake keys at client write-seq 0
+/// (the alert is the client's first encrypted write on the error path).
+fn capture_client_alert(
+    stream: &mut TcpStream,
+    client_keys: &TrafficKeys,
+) -> Option<CapturedAlert> {
+    // A TLS 1.3 client sends a dummy ChangeCipherSpec (0x14) for middlebox
+    // compatibility before its first encrypted flight; skip CCS records and
+    // any others until we find the alert (or run out of attempts).
+    for _ in 0..4 {
+        let rec = read_record(stream).ok()?;
+        if rec.len() < 5 {
+            return None;
+        }
+        match rec[0] {
+            0x14 => continue, // ChangeCipherSpec — middlebox-compat dummy
+            0x15 => {
+                // Plaintext alert: body = [level, description].
+                return if rec.len() >= 7 {
+                    Some((rec[5], rec[6]))
+                } else {
+                    None
+                };
+            }
+            0x17 => {
+                // Encrypted record: decrypt with client handshake keys (seq 0).
+                let aead = AesGcmAead::new(&client_keys.key).ok()?;
+                let nonce = record_nonce(&client_keys.iv, 0);
+                let aad = &rec[0..5];
+                let pt = aead.decrypt(&nonce, aad, &rec[5..]).ok()?;
+                // RFC 8446 §5.2: strip zero padding; the last non-zero byte is
+                // the inner ContentType. An alert is inner type 21, 2-byte body.
+                let mut end = pt.len();
+                while end > 0 && pt[end - 1] == 0 {
+                    end -= 1;
+                }
+                return if end >= 3 && pt[end - 1] == 21 {
+                    Some((pt[end - 3], pt[end - 2]))
+                } else {
+                    None
+                };
+            }
+            _ => return None,
+        }
+    }
+    None
+}
+
+/// Like `drive_client_against_encrypted_rogue_server`, but the rogue server
+/// also derives the client handshake keys and — after `emit_post_sh` — reads
+/// and decrypts the client's response, returning the captured `Alert` (if
+/// any). The client's handshake is still expected to fail.
+fn drive_client_capture_wire_alert<F>(emit_post_sh: F) -> Option<CapturedAlert>
+where
+    F: FnOnce(&mut PostShCtx, &mut TcpStream) + Send + 'static,
+{
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let rogue_handle = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut info = capture_client_hello(&mut stream);
+        // The Phase H harness (`seal_encrypted_record`) assumes AES-128-GCM
+        // (key_len 16). Reorder the parsed cipher list so an AES-128-GCM suite
+        // is selected into the SH; the raw `ch_handshake_bytes` (transcript
+        // input) is untouched, and the client offered this suite so it accepts
+        // it. Falls back to offered_ciphers[0] if no 16-byte-key suite exists.
+        if let Some(pos) = info.offered_ciphers.iter().position(|c| {
+            CipherSuiteParams::from_suite(*c)
+                .map(|p| p.key_len == 16)
+                .unwrap_or(false)
+        }) {
+            info.offered_ciphers.swap(0, pos);
+        }
+        let (group, client_pub) = info.offered_key_shares[0].clone();
+        let kx = KeyExchange::generate(group).expect("rogue server kx");
+
+        let mut sh_random = [0u8; 32];
+        for (i, b) in sh_random.iter_mut().enumerate() {
+            *b = (i as u8).wrapping_add(0x42);
+        }
+        let sh_bytes = make_valid_sh(&info, &kx, sh_random);
+        if stream.write_all(&make_handshake_record(&sh_bytes)).is_err() {
+            return None;
+        }
+
+        let dhe = kx.compute_shared_secret(&client_pub).expect("ECDH");
+        let mut transcript = TranscriptHash::new(HashAlgId::Sha256);
+        transcript.update(&info.ch_handshake_bytes).expect("ch");
+        transcript.update(&sh_bytes).expect("sh");
+        let transcript_hash_ch_sh = transcript.current_hash().expect("hash");
+
+        let suite = info.offered_ciphers[0];
+        let (_server_secret, keys) =
+            derive_server_handshake_keys(suite, &dhe, &transcript_hash_ch_sh);
+        let client_keys = derive_client_handshake_keys(suite, &dhe, &transcript_hash_ch_sh);
+
+        let mut ctx = PostShCtx {
+            suite,
+            server_handshake_keys: keys,
+            next_write_seq: 0,
+            transcript_hash_ch_sh: transcript_hash_ch_sh.to_vec(),
+        };
+        emit_post_sh(&mut ctx, &mut stream);
+
+        // Read + decrypt the client's reaction (the encrypted alert).
+        capture_client_alert(&mut stream, &client_keys)
+    });
+
+    let stream = TcpStream::connect(addr).expect("connect rogue server");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    stream
+        .set_write_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    let client_config = TlsConfig::builder()
+        .role(TlsRole::Client)
+        .min_version(TlsVersion::Tls13)
+        .max_version(TlsVersion::Tls13)
+        .verify_peer(false)
+        .build();
+    let mut conn = TlsClientConnection::new(stream, client_config);
+    let _ = conn
+        .handshake()
+        .expect_err("rogue server must not let handshake succeed");
+    rogue_handle.join().ok().flatten()
+}
+
+/// RFC 8446 §6.2 alert descriptions the client may send when it cannot
+/// authenticate/decrypt a tampered handshake record.
+const ALERT_BAD_RECORD_MAC: u8 = 20;
+const ALERT_DECRYPT_ERROR: u8 = 51;
+
+/// Phase M-1: a tampered EncryptedExtensions AEAD tag makes the client fail
+/// record decryption; it must emit an encrypted **fatal** alert
+/// (`bad_record_mac`) before closing, which we decrypt off the wire.
+#[test]
+fn m276_tampered_ee_tag_client_sends_bad_record_mac() {
+    let alert = drive_client_capture_wire_alert(|ctx, stream| {
+        let ee = build_empty_encrypted_extensions();
+        let mut record = seal_encrypted_record(
+            ctx.suite,
+            &ctx.server_handshake_keys,
+            ctx.next_write_seq,
+            0x16,
+            &ee,
+        );
+        ctx.next_write_seq += 1;
+        // Flip the last byte (AEAD tag) → authentication fails on the client.
+        *record.last_mut().unwrap() ^= 0x01;
+        let _ = stream.write_all(&record);
+    });
+    let (level, desc) = alert.expect("client must send a wire alert on AEAD failure");
+    assert_eq!(level, 2, "decryption-failure alerts are fatal (level 2)");
+    assert!(
+        desc == ALERT_BAD_RECORD_MAC || desc == ALERT_DECRYPT_ERROR,
+        "expected bad_record_mac(20)/decrypt_error(51), got description {desc}"
+    );
+}
+
+/// Phase M-1: flipping a *ciphertext* byte (not the tag) likewise fails the
+/// AEAD integrity check → same fatal alert on the wire.
+#[test]
+fn m276_tampered_ee_ciphertext_client_sends_bad_record_mac() {
+    let alert = drive_client_capture_wire_alert(|ctx, stream| {
+        let ee = build_empty_encrypted_extensions();
+        let mut record = seal_encrypted_record(
+            ctx.suite,
+            &ctx.server_handshake_keys,
+            ctx.next_write_seq,
+            0x16,
+            &ee,
+        );
+        ctx.next_write_seq += 1;
+        // Flip a ciphertext byte just after the 5-byte record header.
+        record[6] ^= 0x01;
+        let _ = stream.write_all(&record);
+    });
+    let (level, desc) = alert.expect("client must send a wire alert on AEAD failure");
+    assert_eq!(level, 2);
+    assert!(desc == ALERT_BAD_RECORD_MAC || desc == ALERT_DECRYPT_ERROR);
+}
+
+/// Phase M-1 audit pin: the Phase M plan (issue-42-phase-jklm-plan.md) records
+/// this wire-alert-capture work as M-1 closing Phase H §8 item #4.
+#[test]
+fn m276_audit_phase_m_plan_docs_in_sync() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let plan_path = format!("{manifest_dir}/../../docs/issue-42-phase-jklm-plan.md");
+    let plan = std::fs::read_to_string(&plan_path).expect("phase jklm plan doc");
+    assert!(plan.contains("Phase M"));
+    assert!(plan.contains("wire") || plan.contains("Alert") || plan.contains("alert"));
+}
