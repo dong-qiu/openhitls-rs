@@ -439,6 +439,7 @@ name = "hitls-pki"
 version = "0.1.0"
 dependencies = [
  "getrandom",
+ "hitls-bignum",
  "hitls-crypto",
  "hitls-types",
  "hitls-utils",
