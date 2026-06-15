@@ -97,8 +97,17 @@ fn encode_priv(key: &Pkcs8PrivateKey) -> Result<String, Box<dyn std::error::Erro
         // preserved for Phase B audit-pin coverage (T112+T233):
         // formerly `"RSA-PSS PKCS#8 re-encoding not implemented (TODO(#47-pkey-rsa-pss))"`.
         Pkcs8PrivateKey::RsaPss(rsa) => encode_rsa_pss_pkcs8_der(rsa)?,
-        Pkcs8PrivateKey::Sm2(_) => {
-            return Err("SM2 PKCS#8 re-encoding not implemented (TODO(#47-pkey-sm2))".into())
+        // T251 RESOLVED — SM2 PKCS#8 wired. Historical anchors preserved
+        // for Phase B audit-pin coverage (T112+T233):
+        // formerly `"SM2 PKCS#8 re-encoding not implemented (TODO(#47-pkey-sm2))"`.
+        // Encodes as Form 1 (ec_public_key OID + sm2_curve params)
+        // per GM/T 0010 / RFC 8998 §B.2 — the parse-side T107 / I89
+        // already accepts both Form 1 and Form 2 via `parse_sm2_private_key`.
+        Pkcs8PrivateKey::Sm2(kp) => {
+            let priv_bytes = kp
+                .private_key_bytes()
+                .map_err(|e| format!("SM2 private key extract: {e:?}"))?;
+            encode_ec_pkcs8_der(hitls_types::EccCurveId::Sm2Prime256, &priv_bytes)
         }
         Pkcs8PrivateKey::Ed448(_)
         | Pkcs8PrivateKey::X25519(_)
@@ -129,8 +138,13 @@ fn encode_pubout(key: &Pkcs8PrivateKey) -> Result<String, Box<dyn std::error::Er
         // Historical anchor preserved: formerly returned
         // `Err("...TODO(#47-pkey-rsa-pss)...")`.
         Pkcs8PrivateKey::RsaPss(rsa) => encode_rsa_pss_spki_der(rsa)?,
-        Pkcs8PrivateKey::Sm2(_) => {
-            return Err("SM2 SPKI not implemented (TODO(#47-pkey-sm2))".into())
+        // T251 RESOLVED — SM2 SPKI wired. Historical anchor preserved:
+        // formerly `"SM2 SPKI not implemented (TODO(#47-pkey-sm2))"`.
+        Pkcs8PrivateKey::Sm2(kp) => {
+            let pub_bytes = kp
+                .public_key_bytes()
+                .map_err(|e| format!("SM2 public key extract: {e:?}"))?;
+            encode_ec_spki_der(hitls_types::EccCurveId::Sm2Prime256, &pub_bytes)
         }
         Pkcs8PrivateKey::Ed448(_)
         | Pkcs8PrivateKey::X25519(_)
@@ -480,6 +494,38 @@ mod tests {
             }
             _ => panic!("expected Pkcs8PrivateKey::RsaPss after re-parse"),
         }
+        // SPKI public-key path.
+        let pubout = encode_pubout(&parsed).unwrap();
+        assert!(pubout.starts_with("-----BEGIN PUBLIC KEY-----"));
+    }
+
+    // T251 Phase I-2 — SM2 PKCS#8 + SPKI round-trip.
+    //
+    // Generates an SM2 key, encodes as PKCS#8 Form 1 (the new
+    // `Pkcs8PrivateKey::Sm2` arm dispatches via `encode_ec_pkcs8_der`
+    // with `EccCurveId::Sm2Prime256`), parses it (T107 / I89 parse-side
+    // already understood Form 1 and Form 2), re-encodes via the public
+    // `encode_priv` dispatch, and re-parses to confirm the private-key
+    // bytes round-trip. Also exercises the SPKI public-key path.
+    #[test]
+    fn ut_pkey_t251_sm2_round_trip() {
+        let kp = hitls_crypto::sm2::Sm2KeyPair::generate().unwrap();
+        let priv_bytes = kp.private_key_bytes().unwrap();
+        let der = encode_ec_pkcs8_der(EccCurveId::Sm2Prime256, &priv_bytes);
+        let pem = hitls_utils::pem::encode("PRIVATE KEY", &der);
+        let parsed = parse_pkcs8_pem(&pem).unwrap();
+        match &parsed {
+            Pkcs8PrivateKey::Sm2(_) => {}
+            _ => panic!("expected Pkcs8PrivateKey::Sm2 after parse"),
+        }
+        // Re-encode via the public dispatch (which now reaches our SM2 arm).
+        let reenc = encode_priv(&parsed).unwrap();
+        let reparsed = parse_pkcs8_pem(&reenc).unwrap();
+        let reparsed_priv = match &reparsed {
+            Pkcs8PrivateKey::Sm2(kp) => kp.private_key_bytes().unwrap(),
+            _ => panic!("expected Pkcs8PrivateKey::Sm2 after re-parse"),
+        };
+        assert_eq!(reparsed_priv, priv_bytes);
         // SPKI public-key path.
         let pubout = encode_pubout(&parsed).unwrap();
         assert!(pubout.starts_with("-----BEGIN PUBLIC KEY-----"));
