@@ -17673,3 +17673,30 @@ Recorded as DEV_LOG Phase T255.
 新方法学：「byte-exact blocked → 迁移 vector 的密钥材料（round-trip）+ 文档化 crypto-construction 缺口」
 
 Recorded as DEV_LOG Phase T256.
+
+### T257 — Phase J-3: SPAKE2+ (RFC 9383) round-trip 迁移 + byte-exact 结构性缺口（blocked）
+
+> 在J-1的任务完成合入后，依次完成J Phase剩下的子 PR
+
+字节级迁移被阻塞：
+  C SPAKE2PLUS_TC001 是 14 个 RFC 9383 向量（P-256/384/521 × SHA-256/512 × HMAC/CMAC-AES），
+    每个钉死 ephemeral 标量 x/y（stubbed RNG）→ shareP/shareV/kShared/confirmP/confirmV 可复现
+  Rust hitls_auth::spake2plus 只支持 P-256 + SHA-256 + HMAC-SHA-256 一个 suite（group/hash/MAC 硬编码），
+    且 generate_share 内部用 DRBG 抽 x/y，无注入 hook
+  → 13/14 suite 不支持 + P-256 suite 的 share/confirm 字节不可复现 → na-list Structural Gap
+    （unblock = 多 suite 泛化 + kat-nonce generate_share_with_scalar(x) hook + RFC 9383 KDF/confirm 校验）
+
+可迁移部分（SM9/T158 round-trip 法）：
+  用 P-256-SHA256-HMAC 向量的注册三元组 (w0, w1, L) 驱动 Rust prover↔verifier 完整交换
+  新建 crates/hitls-auth/tests/migrated_spake2plus.rs（feature-gated spake2plus，默认 feature），3 个 pin：
+    roundtrip（双向 verify_confirmation==true + 共享密钥相等）/ mismatched_w1_rejected / wrong_w0_rejected
+  round-trip 成功本身即隐式证明 RFC 9383 (w0,w1,L) 三元组自洽（L = w1·G）
+
+零新增产品代码（round-trip 管线已存在；本次用真实 RFC 9383 P-256 向量驱动）
+
+验证：
+  cargo test -p hitls-auth --features spake2plus --test migrated_spake2plus     3/0
+  cargo clippy -p hitls-auth --features spake2plus --all-targets -D warnings     clean
+  cargo fmt --all --check                                                         clean
+
+Recorded as DEV_LOG Phase T257.

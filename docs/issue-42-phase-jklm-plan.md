@@ -62,7 +62,7 @@ Phase A–I 在 **crypto / pki(部分)/ tls-tlcp-dtls(audit-pin)** 三域达成 
 |---|---|---|---:|---|
 | ✅ plan + J-1 | ✅ T255 | 本文档 + `xtask/src/otp.rs` emitter | **52 delivered** | HOTP RFC 4226 + TOTP RFC 6238 KAT；输出 `hitls-auth/tests/migrated_otp.rs`；零新增产品代码，52/52 首次通过 |
 | ✅ J-2 | ✅ T256 | round-trip pins（byte-exact **blocked**） | **5 delivered** | Privacy Pass `VECTOR_TEST_TC001` byte-exact 被实现缺口阻塞（Rust privpass 无 EMSA-PSS/salt/hooks）→ na-list Structural Gap + 用 C vector RSA-2048 密钥跑 round-trip（SM9/T158 法）；未来 I-phase 解锁字节级 |
-| J-3 | T257 | `xtask/src/pake.rs` | ~13 | SPAKE2+ `SPAKE2PLUS_TC001` round-trip + 共享密钥 KAT |
+| ✅ J-3 | ✅ T257 | round-trip pins（byte-exact **blocked**） | **3 delivered** | SPAKE2+ `SPAKE2PLUS_TC001` byte-exact 阻塞（Rust 只支持 1/14 suite + 无 x/y 标量注入）→ na-list Structural Gap + 用 P-256 向量 (w0,w1,L) 跑 round-trip（SM9/T158 法）；未来 I-phase 解锁 |
 | J-4 | T258 | `xtask/src/cmvp.rs` | ~30 | FIPS 自测向量（known-answer self-test）字节级 |
 | J-5 | T259 | `xtask/src/codecs.rs` | ~15 | ASN.1 decode 正/负面 |
 | closeout | T260 | bsl audit-pin + 系列收尾 | ~15 | bsl 内存层走 audit-pin；`migrated_bsl_audit.rs` |
