@@ -295,6 +295,48 @@ impl EcPoint {
 
         Ok(point)
     }
+
+    /// Decode a point from its SEC1 compressed representation: `0x02 || x`
+    /// (even y) or `0x03 || x` (odd y), where `x` is `field_size` bytes.
+    ///
+    /// Recovers `y` as a modular square root of `rhs = x³ + a·x + b mod p`.
+    /// This implementation uses the `y = rhs^((p+1)/4) mod p` shortcut, which
+    /// is valid only when the field prime satisfies `p ≡ 3 (mod 4)` — true for
+    /// every curve this module supports (NIST P-256/P-384/P-521 and the SM2
+    /// prime field). The recovered point is checked to be on the curve, so a
+    /// non-residue `rhs` (no valid `y`) is rejected.
+    pub fn from_compressed(group: &EcGroup, data: &[u8]) -> Result<Self, CryptoError> {
+        let fs = group.field_size();
+        if data.len() != 1 + fs || (data[0] != 0x02 && data[0] != 0x03) {
+            return Err(CryptoError::EccInvalidPublicKey);
+        }
+        let want_odd = data[0] == 0x03;
+        let x = BigNum::from_bytes_be(&data[1..]);
+
+        let p = &group.params.p;
+        // rhs = x³ + a·x + b mod p
+        let x_sq = x.mod_mul(&x, p)?;
+        let x_cu = x_sq.mod_mul(&x, p)?;
+        let ax = x.mod_mul(&group.params.a, p)?;
+        let rhs = x_cu.mod_add(&ax, p)?.mod_add(&group.params.b, p)?;
+
+        // y = rhs^((p+1)/4) mod p (valid for p ≡ 3 mod 4)
+        let exp = p.add(&BigNum::from_u64(1)).shr(2usize);
+        let mut y = rhs.mod_exp(&exp, p)?;
+
+        // Select the root with the requested parity.
+        let y_bytes = y.to_bytes_be();
+        let y_is_odd = y_bytes.last().map(|b| b & 1 == 1).unwrap_or(false);
+        if y_is_odd != want_odd {
+            y = p.sub(&y);
+        }
+
+        let point = EcPoint::new(x, y);
+        if !point.is_on_curve(group)? {
+            return Err(CryptoError::EccPointNotOnCurve);
+        }
+        Ok(point)
+    }
 }
 
 impl PartialEq for EcPoint {
@@ -496,6 +538,45 @@ mod tests {
         assert_eq!(encoded[0], 0x04);
         let decoded = EcPoint::from_uncompressed(&group, &encoded).unwrap();
         assert_eq!(g, decoded);
+    }
+
+    #[test]
+    fn test_from_compressed_generator_roundtrip() {
+        // For each supported curve, compress the generator (0x02/0x03 || x by
+        // y-parity) and decompress: must recover the exact same point.
+        for curve in [
+            EccCurveId::NistP256,
+            EccCurveId::NistP384,
+            EccCurveId::NistP521,
+            EccCurveId::Sm2Prime256,
+        ] {
+            let group = EcGroup::new(curve).unwrap();
+            let g = group.generator();
+            let fs = group.field_size();
+            let uncompressed = g.to_uncompressed(&group).unwrap();
+            let y = &uncompressed[1 + fs..];
+            let parity = if y[y.len() - 1] & 1 == 1 { 0x03 } else { 0x02 };
+            let mut compressed = Vec::with_capacity(1 + fs);
+            compressed.push(parity);
+            compressed.extend_from_slice(&uncompressed[1..1 + fs]);
+            let decoded = EcPoint::from_compressed(&group, &compressed).unwrap();
+            assert_eq!(g, decoded, "decompress(compress(G)) == G for {curve:?}");
+        }
+    }
+
+    #[test]
+    fn test_from_compressed_rejects_bad_input() {
+        let group = EcGroup::new(EccCurveId::NistP256).unwrap();
+        // Wrong length.
+        assert!(EcPoint::from_compressed(&group, &[0x02; 32]).is_err());
+        // Bad prefix (0x04 is uncompressed, not valid here).
+        assert!(EcPoint::from_compressed(&group, &[0x04; 33]).is_err());
+        // A prefix-valid but off-curve x (all-0xFF x is not a residue here).
+        let mut bad = vec![0x02u8; 33];
+        for b in bad.iter_mut().skip(1) {
+            *b = 0xFF;
+        }
+        assert!(EcPoint::from_compressed(&group, &bad).is_err());
     }
 
     #[test]

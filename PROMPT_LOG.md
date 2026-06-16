@@ -18032,3 +18032,27 @@ T284（字节级迁移）：
 na-list SPAKE2+ → P256-SHA512 也 RESOLVED（P-384/P-521/CMAC 仍 pending）。
 
 Recorded as DEV_LOG Phase I163/T284.
+
+---
+
+> 继续 SPAKE2+ increment 2
+
+A-2 increment 2：SPAKE2+ 多曲线泛化（P-384/P-521）+ RFC 9383 P384/P521 字节级迁移 → SPAKE2+ 5/5 字节级（完成）。
+
+发现：实际 C `.data` 只有 5 个向量（P256-SHA256/512、P384-SHA256/512、P521-SHA512，全 HMAC，无 CMAC）。na-list 旧写的"14 个含 CMAC"是读文件前的估计。所以 increment 2 解开最后 3 个即 5/5 全部完成。
+
+I164（产品改动，两个 crate）：
+  - hitls-crypto：新增公共 `EcPoint::from_compressed(group, data)` —— 通用 SEC1 点解压（y = rhs^((p+1)/4) mod p，对所有 p≡3 mod4 曲线有效：NIST P-256/384/521 + SM2），替换原来硬编码在 spake2plus 里的 P-256 decompress_point
+  - hitls-auth：`Spake2Suite` 从 P-256 泛化 —— 枚举现在带曲线（P256Sha256/P256Sha512/P384Sha256/P384Sha512/P521Sha512）+ curve() + 每曲线 RFC 9383 §4 M/N 压缩常量（ground-truth 取自 C spake2plus_ecc.h）；with_suite 用 EcGroup::new(suite.curve())；m_point/n_point 取 suite 并经新 crypto API 解压；transcript w0 padding + setup_from_password 派生改为 field_size() 驱动（32/48/66）
+
+T285（字节级迁移）：
+  - migrated_spake2plus.rs 加共享 check_prover_byte_exact 驱动 + 3 个新测试（P384-SHA256 / P384-SHA512 / P521-SHA512）
+  - 每个用 with_suite + kat-nonce scalar hook 驱动 C SDV 向量，断言 shareP / K_shared / confirmP 字节级 + confirmV 验证，全部对独立 C 向量
+  - 另加 2 个 hitls-crypto ecc lib 测试（from_compressed 4 曲线 generator 往返 + 坏输入拒绝）
+
+结果：SPAKE2+ 现 5/5 字节级（C 数据全部向量）。多曲线泛化 + 新 from_compressed 首次运行即对独立 C 向量字节级通过。
+行为变化：老 P256 调用方无（new() 不变），全部新增量。
+验证：auth all-features + 4 个 CI feature 组合通过；crypto ecc lib 464/0；clippy 两 crate --all-features --all-targets -D warnings clean；fmt clean。
+na-list SPAKE2+ gap → FULLY RESOLVED。
+
+Recorded as DEV_LOG Phase I164/T285.
