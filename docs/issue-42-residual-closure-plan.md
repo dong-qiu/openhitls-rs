@@ -36,11 +36,13 @@
 
 | # | T | 来源（H §8） | 估计 | 做法 |
 |---|---|---|---:|---|
-| M-2 | T278 | rogue-server cert+私钥 loader → `MODIFIED_CERT_VERIFY_*` 真 wire Alert | ~10 | PEM→DER→PKCS#8 加载 server cert+key；rogue server 发**有效签名的** Certificate + CertVerify（RFC 8446 §4.4.3 signing buffer）+ Finished（让 client 过 cert 校验，client 配 `verify_peer` 信任该 cert）；篡改 CV 签名 → 捕获 client 的 `decrypt_error`(51) |
-| M-3 | T279 | `MODIFIED_FINISHED_*` 真 wire Alert | ~10 | 在 M-2 valid-handshake 基础上篡改 Finished `verify_data` → 捕获 `decrypt_error`/`bad_record_mac`；乱序 Finished → `unexpected_message`(10) |
-| M-4 | T280 | DTLS 1.3 UDP rogue server（RFC 9147 §4） | ~10 | UDP socket + RFC 9147 统一头（epoch + 截断 seq 加密）；先 wire-format pin（参照 T227 scope-cut），有余力再 E2E |
-| M-5 | T281 | 0-RTT 接受 E2E + PSK 预热（T119 deferred PSK_ONLY） | ~10 | early-data 路径：PSK warm-up → 0-RTT data → 捕获 client 行为 |
-| closeout | T282 | custom-alert variant 收紧 + 系列 rollup | ~6 | 把现存 E2E 断言全部从"client errored"收紧到具体 `Alert::*`；H §8 4 项标 RESOLVED |
+| ✅ M-2 | ✅ T278 | `MODIFIED_CERT_VERIFY_*` 真 wire Alert | **3** | rogue server 用 `make_ecdsa_server_identity` 自签 cert + `sign_certificate_verify` 发有效 Certificate+CertVerify；client `verify_peer(true)`+accept-all callback；翻转/清零 CV 签名 → `decrypt_error(51)`。零产品代码 |
+| ✅ M-3 | ✅ T279 | `MODIFIED_FINISHED_*` 真 wire Alert | **3** | 承接 M-2：发有效 CV，再篡改 server Finished `verify_data`（stateless `derive_finished_key`+`compute_finished_verify_data`）→ `decrypt_error(51)`。零产品代码 |
+| ✅ M-4 | ✅ T280 | DTLS 1.3 record 线格 pin（scope-cut） | **8** | **全 UDP rogue server deferred**：C SDV 无 DTLS 1.3 数据（只有 dtls12/dtlcp）+ 记录层已 13 单测覆盖。改为 integration 级 RFC 9147 §4 record-codec pin（`serialize`↔`parse` round-trip + AAD==header + 截断/未知-type 拒绝 + epoch seq reset）+ 给 integration harness 加 `dtls13` feature。`tests/interop/tests/dtls13_record_wire.rs` |
+| ⏸️ M-5 | — | 0-RTT 接受 + PSK | — | **disposition（非 C 迁移项）**：0-RTT 接受已由 T109 集成测试验证；external PSK 已由 T119 落地。0-RTT/PSK 的 mutation-E2E 是可选新基建（无 C `MODIFIED_*` 源），deferred |
+| ✅ closeout | （并入 M-4） | custom-alert 收紧 + WP-C rollup | — | M-1/M-2/M-3 已把 cert-verify/finished E2E 断言收紧到具体 `Alert::*`（Phase H §8 cert+key-loader item RESOLVED）；DTLS UDP + 0-RTT/PSK E2E 显式 deferred（无 C 源）|
+
+**WP-C 结论**：Phase H §8 的实质缺口（MODIFIED_CERT_VERIFY/FINISHED 的真 wire-`Alert::*` 观测）由 M-1/M-2/M-3 关闭；M-4 记录层 pin + DTLS UDP / 0-RTT-PSK E2E 因**无 C 迁移源**显式 deferred。WP-C 收口，下一步 **WP-A（SPAKE2+）**。
 
 ### 1.2 关键前置（M-2 的难点）
 - **server cert + 私钥 fixture**：需要 CA 证书 + CA 签的 server 证书 + server 私钥；client 配 `verify_peer(true)` + 信任该 CA（或 self-signed + 信任）。可从 `tests/vectors/c-asn1-fixtures/` 或 integration-test 现有 cert 复用，或离线生成后内联。
