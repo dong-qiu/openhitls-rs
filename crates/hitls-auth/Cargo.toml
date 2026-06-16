@@ -26,3 +26,7 @@ default = ["otp", "spake2plus"]
 otp = []
 spake2plus = []
 privpass = []
+# Test-only: enables deterministic-scalar hooks for byte-exact KAT migration
+# (e.g. SPAKE2+ `generate_share_with_scalar`). Never enable in production —
+# a caller-chosen ephemeral scalar leaks the password.
+kat-nonce = []

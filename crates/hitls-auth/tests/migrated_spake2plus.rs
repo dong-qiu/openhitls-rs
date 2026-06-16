@@ -41,6 +41,65 @@ fn p256_vector() -> (Vec<u8>, Vec<u8>, Vec<u8>) {
     (w0, w1, l)
 }
 
+/// Byte-exact prover-side migration of the RFC 9383 P-256 vector (T281, WP-A).
+///
+/// Injects the vector's ephemeral scalar `x` via the `kat-nonce`-gated
+/// `generate_share_with_scalar`, drives the prover with the vector's `shareV`,
+/// and asserts ALL outputs byte-exact against the independent C SDV vector:
+/// `shareP`, `K_shared`, `confirmP`, and that the vector's `confirmV` verifies.
+/// This is true RFC 9383 ground-truth verification — only possible after the
+/// I161 key-schedule conformance fix (RFC 9383 §3.4 HKDF schedule).
+#[cfg(feature = "kat-nonce")]
+#[test]
+fn tc_spake2plus_rfc9383_p256_vector_byte_exact() {
+    let (w0, w1, _l) = p256_vector();
+    // Vector fields x / shareP / shareV / kShared / confirmP / confirmV
+    // (SPAKE2PLUS_TC001, P256-SHA256-HKDF-SHA256-HMAC-SHA256).
+    let x = hex("d1232c8e8693d02368976c174e2088851b8365d0d79a9eee709c6a05a2fad539");
+    let share_p_expected = hex(
+        "04ef3bd051bf78a2234ec0df197f7828060fe9856503579bb1733009042c15c0\
+         c1de127727f418b5966afadfdd95a6e4591d171056b333dab97a79c7193e341727",
+    );
+    let share_v = hex(
+        "04c0f65da0d11927bdf5d560c69e1d7d939a05b0e88291887d679fcadea75810f\
+         b5cc1ca7494db39e82ff2f50665255d76173e09986ab46742c798a9a68437b048",
+    );
+    let k_shared = hex("0c5f8ccd1413423a54f6c1fb26ff01534a87f893779c6e68666d772bfd91f3e7");
+    let confirm_p = hex("926cc713504b9b4d76c9162ded04b5493e89109f6d89462cd33adc46fda27527");
+    let confirm_v = hex("9747bcc4f8fe9f63defee53ac9b07876d907d55047e6ff2def2e7529089d3e68");
+
+    let mut prover = Spake2Plus::new(Spake2Role::Prover).unwrap();
+    // RFC 9383 identities from the vector (Context = suite string, idProver =
+    // "client", idVerifier = "server").
+    prover.set_identities(
+        b"SPAKE2+-P256-SHA256-HKDF-SHA256-HMAC-SHA256 Test Vectors",
+        b"client",
+        b"server",
+    );
+    prover.setup(&w0, &w1).unwrap();
+
+    #[allow(deprecated)]
+    let share_p = prover.generate_share_with_scalar(&x).unwrap();
+    assert_eq!(share_p, share_p_expected, "shareP = x·G + w0·M byte-exact");
+
+    let ke = prover.process_share(&share_v).unwrap();
+    assert_eq!(
+        ke, k_shared,
+        "K_shared (RFC 9383 §3.4 HKDF 'SharedKey') byte-exact"
+    );
+
+    let cp = prover.get_confirmation().unwrap();
+    assert_eq!(
+        cp, confirm_p,
+        "confirmP = HMAC(K_confirmP, shareV) byte-exact"
+    );
+
+    assert!(
+        prover.verify_confirmation(&confirm_v).unwrap(),
+        "the vector's confirmV = HMAC(K_confirmV, shareP) must verify"
+    );
+}
+
 /// Full SPAKE2+ exchange driven by the RFC 9383 P-256 vector's `(w0, w1, L)`:
 /// both parties confirm each other and derive the same shared key.
 #[test]

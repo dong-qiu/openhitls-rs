@@ -4,6 +4,7 @@
 
 use hitls_bignum::BigNum;
 use hitls_crypto::ecc::{EcGroup, EcPoint};
+use hitls_crypto::hkdf::Hkdf;
 use hitls_crypto::hmac::Hmac;
 use hitls_crypto::provider::Digest;
 use hitls_crypto::sha2::Sha256;
@@ -46,6 +47,11 @@ pub struct Spake2Plus {
     ke: Option<Vec<u8>>,
     kc_a: Option<Vec<u8>>,
     kc_b: Option<Vec<u8>>,
+    // RFC 9383 protocol identities (default empty). These feed the transcript
+    // TT (Context || idProver || idVerifier) and so the derived keys.
+    context: Vec<u8>,
+    id_prover: Vec<u8>,
+    id_verifier: Vec<u8>,
 }
 
 impl Drop for Spake2Plus {
@@ -173,7 +179,20 @@ impl Spake2Plus {
             ke: None,
             kc_a: None,
             kc_b: None,
+            context: Vec::new(),
+            id_prover: Vec::new(),
+            id_verifier: Vec::new(),
         })
+    }
+
+    /// Set the RFC 9383 protocol identities (`Context`, `idProver`,
+    /// `idVerifier`) used in the transcript `TT`. Default is all-empty. Must be
+    /// called before `process_share` for the values to take effect. Both peers
+    /// must agree on these out-of-band.
+    pub fn set_identities(&mut self, context: &[u8], id_prover: &[u8], id_verifier: &[u8]) {
+        self.context = context.to_vec();
+        self.id_prover = id_prover.to_vec();
+        self.id_verifier = id_verifier.to_vec();
     }
 
     /// Set up from raw w0, w1 (prover) or w0, L (verifier) bytes.
@@ -265,6 +284,37 @@ impl Spake2Plus {
         Ok(share_bytes)
     }
 
+    /// Test-only: generate the share with a caller-supplied ephemeral scalar
+    /// `x` (big-endian), instead of a random one — for byte-exact reproduction
+    /// of RFC 9383 test vectors (`shareP = x·G + w0·M`).
+    ///
+    /// Gated behind the non-default `kat-nonce` feature. A caller-chosen
+    /// ephemeral scalar **leaks the password** in a real exchange, so this must
+    /// never be used in production.
+    #[cfg(feature = "kat-nonce")]
+    #[doc(hidden)]
+    #[deprecated(note = "test-only: a caller-chosen ephemeral scalar leaks the password")]
+    pub fn generate_share_with_scalar(&mut self, x_bytes: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        if self.state != State::Setup {
+            return Err(CryptoError::DrbgInvalidState);
+        }
+        let w0 = self.w0.as_ref().ok_or(CryptoError::NullInput)?;
+        let n = self.group.order().clone();
+        let x = BigNum::from_bytes_be(x_bytes).mod_reduce(&n)?;
+
+        let blinding_point = match self.role {
+            Spake2Role::Prover => m_point(&self.group)?,
+            Spake2Role::Verifier => n_point(&self.group)?,
+        };
+        let share = self.group.scalar_mul_add(&x, w0, &blinding_point)?;
+        let share_bytes = share.to_uncompressed(&self.group)?;
+
+        self.x_scalar = Some(x);
+        self.my_share = Some(share_bytes.clone());
+        self.state = State::ShareGenerated;
+        Ok(share_bytes)
+    }
+
     /// Process the peer's share and derive the shared key Ke.
     ///
     /// Returns the encryption key Ke.
@@ -341,12 +391,10 @@ impl Spake2Plus {
         let w0_bytes = w0.to_bytes_be_padded(32)?;
 
         let mut tt = Vec::new();
-        // Context: empty for default
-        encode_len_data(&mut tt, b"");
-        // idProver: empty
-        encode_len_data(&mut tt, b"");
-        // idVerifier: empty
-        encode_len_data(&mut tt, b"");
+        // Context / idProver / idVerifier (RFC 9383 §3.3; default empty).
+        encode_len_data(&mut tt, &self.context);
+        encode_len_data(&mut tt, &self.id_prover);
+        encode_len_data(&mut tt, &self.id_verifier);
         // M
         let m_bytes = m_point(&self.group)?.to_uncompressed(&self.group)?;
         encode_len_data(&mut tt, &m_bytes);
@@ -364,16 +412,21 @@ impl Spake2Plus {
         // w0
         encode_len_data(&mut tt, &w0_bytes);
 
-        // Hash the transcript
-        let hash_tt = sha256(&tt)?;
-
-        // Split: Ke || Ka (each 16 bytes for SHA-256, or 32/2 = 16)
-        let ke = hash_tt[..16].to_vec();
-        let ka = &hash_tt[16..];
-
-        // Derive confirmation keys using HMAC
-        let kc_a = hmac_sha256(ka, b"ConfirmProver")?;
-        let kc_b = hmac_sha256(ka, b"ConfirmVerifier")?;
+        // RFC 9383 §3.4 key schedule:
+        //   K_main = Hash(TT)
+        //   K_confirmP || K_confirmV = KDF(nil, K_main, "ConfirmationKeys")
+        //   K_shared                 = KDF(nil, K_main, "SharedKey")
+        // For the P-256-SHA256-HKDF-SHA256-HMAC-SHA256 ciphersuite (Table 1):
+        // Hash = SHA-256, KDF = HKDF-SHA256, MAC = HMAC-SHA256; each derived
+        // key is 32 bytes. (Previously this used a non-conformant
+        // split-Hash(TT) + HMAC("ConfirmProver"/"ConfirmVerifier") schedule
+        // that did not interoperate with RFC 9383 implementations.)
+        let k_main = sha256(&tt)?;
+        let hkdf = Hkdf::new_with_factory(&[], &k_main, sha256_factory, 32)?;
+        let confirm_keys = hkdf.expand(b"ConfirmationKeys", 64)?;
+        let kc_a = confirm_keys[..32].to_vec(); // K_confirmP
+        let kc_b = confirm_keys[32..].to_vec(); // K_confirmV
+        let ke = hkdf.expand(b"SharedKey", 32)?; // K_shared
 
         self.ke = Some(ke.clone());
         self.kc_a = Some(kc_a);
@@ -669,8 +722,9 @@ mod tests {
         let ke = prover.process_share(&pb).unwrap();
         let _ = verifier.process_share(&pa).unwrap();
 
-        // Ke is 16 bytes (half of SHA-256 output)
-        assert_eq!(ke.len(), 16);
+        // RFC 9383 §3.4: K_shared = KDF(nil, K_main, "SharedKey") is 32 bytes
+        // for the SHA-256 ciphersuite.
+        assert_eq!(ke.len(), 32);
 
         // Confirmations are 32 bytes (HMAC-SHA-256 output)
         let conf = prover.get_confirmation().unwrap();
