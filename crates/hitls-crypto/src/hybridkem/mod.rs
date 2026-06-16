@@ -87,6 +87,26 @@ fn mlkem_ek_len(mlkem_param: u32) -> usize {
     }
 }
 
+/// Return the ML-KEM decapsulation (secret) key length for a given parameter set.
+fn mlkem_dk_len(mlkem_param: u32) -> usize {
+    match mlkem_param {
+        512 => 1632,
+        768 => 2400,
+        1024 => 3168,
+        _ => unreachable!(),
+    }
+}
+
+/// Return the classic (DH) private-key length in bytes for a `ClassicType`.
+fn classic_sk_len(ct: ClassicType) -> usize {
+    match ct {
+        ClassicType::X25519 => 32,
+        ClassicType::EcdhP256 => 32,
+        ClassicType::EcdhP384 => 48,
+        ClassicType::EcdhP521 => 66,
+    }
+}
+
 /// Map a `ClassicType` to its `EccCurveId`.
 fn classic_curve_id(ct: ClassicType) -> EccCurveId {
     match ct {
@@ -260,6 +280,57 @@ impl HybridKemKeyPair {
         };
 
         let mlkem = MlKemKeyPair::from_encapsulation_key(params.mlkem_param, mlkem_ek)?;
+        Ok(Self {
+            param_id,
+            params,
+            classic,
+            mlkem,
+        })
+    }
+
+    /// Construct a hybrid KEM key pair from a combined **decapsulation** (secret)
+    /// key — the inverse of `public_key()`. The resulting key pair can
+    /// `decapsulate()` (and re-derive its public key). The combined layout
+    /// mirrors the public-key ordering:
+    /// - X25519 variants: `[ML-KEM dk || X25519 sk]`
+    /// - ECDH variants:   `[ECDH sk || ML-KEM dk]`
+    pub fn from_decapsulation_key(
+        param_id: HybridKemParamId,
+        combined_sk: &[u8],
+    ) -> Result<Self, CryptoError> {
+        let params = get_params(param_id);
+        let dk_len = mlkem_dk_len(params.mlkem_param);
+        let sk_len = classic_sk_len(params.classic_type);
+        if combined_sk.len() != sk_len + dk_len {
+            return Err(CryptoError::InvalidArg(""));
+        }
+
+        // `split_combined` encodes the same ordering used for the public key.
+        let (classic_sk, mlkem_dk) =
+            split_combined(combined_sk, params.classic_type, sk_len, dk_len);
+
+        let classic = match params.classic_type {
+            ClassicType::X25519 => {
+                // Store the raw secret bytes (decaps re-clamps on use, matching
+                // `generate`); derive the public key for `public_key()`.
+                let sk = X25519PrivateKey::new(classic_sk)?;
+                let pk = sk.public_key();
+                let mut sk_bytes = [0u8; X25519_KEY_SIZE];
+                sk_bytes.copy_from_slice(classic_sk);
+                ClassicDh::X25519 {
+                    sk_bytes,
+                    pk_bytes: *pk.as_bytes(),
+                }
+            }
+            _ => {
+                let curve_id = classic_curve_id(params.classic_type);
+                ClassicDh::Ecdh(Box::new(EcdhKeyPair::from_private_key(
+                    curve_id, classic_sk,
+                )?))
+            }
+        };
+
+        let mlkem = MlKemKeyPair::from_decapsulation_key(params.mlkem_param, mlkem_dk)?;
         Ok(Self {
             param_id,
             params,
