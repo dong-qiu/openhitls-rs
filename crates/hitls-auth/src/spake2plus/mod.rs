@@ -1,6 +1,8 @@
-//! SPAKE2+ password-authenticated key exchange (RFC 9382).
+//! SPAKE2+ password-authenticated key exchange (RFC 9383).
 //!
-//! Implements SPAKE2+ over P-256 with HMAC-SHA-256 for key confirmation.
+//! Supports the RFC 9383 ciphersuites over NIST P-256 / P-384 / P-521 with
+//! SHA-256 / SHA-512 + HKDF + HMAC for the key schedule and confirmation
+//! (`Spake2Suite`). Defaults to P256-SHA256.
 
 use hitls_bignum::BigNum;
 use hitls_crypto::ecc::{EcGroup, EcPoint};
@@ -94,43 +96,58 @@ fn sha256(data: &[u8]) -> Result<Vec<u8>, CryptoError> {
     Ok(h.finish()?.to_vec())
 }
 
-/// RFC 9383 ciphersuite (the hash / KDF / MAC family). The elliptic curve is
-/// carried separately on `Spake2Plus` (P-256 today). Each variant fixes
-/// `Hash = KDF-hash = HMAC-hash` per RFC 9383 Table 1.
+/// RFC 9383 ciphersuite — binds the elliptic curve **and** the
+/// `Hash = KDF-hash = HMAC-hash` family (RFC 9383 Table 1). Each variant maps
+/// to one openHiTLS C SDV `SPAKE2PLUS_TC001` vector.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Spake2Suite {
     /// SPAKE2+-P256-SHA256-HKDF-SHA256-HMAC-SHA256.
     P256Sha256,
     /// SPAKE2+-P256-SHA512-HKDF-SHA512-HMAC-SHA512.
     P256Sha512,
+    /// SPAKE2+-P384-SHA256-HKDF-SHA256-HMAC-SHA256.
+    P384Sha256,
+    /// SPAKE2+-P384-SHA512-HKDF-SHA512-HMAC-SHA512.
+    P384Sha512,
+    /// SPAKE2+-P521-SHA512-HKDF-SHA512-HMAC-SHA512.
+    P521Sha512,
 }
 
 impl Spake2Suite {
+    /// The elliptic curve this ciphersuite runs over.
+    fn curve(self) -> EccCurveId {
+        match self {
+            Spake2Suite::P256Sha256 | Spake2Suite::P256Sha512 => EccCurveId::NistP256,
+            Spake2Suite::P384Sha256 | Spake2Suite::P384Sha512 => EccCurveId::NistP384,
+            Spake2Suite::P521Sha512 => EccCurveId::NistP521,
+        }
+    }
+
     /// Hash output length in bytes (also the derived-key length: RFC 9383 §3.4
     /// recommends each key = the digest output length).
     fn hlen(self) -> usize {
         match self {
-            Spake2Suite::P256Sha256 => 32,
-            Spake2Suite::P256Sha512 => 64,
+            Spake2Suite::P256Sha256 | Spake2Suite::P384Sha256 => 32,
+            Spake2Suite::P256Sha512 | Spake2Suite::P384Sha512 | Spake2Suite::P521Sha512 => 64,
         }
     }
 
     fn factory(self) -> fn() -> Box<dyn Digest> {
-        match self {
-            Spake2Suite::P256Sha256 => sha256_factory,
-            Spake2Suite::P256Sha512 => sha512_factory,
+        if self.hlen() == 32 {
+            sha256_factory
+        } else {
+            sha512_factory
         }
     }
 
     /// `K_main = Hash(TT)`.
     fn hash(self, data: &[u8]) -> Result<Vec<u8>, CryptoError> {
-        match self {
-            Spake2Suite::P256Sha256 => sha256(data),
-            Spake2Suite::P256Sha512 => {
-                let mut h = Sha512::new();
-                h.update(data)?;
-                Ok(h.finish()?.to_vec())
-            }
+        if self.hlen() == 32 {
+            sha256(data)
+        } else {
+            let mut h = Sha512::new();
+            h.update(data)?;
+            Ok(h.finish()?.to_vec())
         }
     }
 
@@ -138,68 +155,52 @@ impl Spake2Suite {
     fn mac(self, key: &[u8], data: &[u8]) -> Result<Vec<u8>, CryptoError> {
         Hmac::mac(self.factory(), key, data)
     }
-}
 
-/// Decompress a point from compressed form (02/03 || x).
-/// For P-256, p ≡ 3 mod 4, so y = rhs^((p+1)/4) mod p.
-fn decompress_point(group: &EcGroup, compressed: &[u8]) -> Result<EcPoint, CryptoError> {
-    if compressed.len() != 33 || (compressed[0] != 0x02 && compressed[0] != 0x03) {
-        return Err(CryptoError::EccInvalidPublicKey);
-    }
-    let sign = compressed[0]; // 02 = even y, 03 = odd y
-    let x = BigNum::from_bytes_be(&compressed[1..]);
-
-    // P-256 curve parameters for decompression
-    let field_p = BigNum::from_bytes_be(&hex(
-        "FFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFF",
-    ));
-    let a = BigNum::from_bytes_be(&hex(
-        "FFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFC",
-    ));
-    let b = BigNum::from_bytes_be(&hex(
-        "5AC635D8AA3A93E7B3EBBD55769886BC651D06B0CC53B0F63BCE3C3E27D2604B",
-    ));
-
-    // rhs = x³ + ax + b mod p
-    let x_sq = x.mod_mul(&x, &field_p)?;
-    let x_cu = x_sq.mod_mul(&x, &field_p)?;
-    let ax = a.mod_mul(&x, &field_p)?;
-    let rhs = x_cu.mod_add(&ax, &field_p)?.mod_add(&b, &field_p)?;
-
-    // y = rhs^((p+1)/4) mod p (since p ≡ 3 mod 4)
-    let exp = field_p.add(&BigNum::from_u64(1)).shr(2usize);
-    let mut y = rhs.mod_exp(&exp, &field_p)?;
-
-    // Check parity
-    let y_bytes = y.to_bytes_be();
-    let y_is_odd = if y_bytes.is_empty() {
-        false
-    } else {
-        y_bytes[y_bytes.len() - 1] & 1 == 1
-    };
-    let want_odd = sign == 0x03;
-    if y_is_odd != want_odd {
-        y = field_p.sub(&y);
+    /// RFC 9383 §4 constant point M for this curve (SEC1 compressed).
+    fn m_compressed(self) -> &'static str {
+        match self {
+            Spake2Suite::P256Sha256 | Spake2Suite::P256Sha512 => {
+                "02886e2f97ace46e55ba9dd7242579f2993b64e16ef3dcab95afd497333d8fa12f"
+            }
+            Spake2Suite::P384Sha256 | Spake2Suite::P384Sha512 => {
+                "030ff0895ae5ebf6187080a82d82b42e2765e3b2f8749c7e05eba366434b363d\
+                 3dc36f15314739074d2eb8613fceec2853"
+            }
+            Spake2Suite::P521Sha512 => {
+                "02003f06f38131b2ba2600791e82488e8d20ab889af753a41806c5db18d37d85\
+                 608cfae06b82e4a72cd744c719193562a653ea1f119eef9356907edc9b569799\
+                 62d7aa"
+            }
+        }
     }
 
-    let point = EcPoint::new(x, y);
-    if !point.is_on_curve(group)? {
-        return Err(CryptoError::EccPointNotOnCurve);
+    /// RFC 9383 §4 constant point N for this curve (SEC1 compressed).
+    fn n_compressed(self) -> &'static str {
+        match self {
+            Spake2Suite::P256Sha256 | Spake2Suite::P256Sha512 => {
+                "03d8bbd6c639c62937b04d997f38c3770719c629d7014d49a24b4f98baa1292b49"
+            }
+            Spake2Suite::P384Sha256 | Spake2Suite::P384Sha512 => {
+                "02c72cf2e390853a1c1c4ad816a62fd15824f56078918f43f922ca21518f9c54\
+                 3bb252c5490214cf9aa3f0baab4b665c10"
+            }
+            Spake2Suite::P521Sha512 => {
+                "0200c7924b9ec017f3094562894336a53c50167ba8c5963876880542bc669e49\
+                 4b2532d76c5b53dfb349fdf69154b9e0048c58a42e8ed04cef052a3bc349d955\
+                 75cd25"
+            }
+        }
     }
-    Ok(point)
 }
 
-// RFC 9382 Section 4: M and N compressed points for P-256.
-// M = 02886e2f97ace46e55ba9dd7242579f2993b64e16ef3dcab95afd497333d8fa12f
-// N = 03d8bbd6c639c62937b04d997f38c3770719c629d7014d49a24b4f98baa1292b49
-fn m_point(group: &EcGroup) -> Result<EcPoint, CryptoError> {
-    let compressed = hex("02886e2f97ace46e55ba9dd7242579f2993b64e16ef3dcab95afd497333d8fa12f");
-    decompress_point(group, &compressed)
+/// RFC 9383 §4 constant point M for the suite's curve, decompressed onto `group`.
+fn m_point(group: &EcGroup, suite: Spake2Suite) -> Result<EcPoint, CryptoError> {
+    EcPoint::from_compressed(group, &hex(suite.m_compressed()))
 }
 
-fn n_point(group: &EcGroup) -> Result<EcPoint, CryptoError> {
-    let compressed = hex("03d8bbd6c639c62937b04d997f38c3770719c629d7014d49a24b4f98baa1292b49");
-    decompress_point(group, &compressed)
+/// RFC 9383 §4 constant point N for the suite's curve, decompressed onto `group`.
+fn n_point(group: &EcGroup, suite: Spake2Suite) -> Result<EcPoint, CryptoError> {
+    EcPoint::from_compressed(group, &hex(suite.n_compressed()))
 }
 
 /// Encode length-prefixed data for the transcript TT.
@@ -217,7 +218,7 @@ impl Spake2Plus {
 
     /// Create a new SPAKE2+ context with an explicit RFC 9383 ciphersuite.
     pub fn with_suite(role: Spake2Role, suite: Spake2Suite) -> Result<Self, CryptoError> {
-        let group = EcGroup::new(EccCurveId::NistP256)?;
+        let group = EcGroup::new(suite.curve())?;
         Ok(Self {
             role,
             state: State::Init,
@@ -285,10 +286,12 @@ impl Spake2Plus {
     ) -> Result<(), CryptoError> {
         let n = self.group.order();
 
-        // Derive 2*32 = 64 bytes of key material
-        let dk = hitls_crypto::pbkdf2::pbkdf2(password, salt, iterations, 64)?;
-        let w0_raw = BigNum::from_bytes_be(&dk[..32]);
-        let w1_raw = BigNum::from_bytes_be(&dk[32..64]);
+        // Derive 2 field-element halves of key material (one each for w0, w1),
+        // then reduce mod n. Width tracks the curve (32 / 48 / 66 bytes).
+        let fs = self.group.field_size();
+        let dk = hitls_crypto::pbkdf2::pbkdf2(password, salt, iterations, 2 * fs)?;
+        let w0_raw = BigNum::from_bytes_be(&dk[..fs]);
+        let w1_raw = BigNum::from_bytes_be(&dk[fs..2 * fs]);
 
         let w0 = w0_raw.mod_reduce(n)?;
         let w1 = w1_raw.mod_reduce(n)?;
@@ -325,8 +328,8 @@ impl Spake2Plus {
 
         // Compute share: x*G + w0*M (prover) or x*G + w0*N (verifier)
         let blinding_point = match self.role {
-            Spake2Role::Prover => m_point(&self.group)?,
-            Spake2Role::Verifier => n_point(&self.group)?,
+            Spake2Role::Prover => m_point(&self.group, self.suite)?,
+            Spake2Role::Verifier => n_point(&self.group, self.suite)?,
         };
         let share = self.group.scalar_mul_add(&x, w0, &blinding_point)?;
         let share_bytes = share.to_uncompressed(&self.group)?;
@@ -356,8 +359,8 @@ impl Spake2Plus {
         let x = BigNum::from_bytes_be(x_bytes).mod_reduce(&n)?;
 
         let blinding_point = match self.role {
-            Spake2Role::Prover => m_point(&self.group)?,
-            Spake2Role::Verifier => n_point(&self.group)?,
+            Spake2Role::Prover => m_point(&self.group, self.suite)?,
+            Spake2Role::Verifier => n_point(&self.group, self.suite)?,
         };
         let share = self.group.scalar_mul_add(&x, w0, &blinding_point)?;
         let share_bytes = share.to_uncompressed(&self.group)?;
@@ -386,11 +389,11 @@ impl Spake2Plus {
         let unbind_point = match self.role {
             Spake2Role::Prover => {
                 // Peer is verifier, used N blinding
-                n_point(&self.group)?
+                n_point(&self.group, self.suite)?
             }
             Spake2Role::Verifier => {
                 // Peer is prover, used M blinding
-                m_point(&self.group)?
+                m_point(&self.group, self.suite)?
             }
         };
         let w0_times_unbind = self.group.scalar_mul(w0, &unbind_point)?;
@@ -441,7 +444,7 @@ impl Spake2Plus {
 
         let z_bytes = z.to_uncompressed(&self.group)?;
         let v_bytes = v.to_uncompressed(&self.group)?;
-        let w0_bytes = w0.to_bytes_be_padded(32)?;
+        let w0_bytes = w0.to_bytes_be_padded(self.group.field_size())?;
 
         let mut tt = Vec::new();
         // Context / idProver / idVerifier (RFC 9383 §3.3; default empty).
@@ -449,10 +452,10 @@ impl Spake2Plus {
         encode_len_data(&mut tt, &self.id_prover);
         encode_len_data(&mut tt, &self.id_verifier);
         // M
-        let m_bytes = m_point(&self.group)?.to_uncompressed(&self.group)?;
+        let m_bytes = m_point(&self.group, self.suite)?.to_uncompressed(&self.group)?;
         encode_len_data(&mut tt, &m_bytes);
         // N
-        let n_bytes = n_point(&self.group)?.to_uncompressed(&self.group)?;
+        let n_bytes = n_point(&self.group, self.suite)?.to_uncompressed(&self.group)?;
         encode_len_data(&mut tt, &n_bytes);
         // pA
         encode_len_data(&mut tt, pa_bytes);
@@ -562,12 +565,19 @@ mod tests {
 
     #[test]
     fn test_m_n_on_curve() {
-        let group = EcGroup::new(EccCurveId::NistP256).unwrap();
-        let m = m_point(&group).unwrap();
-        let n = n_point(&group).unwrap();
-        assert!(m.is_on_curve(&group).unwrap());
-        assert!(n.is_on_curve(&group).unwrap());
-        assert_ne!(m, n);
+        // Every supported suite's M/N must decompress onto its curve.
+        for suite in [
+            Spake2Suite::P256Sha256,
+            Spake2Suite::P384Sha256,
+            Spake2Suite::P521Sha512,
+        ] {
+            let group = EcGroup::new(suite.curve()).unwrap();
+            let m = m_point(&group, suite).unwrap();
+            let n = n_point(&group, suite).unwrap();
+            assert!(m.is_on_curve(&group).unwrap());
+            assert!(n.is_on_curve(&group).unwrap());
+            assert_ne!(m, n);
+        }
     }
 
     #[test]
