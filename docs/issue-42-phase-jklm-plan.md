@@ -167,7 +167,7 @@ custom-alert 并入各 E2E）。这是把 audit-pin 升级为真 wire-format `Al
 |---|---|---|---:|---|
 | ✅ plan + M-1 | ✅ T276 | client wire-level Alert capture（H §8 #4 keystone） | **3 delivered** | rogue server 派生 client handshake keys + 读取并解密 client 的加密 alert（跳过 middlebox-compat CCS）→ 把 E2E 断言从"client errored"收紧到具体 `Alert{level,desc}`；tampered EE tag/ciphertext → client 发 fatal `bad_record_mac`/`decrypt_error`。零产品代码 |
 | ✅ M-2 | ✅ T278 | rogue-server cert + 签 CertVerify → `MODIFIED_CERT_VERIFY_*` 真 wire Alert | **3 delivered** | rogue server 用 `make_ecdsa_server_identity` 自签 cert + `sign_certificate_verify` 发**有效签名**的 Certificate+CertVerify；client `verify_peer(true)` + accept-all `cert_verify_callback`（绕过链校验、保留 CV 签名校验）；翻转/清零 CV 签名 → 捕获 `decrypt_error(51)`。零产品代码（复用 server 端 public 编码/签名 API） |
-| M-3 | T278 | `MODIFIED_FINISHED_*` 真 wire Alert | ~12 | Finished MAC 校验阶段观测 |
+| ✅ M-3 | ✅ T279 | `MODIFIED_FINISHED_*` 真 wire Alert | **3 delivered** | 承接 M-2:发有效 EE+Cert+CV，再发**篡改 verify_data 的** server Finished（`derive_finished_key`+`compute_finished_verify_data` over CH..CV，stateless）；翻转/清零/截断 → client Finished HMAC 校验失败 → 捕获 `decrypt_error(51)`。零产品代码 |
 | M-4 | T279 | DTLS 1.3 UDP rogue server（RFC 9147 §4） | ~10 | epoch+seq 加密统一头 |
 | M-5 | T280 | 0-RTT 接受 E2E + PSK 预热（T119 deferred PSK_ONLY） | ~10 | early-data 路径 |
 | closeout | T281 | custom-alert variant 收紧 + 系列收尾 | ~6 | 所有 E2E 断言精确 `Alert::*` |

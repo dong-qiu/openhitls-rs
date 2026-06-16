@@ -1536,8 +1536,8 @@ use hitls_integration_tests::make_ecdsa_server_identity;
 use hitls_tls::config::CertVerifyCallback;
 use hitls_tls::crypt::SignatureScheme;
 use hitls_tls::handshake::codec::{
-    encode_certificate, encode_certificate_verify, CertificateEntry, CertificateMsg,
-    CertificateVerifyMsg,
+    encode_certificate, encode_certificate_verify, encode_finished, CertificateEntry,
+    CertificateMsg, CertificateVerifyMsg,
 };
 use hitls_tls::handshake::signing::{select_signature_scheme_for_cert, sign_certificate_verify};
 use std::sync::Arc;
@@ -1732,4 +1732,244 @@ fn m278_audit_phase_m_plan_records_m2() {
     let plan = std::fs::read_to_string(&plan_path).expect("phase jklm plan doc");
     assert!(plan.contains("M-2"));
     assert!(plan.contains("MODIFIED_CERT_VERIFY"));
+}
+
+// ===========================================================================
+// Phase M-3 (T279) — MODIFIED_FINISHED → true wire-level Alert.
+//
+// One flight deeper than M-2: the rogue server emits a VALID EE + Certificate +
+// CertificateVerify (so the client accepts the server's authentication), then a
+// server Finished whose `verify_data` is mutated. The client recomputes
+// `HMAC(server_finished_key, transcript_hash(CH..CV))` and compares — the
+// mutated value mismatches → the client rejects with a fatal alert
+// (`decrypt_error(51)` per RFC 8446 §6.2 / the T89 alert mapping; the AEAD
+// record itself decrypts fine, so it is NOT bad_record_mac).
+//
+// Reuses the M-2 valid-handshake-up-to-CV substrate + the stateless KeySchedule
+// Finished helpers (`derive_finished_key` / `compute_finished_verify_data`,
+// which depend only on the suite's hash). Zero product code.
+// ===========================================================================
+
+/// How to corrupt the server Finished before sending it.
+#[derive(Clone, Copy)]
+enum FinishedMutation {
+    /// Flip the last `verify_data` byte.
+    FlipByte,
+    /// Zero the entire `verify_data`.
+    Zero,
+    /// Truncate `verify_data` to the wrong length (RFC 8446 §4.4.4 strict len).
+    Truncate,
+}
+
+/// Drive a real client through SH → encrypted EE → Certificate → (valid)
+/// CertificateVerify → (mutated) Finished, and capture the alert the client
+/// sends when the Finished `verify_data` check fails.
+fn drive_m3_finished(mutate: FinishedMutation) -> Option<CapturedAlert> {
+    let (cert_chain, server_key) = make_ecdsa_server_identity();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let rogue = thread::spawn(move || -> Option<CapturedAlert> {
+        let (mut stream, _) = listener.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut info = capture_client_hello(&mut stream);
+        if let Some(pos) = info.offered_ciphers.iter().position(|c| {
+            CipherSuiteParams::from_suite(*c)
+                .map(|p| p.key_len == 16)
+                .unwrap_or(false)
+        }) {
+            info.offered_ciphers.swap(0, pos);
+        }
+        let (group, client_pub) = info.offered_key_shares[0].clone();
+        let kx = KeyExchange::generate(group).expect("kx");
+
+        let mut sh_random = [0u8; 32];
+        for (i, b) in sh_random.iter_mut().enumerate() {
+            *b = (i as u8).wrapping_add(0x42);
+        }
+        let sh_bytes = make_valid_sh(&info, &kx, sh_random);
+        if stream.write_all(&make_handshake_record(&sh_bytes)).is_err() {
+            return None;
+        }
+
+        let dhe = kx.compute_shared_secret(&client_pub).expect("ECDH");
+        let mut transcript = TranscriptHash::new(HashAlgId::Sha256);
+        transcript.update(&info.ch_handshake_bytes).expect("ch");
+        transcript.update(&sh_bytes).expect("sh");
+        let ch_sh_hash = transcript.current_hash().expect("hash");
+
+        let suite = info.offered_ciphers[0];
+        let (server_secret, server_keys) = derive_server_handshake_keys(suite, &dhe, &ch_sh_hash);
+        let client_keys = derive_client_handshake_keys(suite, &dhe, &ch_sh_hash);
+        let mut seq = 0u64;
+
+        // (1) EncryptedExtensions
+        let ee = build_empty_encrypted_extensions();
+        if stream
+            .write_all(&seal_encrypted_record(suite, &server_keys, seq, 0x16, &ee))
+            .is_err()
+        {
+            return None;
+        }
+        seq += 1;
+        transcript.update(&ee).expect("ee");
+
+        // (2) Certificate
+        let cert_struct = CertificateMsg {
+            certificate_request_context: vec![],
+            certificate_list: cert_chain
+                .iter()
+                .map(|d| CertificateEntry {
+                    cert_data: d.clone(),
+                    extensions: vec![],
+                })
+                .collect(),
+        };
+        let cert_msg = encode_certificate(&cert_struct);
+        if stream
+            .write_all(&seal_encrypted_record(
+                suite,
+                &server_keys,
+                seq,
+                0x16,
+                &cert_msg,
+            ))
+            .is_err()
+        {
+            return None;
+        }
+        seq += 1;
+        transcript.update(&cert_msg).expect("cert");
+
+        // (3) CertificateVerify — VALID (M-3 mutates Finished, not CV).
+        let scheme = select_signature_scheme_for_cert(
+            &server_key,
+            &[SignatureScheme::ECDSA_SECP256R1_SHA256],
+            false,
+        )
+        .expect("select scheme");
+        let cv_hash = transcript.current_hash().expect("cv hash");
+        let sig = sign_certificate_verify(&server_key, scheme, &cv_hash, true).expect("sign cv");
+        let cv_msg = encode_certificate_verify(&CertificateVerifyMsg {
+            algorithm: scheme,
+            signature: sig,
+        });
+        if stream
+            .write_all(&seal_encrypted_record(
+                suite,
+                &server_keys,
+                seq,
+                0x16,
+                &cv_msg,
+            ))
+            .is_err()
+        {
+            return None;
+        }
+        seq += 1;
+        transcript.update(&cv_msg).expect("cv");
+
+        // (4) Finished — verify_data = HMAC(finished_key, transcript(CH..CV)),
+        // then mutated. The Finished helpers are stateless w.r.t. the DHE
+        // secrets (depend only on the suite hash), so a fresh KeySchedule works.
+        let params = CipherSuiteParams::from_suite(suite).expect("suite");
+        let ks = KeySchedule::new(params);
+        let finished_key = ks
+            .derive_finished_key(&server_secret)
+            .expect("finished key");
+        let finished_transcript = transcript.current_hash().expect("finished transcript");
+        let mut verify_data = ks
+            .compute_finished_verify_data(&finished_key, &finished_transcript)
+            .expect("verify_data");
+        match mutate {
+            FinishedMutation::FlipByte => {
+                if let Some(b) = verify_data.last_mut() {
+                    *b ^= 0x01;
+                }
+            }
+            FinishedMutation::Zero => verify_data.iter_mut().for_each(|b| *b = 0),
+            FinishedMutation::Truncate => {
+                verify_data.truncate(verify_data.len().saturating_sub(1));
+            }
+        }
+        let fin_msg = encode_finished(&verify_data);
+        if stream
+            .write_all(&seal_encrypted_record(
+                suite,
+                &server_keys,
+                seq,
+                0x16,
+                &fin_msg,
+            ))
+            .is_err()
+        {
+            return None;
+        }
+
+        capture_client_alert(&mut stream, &client_keys)
+    });
+
+    let stream = TcpStream::connect(addr).expect("connect");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    stream
+        .set_write_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    let accept_all: CertVerifyCallback = Arc::new(|_info| Ok(()));
+    let client_config = TlsConfig::builder()
+        .role(TlsRole::Client)
+        .min_version(TlsVersion::Tls13)
+        .max_version(TlsVersion::Tls13)
+        .verify_peer(true)
+        .cert_verify_callback(accept_all)
+        .build();
+    let mut conn = TlsClientConnection::new(stream, client_config);
+    let _ = conn
+        .handshake()
+        .expect_err("rogue server with a bad Finished must not let handshake succeed");
+    rogue.join().ok().flatten()
+}
+
+/// Phase M-3: a flipped server-Finished `verify_data` byte (valid Cert+CV
+/// before it) must make the client's Finished HMAC check mismatch → fatal
+/// `decrypt_error(51)` on the wire.
+#[test]
+fn m279_tampered_finished_client_sends_decrypt_error() {
+    let (level, desc) = drive_m3_finished(FinishedMutation::FlipByte)
+        .expect("client must send a Finished-failure alert");
+    assert_eq!(level, 2, "Finished mismatch is fatal (level 2)");
+    assert_eq!(
+        desc, ALERT_DECRYPT_ERROR,
+        "RFC 8446 §6.2: server Finished verify_data mismatch → decrypt_error(51)"
+    );
+}
+
+/// Phase M-3: a zeroed Finished `verify_data` → same fatal alert.
+#[test]
+fn m279_zeroed_finished_client_sends_decrypt_error() {
+    let (level, desc) = drive_m3_finished(FinishedMutation::Zero)
+        .expect("client must send a Finished-failure alert");
+    assert_eq!(level, 2);
+    assert_eq!(desc, ALERT_DECRYPT_ERROR);
+}
+
+/// Phase M-3: a wrong-length Finished `verify_data` (RFC 8446 §4.4.4 requires
+/// exactly Hash.length) must be rejected with a fatal alert (the client rejects
+/// the short verify_data — `decode_error(50)` or `decrypt_error(51)` depending
+/// on whether the length or the MAC check fires first; both are fatal).
+#[test]
+fn m279_truncated_finished_client_rejects() {
+    let (level, desc) = drive_m3_finished(FinishedMutation::Truncate)
+        .expect("client must send a Finished-failure alert");
+    assert_eq!(level, 2, "wrong-length Finished is a fatal error");
+    assert!(
+        desc == ALERT_DECRYPT_ERROR || desc == 50,
+        "expected decrypt_error(51) or decode_error(50), got {desc}"
+    );
 }
