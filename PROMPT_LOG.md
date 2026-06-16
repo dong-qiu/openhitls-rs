@@ -17869,3 +17869,31 @@ WP-C 第二弹（承接 M-1 wire-alert 基建）。把 client 驱动深一程：
 M-3（MODIFIED_FINISHED wire alerts）建立在同一 valid-handshake-up-to-CV 基底上。
 
 Recorded as DEV_LOG Phase T278.
+
+### T279 — Phase M-3: MODIFIED_FINISHED → 真 wire-level decrypt_error Alert
+
+> 请继续未完成的工作
+
+WP-C 第三弹。比 M-2 深一程：rogue server 发**有效** EE+Cert+CV（client 接受 server 认证），再发**篡改 verify_data 的** server Finished；client 重算 HMAC(server_finished_key, transcript(CH..CV)) 比对失败 → fatal alert。
+
+扩展 transcript_mutation_encrypted_e2e.rs 的 drive_m3_finished(FinishedMutation)：
+  复用 M-2 valid-handshake-up-to-CV 基底（make_ecdsa_server_identity + verify_peer(true) + accept-all callback）
+  用 stateless KeySchedule helpers 算 Finished verify_data：
+    KeySchedule::new(params).derive_finished_key(&server_secret) + compute_finished_verify_data(over CH..CV)
+    （二者只依赖 suite hash，读 key_schedule.rs:242/255 确认 stateless）
+  篡改后 encode_finished 发出
+3 个测试：
+  m279_tampered_finished_client_sends_decrypt_error（翻转 verify_data 尾字节 → decrypt_error(51)；AEAD 解密正常所以非 bad_record_mac）
+  m279_zeroed_finished_...（清零 → 同）
+  m279_truncated_finished_client_rejects（错长 verify_data，RFC 8446 §4.4.4 → fatal decrypt_error(51)/decode_error(50)）
+
+零新增产品代码（复用 public derive_finished_key/compute_finished_verify_data/encode_finished）。
+
+验证：
+  cargo test -p hitls-integration-tests --test transcript_mutation_encrypted_e2e   47/0（44+3）
+  cargo clippy -p hitls-integration-tests --tests -D warnings                       clean
+  cargo fmt --all --check                                                           clean
+
+M-2+M-3 共同关闭 Phase H §8 cert+key-loader follow-up（两个认证阶段都有真 wire-Alert）。M-4（DTLS 1.3 UDP rogue server）next。
+
+Recorded as DEV_LOG Phase T279.
