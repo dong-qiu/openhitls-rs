@@ -7,7 +7,7 @@ use hitls_crypto::ecc::{EcGroup, EcPoint};
 use hitls_crypto::hkdf::Hkdf;
 use hitls_crypto::hmac::Hmac;
 use hitls_crypto::provider::Digest;
-use hitls_crypto::sha2::Sha256;
+use hitls_crypto::sha2::{Sha256, Sha512};
 use hitls_types::{CryptoError, EccCurveId};
 use hitls_utils::hex::hex;
 use subtle::ConstantTimeEq;
@@ -52,6 +52,8 @@ pub struct Spake2Plus {
     context: Vec<u8>,
     id_prover: Vec<u8>,
     id_verifier: Vec<u8>,
+    // RFC 9383 ciphersuite (hash / KDF / MAC family). Default P256-SHA256.
+    suite: Spake2Suite,
 }
 
 impl Drop for Spake2Plus {
@@ -81,6 +83,10 @@ fn sha256_factory() -> Box<dyn Digest> {
     Box::new(Sha256::new())
 }
 
+fn sha512_factory() -> Box<dyn Digest> {
+    Box::new(Sha512::new())
+}
+
 /// Hash data with SHA-256.
 fn sha256(data: &[u8]) -> Result<Vec<u8>, CryptoError> {
     let mut h = Sha256::new();
@@ -88,9 +94,50 @@ fn sha256(data: &[u8]) -> Result<Vec<u8>, CryptoError> {
     Ok(h.finish()?.to_vec())
 }
 
-/// HMAC-SHA-256(key, data).
-fn hmac_sha256(key: &[u8], data: &[u8]) -> Result<Vec<u8>, CryptoError> {
-    Hmac::mac(sha256_factory, key, data)
+/// RFC 9383 ciphersuite (the hash / KDF / MAC family). The elliptic curve is
+/// carried separately on `Spake2Plus` (P-256 today). Each variant fixes
+/// `Hash = KDF-hash = HMAC-hash` per RFC 9383 Table 1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Spake2Suite {
+    /// SPAKE2+-P256-SHA256-HKDF-SHA256-HMAC-SHA256.
+    P256Sha256,
+    /// SPAKE2+-P256-SHA512-HKDF-SHA512-HMAC-SHA512.
+    P256Sha512,
+}
+
+impl Spake2Suite {
+    /// Hash output length in bytes (also the derived-key length: RFC 9383 §3.4
+    /// recommends each key = the digest output length).
+    fn hlen(self) -> usize {
+        match self {
+            Spake2Suite::P256Sha256 => 32,
+            Spake2Suite::P256Sha512 => 64,
+        }
+    }
+
+    fn factory(self) -> fn() -> Box<dyn Digest> {
+        match self {
+            Spake2Suite::P256Sha256 => sha256_factory,
+            Spake2Suite::P256Sha512 => sha512_factory,
+        }
+    }
+
+    /// `K_main = Hash(TT)`.
+    fn hash(self, data: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        match self {
+            Spake2Suite::P256Sha256 => sha256(data),
+            Spake2Suite::P256Sha512 => {
+                let mut h = Sha512::new();
+                h.update(data)?;
+                Ok(h.finish()?.to_vec())
+            }
+        }
+    }
+
+    /// The key-confirmation MAC over the peer's share.
+    fn mac(self, key: &[u8], data: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        Hmac::mac(self.factory(), key, data)
+    }
 }
 
 /// Decompress a point from compressed form (02/03 || x).
@@ -163,8 +210,13 @@ fn encode_len_data(out: &mut Vec<u8>, data: &[u8]) {
 }
 
 impl Spake2Plus {
-    /// Create a new SPAKE2+ context.
+    /// Create a new SPAKE2+ context (default ciphersuite P256-SHA256).
     pub fn new(role: Spake2Role) -> Result<Self, CryptoError> {
+        Self::with_suite(role, Spake2Suite::P256Sha256)
+    }
+
+    /// Create a new SPAKE2+ context with an explicit RFC 9383 ciphersuite.
+    pub fn with_suite(role: Spake2Role, suite: Spake2Suite) -> Result<Self, CryptoError> {
         let group = EcGroup::new(EccCurveId::NistP256)?;
         Ok(Self {
             role,
@@ -182,6 +234,7 @@ impl Spake2Plus {
             context: Vec::new(),
             id_prover: Vec::new(),
             id_verifier: Vec::new(),
+            suite,
         })
     }
 
@@ -412,21 +465,18 @@ impl Spake2Plus {
         // w0
         encode_len_data(&mut tt, &w0_bytes);
 
-        // RFC 9383 §3.4 key schedule:
+        // RFC 9383 §3.4 key schedule (ciphersuite-parameterised over the hash):
         //   K_main = Hash(TT)
-        //   K_confirmP || K_confirmV = KDF(nil, K_main, "ConfirmationKeys")
-        //   K_shared                 = KDF(nil, K_main, "SharedKey")
-        // For the P-256-SHA256-HKDF-SHA256-HMAC-SHA256 ciphersuite (Table 1):
-        // Hash = SHA-256, KDF = HKDF-SHA256, MAC = HMAC-SHA256; each derived
-        // key is 32 bytes. (Previously this used a non-conformant
-        // split-Hash(TT) + HMAC("ConfirmProver"/"ConfirmVerifier") schedule
-        // that did not interoperate with RFC 9383 implementations.)
-        let k_main = sha256(&tt)?;
-        let hkdf = Hkdf::new_with_factory(&[], &k_main, sha256_factory, 32)?;
-        let confirm_keys = hkdf.expand(b"ConfirmationKeys", 64)?;
-        let kc_a = confirm_keys[..32].to_vec(); // K_confirmP
-        let kc_b = confirm_keys[32..].to_vec(); // K_confirmV
-        let ke = hkdf.expand(b"SharedKey", 32)?; // K_shared
+        //   K_confirmP || K_confirmV = HKDF(nil, K_main, "ConfirmationKeys")
+        //   K_shared                 = HKDF(nil, K_main, "SharedKey")
+        // Each derived key is `hlen` bytes (= the digest output length).
+        let hlen = self.suite.hlen();
+        let k_main = self.suite.hash(&tt)?;
+        let hkdf = Hkdf::new_with_factory(&[], &k_main, self.suite.factory(), hlen)?;
+        let confirm_keys = hkdf.expand(b"ConfirmationKeys", 2 * hlen)?;
+        let kc_a = confirm_keys[..hlen].to_vec(); // K_confirmP
+        let kc_b = confirm_keys[hlen..].to_vec(); // K_confirmV
+        let ke = hkdf.expand(b"SharedKey", hlen)?; // K_shared
 
         self.ke = Some(ke.clone());
         self.kc_a = Some(kc_a);
@@ -450,11 +500,11 @@ impl Spake2Plus {
         match self.role {
             Spake2Role::Prover => {
                 let kc_a = self.kc_a.as_ref().ok_or(CryptoError::NullInput)?;
-                hmac_sha256(kc_a, peer_share)
+                self.suite.mac(kc_a, peer_share)
             }
             Spake2Role::Verifier => {
                 let kc_b = self.kc_b.as_ref().ok_or(CryptoError::NullInput)?;
-                hmac_sha256(kc_b, peer_share)
+                self.suite.mac(kc_b, peer_share)
             }
         }
     }
@@ -471,13 +521,13 @@ impl Spake2Plus {
                 // Peer is verifier, sent HMAC(KcB, pA) where pA = my_share
                 let kc_b = self.kc_b.as_ref().ok_or(CryptoError::NullInput)?;
                 let my_share = self.my_share.as_ref().ok_or(CryptoError::NullInput)?;
-                hmac_sha256(kc_b, my_share)?
+                self.suite.mac(kc_b, my_share)?
             }
             Spake2Role::Verifier => {
                 // Peer is prover, sent HMAC(KcA, pB) where pB = my_share
                 let kc_a = self.kc_a.as_ref().ok_or(CryptoError::NullInput)?;
                 let my_share = self.my_share.as_ref().ok_or(CryptoError::NullInput)?;
-                hmac_sha256(kc_a, my_share)?
+                self.suite.mac(kc_a, my_share)?
             }
         };
 

@@ -18006,3 +18006,29 @@ WP-D（PKI x509 emitter 恢复）按 plan §4.2 准则文档化为 N/A：
 na-list SPAKE2+ + Privacy Pass Structural Gap 均 RESOLVED。docs-only。
 
 Recorded as DEV_LOG Phase T283.
+
+---
+
+> 继续 SPAKE2+ A-2
+
+A-2：SPAKE2+ 多 suite 泛化（hash family 参数化）+ RFC 9383 P256-SHA512 字节级迁移。WP-A（I161/T281）只解了 P-256-SHA256，A-2 解开 13 个 deferred 向量里的第一个。
+
+I163（产品改动）：
+  - 把 spake2plus 从硬编码 SHA-256 hash family 泛化
+  - 新 pub `Spake2Suite` 枚举（P256Sha256 / P256Sha512），带 RFC 9383 Table 1 的 Hash=KDF-hash=HMAC-hash 族（hlen/factory/hash/mac）
+  - 新 `Spake2Plus::with_suite(role, suite)` 构造器；`new(role)` 委托给它（P256Sha256，老调用方零行为变化）
+  - §3.4 key schedule（process_share）按 self.suite 参数化：K_main=Hash(TT)，HKDF "ConfirmationKeys" → 2·hlen 切 hlen/hlen，K_shared=HKDF "SharedKey" → hlen
+  - confirmation MAC（get/verify_confirmation）走 self.suite.mac()
+  - 删除已无用的 hmac_sha256 free function
+  - 曲线仍 P-256（M/N 点 + decompress + 32 字节标量不变）；只有 hash family 可变。P-384/P-521 + CMAC 留作后续 increment
+
+T284（字节级迁移）：
+  - migrated_spake2plus.rs 新增 tc_spake2plus_rfc9383_p256_sha512_vector_byte_exact
+  - 用 with_suite(Prover, P256Sha512) + kat-nonce generate_share_with_scalar(x) 驱动 C SDV SPAKE2PLUS_TC001 的 P256-SHA512-HKDF-SHA512-HMAC-SHA512 向量
+  - 断言 shareP / 64 字节 K_shared / confirmP 字节级 + confirmV 验证通过，全部对独立 C 向量（错的 hash-family schedule 不可能 false-pass）
+
+行为变化：老 P256-SHA256 调用方无（new() 不变），新路径纯增量。
+验证：cargo test -p hitls-auth --all-features = 119/0；clippy --all-features --all-targets -D warnings clean；fmt clean。
+na-list SPAKE2+ → P256-SHA512 也 RESOLVED（P-384/P-521/CMAC 仍 pending）。
+
+Recorded as DEV_LOG Phase I163/T284.
