@@ -18056,3 +18056,21 @@ T285（字节级迁移）：
 na-list SPAKE2+ gap → FULLY RESOLVED。
 
 Recorded as DEV_LOG Phase I164/T285.
+
+---
+
+> 请深度分析还有哪些测试用例没有迁移完成 / 请依次完成1和2
+
+深度扫描发现重大遗漏：ElGamal / Paillier / HybridKEM 三个算法 Rust 已实现但 C 测试完全未迁移（从未进 Phase A 范围，na-list 里连行都没有）。依次迁移。
+
+T286：ElGamal + Paillier 迁移（两个零覆盖算法）。
+  - 两个 C 套件都是 API-test 格式（NewCtx/SetPara/Gen/Get/Set/Enc/Dec/Dup 参数校验），且加密随机化（ElGamal k / Paillier r），无可复现 KAT → SM9/T158 round-trip 套路，手写非 xtask。
+  - migrated_elgamal.rs（3 测试）：字节级 y=g^x mod p（C ENC/DEC_API_TC001 密钥，证 Rust 1024-bit modexp 对齐 C）+ encrypt→decrypt round-trip + m=0/m≥p 拒绝。
+  - migrated_paillier.rs（3 测试）：字节级 n=p·q（C SET_PUB_API_TC002 素数）+ round-trip + 加法同态 decrypt(E(m1)·E(m2))=m1+m2（Paillier 定义性质）。
+  - C 密文字节刻意不迁（ElGamal 无标准 wire format，Rust 用自有 framing）—— 文件头 + na-list 文档化。
+  - 零新产品代码；两个非对称 KAT 首跑即过，未抓到 bug。
+  - na-list：新增 ElGamal(3/61/0/0/64) + Paillier(3/71/0/0/74)，Total 3251→3257 emitted / 6578→6716。
+
+HybridKEM（第 3 个未迁移算法）单独成 PR（需 from_decapsulation_key 产品构造器）。Privacy Pass 序列化为 item 2。
+
+Recorded as DEV_LOG Phase T286.

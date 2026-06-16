@@ -83,7 +83,26 @@ Counts are the `Generation summary` footer of each generated file
 | XMSS | 84 | 4 | 0 | 0 | 88 |
 | SM9 | 8 | 30 | 0 | 0 | 38 |
 | OTP (HOTP/TOTP) | 52 | 32 | 0 | 0 | 84 |
-| **Total** | **3251** | **3804** | **240** | **7** | **6578** |
+| ElGamal | 3 | 61 | 0 | 0 | 64 |
+| Paillier | 3 | 71 | 0 | 0 | 74 |
+| **Total** | **3257** | **3936** | **240** | **7** | **6716** |
+
+> **ElGamal / Paillier (round-trip migration, not xtask byte-exact)**: these two
+> algorithms were never in the Phase A scope (they have no `migrated_*` file and
+> no xtask emitter), yet both have working Rust implementations — so their C
+> SDV suites (`crypto/elgamal`, `crypto/paillier`) were **entirely unmigrated**.
+> Both C suites are **API-test** format (NewCtx / SetPara / Gen / Get/Set Pub/Prv
+> / Encrypt / Decrypt / DupCtx parameter validation) and both schemes are
+> randomized (ElGamal ephemeral `k`; Paillier randomizer `r`), so there is no
+> reproducible KAT to xtask-emit. They are migrated SM9/T158-style (`Emitted`
+> column counts the round-trip + functional pins): each uses the C vector's real
+> 1024-bit key material to drive a **byte-exact** asymmetric KAT
+> (ElGamal `y = g^x mod p`; Paillier `n = p·q`) plus an encrypt/decrypt
+> round-trip (and, for Paillier, the additive-homomorphic property
+> `decrypt(E(m1)·E(m2)) = m1+m2`). The C ciphertext bytes are **not** migrated:
+> ElGamal has no standard wire format and the Rust port uses its own framing
+> (`4-byte c1_len ‖ c1 ‖ c2`); see `migrated_elgamal.rs` / `migrated_paillier.rs`
+> headers. The remaining API rows are EAL ctx mechanics with no Rust 1:1.
 
 > **Phase J onward**: the per-algorithm table above was originally the Phase A
 > (crypto) deliverable. Phase J extends the migration to the previously-unplanned
