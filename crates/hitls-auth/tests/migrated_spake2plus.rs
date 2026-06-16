@@ -25,7 +25,7 @@
 
 #![cfg(feature = "spake2plus")]
 
-use hitls_auth::spake2plus::{Spake2Plus, Spake2Role};
+use hitls_auth::spake2plus::{Spake2Plus, Spake2Role, Spake2Suite};
 use hitls_utils::hex::hex;
 
 /// Registration triple from the C SDV `SPAKE2PLUS_TC001`
@@ -97,6 +97,75 @@ fn tc_spake2plus_rfc9383_p256_vector_byte_exact() {
     assert!(
         prover.verify_confirmation(&confirm_v).unwrap(),
         "the vector's confirmV = HMAC(K_confirmV, shareP) must verify"
+    );
+}
+
+/// Byte-exact prover-side migration of the RFC 9383
+/// `SPAKE2+-P256-SHA512-HKDF-SHA512-HMAC-SHA512` vector (A-2, multi-suite).
+///
+/// Same methodology as the SHA-256 case, but driven through
+/// `Spake2Plus::with_suite(.., Spake2Suite::P256Sha512)` so the §3.4 key
+/// schedule runs Hash = SHA-512, HKDF-SHA512, MAC = HMAC-SHA512 (each derived
+/// key 64 bytes). The curve stays P-256 (M/N points + scalar math identical),
+/// so only the hash family changes vs the SHA-256 vector. Asserts `shareP`,
+/// 64-byte `K_shared`, `confirmP` byte-exact, and that the vector's `confirmV`
+/// verifies — independent C ground-truth, cannot false-pass.
+#[cfg(feature = "kat-nonce")]
+#[test]
+fn tc_spake2plus_rfc9383_p256_sha512_vector_byte_exact() {
+    // SPAKE2PLUS_TC001, suite "SPAKE2+-P256-SHA512-HKDF-SHA512-HMAC-SHA512".
+    let w0 = hex("1cc5207d6e34b8f7828206fb64b86aa9c712bc952abf251bb9f5856b24d8c8cc");
+    let w1 = hex("4279649e62532b01dc27d2ed39100ba350518fb969672061a01edce752d0e672");
+    let x = hex("b586ab83f175c1a2b56b6a1b6a283523f88a9befcf11e22efb48e2ee1fe69a23");
+    let share_p_expected = hex(
+        "04a7928c4b47f6b8657a5b8ebcb6f1bd266192e152fb9745a4180c94657a2f323\
+         b4d50d536c0325cdb0ec42c9bd8db8d7af3ff6dc85edb4b5365375c62e09def4a",
+    );
+    let share_v = hex(
+        "04498c29e37dbd53ebf8db76679901d90c6be3af57f46ac3025b32420839f0489\
+         c6c3b6bf5ddc8ecbc3d7c83d0891ad814a00ad23eba13197c9d96a5b10275e35d",
+    );
+    let k_shared = hex(
+        "11887659d9e002f34fa6cc270d33570f001b2a3fc0522b643c07327d09a4a9f47\
+         aab85813d13c585b53adf5ac9de5707114848f3dc31a4045f69a2cc1972b098",
+    );
+    let confirm_p = hex(
+        "6b2469b56cf8ac3f94a8d0b533380ea6b3d0f46b3e12ee82550d49e129c241272\
+         8c9437a64ee5f80c8cdc5e8a30faa0a6deb8a5251346ba81bb6fc955b2304fc",
+    );
+    let confirm_v = hex(
+        "154174fc278a935e290b3352ba877e179fa9281c0a76928faea703c72d383b267\
+         511a5cf084cb07147efece94e3cfd91944e7baab856858fbebc087167b0f409",
+    );
+
+    let mut prover = Spake2Plus::with_suite(Spake2Role::Prover, Spake2Suite::P256Sha512).unwrap();
+    prover.set_identities(
+        b"SPAKE2+-P256-SHA512-HKDF-SHA512-HMAC-SHA512 Test Vectors",
+        b"client",
+        b"server",
+    );
+    prover.setup(&w0, &w1).unwrap();
+
+    #[allow(deprecated)]
+    let share_p = prover.generate_share_with_scalar(&x).unwrap();
+    assert_eq!(share_p, share_p_expected, "shareP = x·G + w0·M byte-exact");
+
+    let ke = prover.process_share(&share_v).unwrap();
+    assert_eq!(ke.len(), 64, "SHA-512 K_shared is 64 bytes");
+    assert_eq!(
+        ke, k_shared,
+        "K_shared (RFC 9383 §3.4 HKDF-SHA512 'SharedKey') byte-exact"
+    );
+
+    let cp = prover.get_confirmation().unwrap();
+    assert_eq!(
+        cp, confirm_p,
+        "confirmP = HMAC-SHA512(K_confirmP, shareV) byte-exact"
+    );
+
+    assert!(
+        prover.verify_confirmation(&confirm_v).unwrap(),
+        "the vector's confirmV = HMAC-SHA512(K_confirmV, shareP) must verify"
     );
 }
 
