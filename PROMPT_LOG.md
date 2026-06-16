@@ -17984,3 +17984,25 @@ na-list Privacy Pass gap → RESOLVED。剩余 follow-up：RFC 9577 TokenChallen
 WP-B 完成；残余计划只剩 WP-D（PKI emitter，收益边际）。
 
 Recorded as DEV_LOG Phase I162/T282.
+
+### T283 — 残余收口计划完成：WP-D 文档化 N/A，C→A→B→D 弧收口
+
+> 请继续中断的任务 / 348合并后 继续 WP-B
+
+WP-D（PKI x509 emitter 恢复）按 plan §4.2 准则文档化为 N/A：
+  (1) 明显 flywheel（扩 sig-alg OID map）recover 0 行
+  (2) 剩余跳过项刻意/parser-convention/fiddly（56 unknown + 69 unsupported）
+  (3) dotted-OID DN 属性恢复可行（parser 存 oid.to_dot_string()，certificate.rs:218）但需 emitter 精确复刻
+      parser 三处行为（oid_to_dn_short_name 完整集 + to_dot_string + read_string tag），为边际收益做三重复刻 = §4.2 允许放弃的 fiddly 工作
+
+残余收口计划 COMPLETE：
+  C（TLS rogue-server wire-Alert，M-1/2/3/4，#342/345/346/347）
+  A（SPAKE2+ RFC 9383 一致性修复 + P-256 字节级，I161/T281，#348）
+  B（Privacy Pass RFC 9474 一致性修复 + 字节级，I162/T282，#349）
+  D（N/A）
+
+最大产出：迁移飞轮抓到并修复 2 个生产互通 bug（Rust SPAKE2+ 非 RFC 9383 key schedule + Privacy Pass 非 RFC 9474 blind-RSA），均对独立 C 向量 ground-truth 验证。Phase A 飞轮（I137/I145/I146）在残余收口阶段的延续。
+
+na-list SPAKE2+ + Privacy Pass Structural Gap 均 RESOLVED。docs-only。
+
+Recorded as DEV_LOG Phase T283.
