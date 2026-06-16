@@ -13,6 +13,8 @@
 //!
 //! Where `token_input = 0x0002 || nonce(32) || challenge_digest(32) || token_key_id(32)`.
 
+pub mod wire;
+
 use hitls_bignum::BigNum;
 use hitls_crypto::rsa::{emsa_pss_encode, RsaHashAlg, RsaPublicKey};
 use hitls_crypto::sha2::{Sha256, Sha384};
