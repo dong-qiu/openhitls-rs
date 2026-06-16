@@ -17897,3 +17897,33 @@ WP-C 第三弹。比 M-2 深一程：rogue server 发**有效** EE+Cert+CV（cli
 M-2+M-3 共同关闭 Phase H §8 cert+key-loader follow-up（两个认证阶段都有真 wire-Alert）。M-4（DTLS 1.3 UDP rogue server）next。
 
 Recorded as DEV_LOG Phase T279.
+
+### T280 — Phase M-4: DTLS 1.3 record 线格 pin（scope-cut）+ WP-C closeout
+
+> 请继续未完成的工作
+
+M-4 scope-cut：全 DTLS 1.3 UDP rogue server 不成比例 —— C SDV 无 DTLS 1.3 套件（只有 dtls12/dtlcp），无 MODIFIED_* 源；记录层已 13 单测覆盖。改为 integration 级 RFC 9147 §4 record-codec pin。
+
+给 tests/interop/Cargo.toml 的 hitls-tls features 加 dtls13（之前有 dtls12 没 dtls13；模块 feature-gated）—— 合理基建改进，解锁 integration 级 DTLS 1.3 覆盖（此前为零）。
+新建 tests/interop/tests/dtls13_record_wire.rs，8 个 pin：
+  serialize↔parse round-trip（content_type/epoch/6-byte seq/fragment）
+  13-byte header layout
+  build_aad_dtls13 == 序列化 record header（RFC 9147 §4 AAD）
+  截断 header / 短 body / 未知 content-type 拒绝
+  Dtls13EpochState seq 自增 + epoch 变更 reset（§4.2.2）
+  plan audit pin
+
+WP-C closeout：Phase H §8 实质缺口（MODIFIED_CERT_VERIFY + MODIFIED_FINISHED 的真 wire-Alert 观测）由 M-1/M-2/M-3 关闭；
+M-5（0-RTT/PSK）是 disposition 非 C 迁移项 —— 0-RTT 接受已由 T109 集成测试验证，external PSK 已由 T119 落地，mutation-E2E 是可选新基建（无 C MODIFIED_* 源），deferred；全 DTLS UDP rogue server 同样 deferred（无 C 数据）。
+
+零新增产品代码（复用 public record::dtls13 codec）。
+
+验证：
+  cargo test -p hitls-integration-tests --test dtls13_record_wire   8/0
+  无回归（transcript_mutation_encrypted_e2e 47/0、dtls12 9/0 加 dtls13 后仍过）
+  cargo clippy -p hitls-integration-tests --tests -D warnings        clean
+  cargo fmt --all --check                                            clean
+
+WP-C 完成；next 是 WP-A（SPAKE2+ byte-exact 解锁 —— 最高字节级产出的残余）。
+
+Recorded as DEV_LOG Phase T280.
