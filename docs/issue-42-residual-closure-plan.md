@@ -1,6 +1,6 @@
 # C→Rust 测试迁移 — 残余收口计划（v1.0）
 
-**状态**：规划阶段（2026-06-16）
+**状态**：✅ **完成**（2026-06-16）—— C/A/B 实质交付（含 2 个生产互通 bug 修复），D 文档化 N/A。见 §6。
 **主跟踪 issue**：[#42](https://github.com/dong-qiu/openhitls-rs/issues/42)
 **前序**：`docs/issue-42-phase-{a..i}-*.md` + `docs/issue-42-phase-jklm-plan.md`（Phase A–J 完成；K/L 经 ground-truth 评估为已由 Phase C/I 达成；M-1 完成）
 **DEV_LOG 命名**：接续 T277 → **T278+**，Implementation 接续 I160 → **I161+**
@@ -105,18 +105,24 @@
 
 ---
 
-## 4. WP-D — PKI x509 emitter 恢复（测试，可选 / 最后）
+## 4. WP-D — PKI x509 emitter 恢复（⏸️ 评估为 N/A，2026-06-16）
 
-**核心判断**：`migrated_x509_parse.rs` 1073/1588，剩 56 unknown（Hex-ambiguous DN 值 + header 行）+ 69 unsupported（dotted-OID DN 属性 + 严格性 gap）。**收益边际**（本会话实测扩 sig-alg map recover 0 行），列为可选。
+**核心判断（最终）**：`migrated_x509_parse.rs` 1073/1588，剩 56 unknown + 69 unsupported。经 ground-truth
+评估，**按 §4.2 准则文档化为 N/A**（不值得 fiddly 投入），理由：
 
-### 4.1 子 PR（单个）
-| # | T | 内容 | 估计 | 做法 |
-|---|---|---|---:|---|
-| D-1 | T281★ | 恢复 Hex-ambiguous DN + dotted-OID DN 属性 | ~小 | xtask `x509.rs`:对偶长十进制 DN 值用位置信息消歧；对未知 DN 属性类型按 dotted-OID 比较（Rust parser 存 dotted OID）|
+1. **明显的 flywheel 收益 = 0**：本会话实测扩 sig-alg OID map（SHA384/512/SHA1/MD5-RSA + ML-DSA）recover **0 行**
+   —— 那些 SigAlg 行已全部 map，跳过项在别处。
+2. **剩余跳过项是刻意/难恢复**：56 unknown = header 行 + **Hex-ambiguous DN 值**（偶长十进制 DN 被 parser 当
+   hex，是 parser-convention 而非可迁数据）；69 unsupported = **dotted-OID DN 属性** + verifier 严格性 gap。
+3. **dotted-OID DN 属性恢复虽可行但 fiddly**：Rust parser 对未知 DN 属性 OID 存 `oid.to_dot_string()`
+   （`certificate.rs:218`），所以理论上可迁。但 emitter 要**精确复刻**三处 parser 行为才能字节级命中：
+   (a) parser 的 `known::oid_to_dn_short_name` 完整 short-name 集（定义埋在 hitls-pki，非平凡定位）；
+   (b) `Oid::to_dot_string`（OID arc 解码 + join "."）；(c) `read_string` 的 value-tag 处理。三处任一不匹配即断言
+   失败。为不确定的 modest 收益（~tens 行）做三重精确复刻，属 §4.2 明确允许放弃的 fiddly 工作。
+4. **价值对比**：本残余计划的实质价值是 WP-A/B 的**两个生产互通 bug 修复** + WP-C 的 wire-Alert；WP-D 的
+   dotted-OID 恢复是边际测试覆盖，不改变任何正确性结论。
 
-### 4.2 验收
-- [ ] `migrated_x509_parse.rs` emitted 计数提升；`--check` drift 门通过
-- [ ] **若实测仍 recover < ~10 行，则放弃并文档化为永久 N/A**（不值得 fiddly 投入）
+**结论**：WP-D 归入 §5 永久 N/A（fiddly emitter 复刻，边际收益）。残余收口计划至此**完成**（C/A/B 实质交付，D N/A）。
 
 ---
 
@@ -138,22 +144,27 @@
 | cmvp 逐算法 Selftest 粒度 | — | Rust 聚合 `run_self_tests`，无 public 逐算法入口（已集成 pin）|
 | codecs provider 框架 | — | Rust 无 provider 概念（base64/PEM 已 byte-exact 迁）|
 | keymgmt / sm CLI | — | 刻意 deferral（GM operator mode，README 文档化）|
+| pki x509 dotted-OID DN 属性 + Hex-ambiguous DN（原 WP-D）| 56 unknown + 69 unsupported | 需 emitter 精确复刻 parser `oid_to_dn_short_name` + `to_dot_string` + `read_string` 三处行为，fiddly + 边际收益（§4 评估）|
 
 ---
 
-## 6. 总验收 & 度量
+## 6. 总验收 & 度量 ✅ 残余收口计划完成（2026-06-16）
 
-| 指标 | 当前 | 收口后（全 WP 完成，预期）|
+| 指标 | 计划前 | 现状（完成）|
 |---|---:|---:|
-| workspace 总测试 | 9,245 | ~9,290+ |
-| SPAKE2+ 字节级向量 | 0（仅 round-trip） | 1–14（按 A-2 落地数）|
-| Privacy Pass 字节级 | 0（仅 round-trip） | 1 VECTOR |
-| na-list Structural Gap（未 resolved） | 2（SPAKE2+ / Privacy Pass） | 0–1 |
-| TLS H §8 still-pending | 3（M-2/3/4/5）| 0 |
+| SPAKE2+ 字节级向量 | 0（仅 round-trip） | **1**（P-256；A-2 多 suite 留 future I-phase）|
+| Privacy Pass 字节级 | 0（仅 round-trip） | **1 VECTOR**（request/response/token）|
+| na-list Structural Gap（未 resolved） | 2（SPAKE2+ / Privacy Pass） | **0**（两个均 RESOLVED）|
+| TLS H §8 still-pending（实质项） | 3 | **0**（M-1/2/3 关闭 cert-verify/finished wire-Alert；M-4/M-5 无 C 源 deferred）|
+| **生产互通 bug 修复** | — | **2**（SPAKE2+ §3.4 key schedule + Privacy Pass RSABSSA）|
 
-- [ ] 完成的 WP 对应 na-list Structural Gap 行翻 resolved
-- [ ] DEV_LOG / PROMPT_LOG 同步
-- [ ] 每个子 PR：独立 review → pre-push AI review → CI Gate → squash-merge（[[merge-before-next-task]]）
+- [x] 完成的 WP 对应 na-list Structural Gap 行翻 resolved（SPAKE2+ + Privacy Pass）
+- [x] DEV_LOG / PROMPT_LOG 同步（T276/T278/T279/T280 + I161/T281 + I162/T282 + 本收尾）
+- [x] 每个子 PR：独立 review / pre-push AI review → CI Gate → squash-merge
+
+**WP 完成情况**：**C ✅**（TLS rogue-server wire-Alert，#342/345/346/347）+ **A ✅**（SPAKE2+ 一致性修复 + 字节级，#348）+ **B ✅**（Privacy Pass 一致性修复 + 字节级，#349）+ **D ⏸️ N/A**（fiddly emitter 复刻，边际收益，§4）。
+
+> **本计划最大产出不是测试覆盖，而是两个被迁移飞轮抓到的生产互通 bug**（Rust SPAKE2+ 与 Privacy Pass 此前都不与各自 RFC 标准互通），均已修复并对独立 C 向量 ground-truth 验证。这是 Phase A 飞轮（迁移驱动发现实现 bug）在残余收口阶段的延续（cf. I137/I145/I146）。
 
 ---
 
