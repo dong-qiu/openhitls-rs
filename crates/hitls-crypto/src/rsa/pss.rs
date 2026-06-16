@@ -89,13 +89,13 @@ pub(crate) fn pss_sign_pad_with_salt_alg(
     }
 }
 
-/// EMSA-PSS encoding with a **caller-provided salt** (no RNG). Used only by
-/// the `kat-nonce` deterministic-sign hook to reproduce fixed-salt PSS sign
-/// KAT vectors; production signing uses `pss_sign_pad_with_salt_alg`, which
-/// generates a random salt. Validates `digest.len()` and the
+/// EMSA-PSS encoding with a **caller-provided salt** (no RNG). Used by the
+/// `kat-nonce` deterministic-sign hook (fixed-salt PSS sign KAT vectors) and by
+/// RFC 9474 RSABSSA blind signatures (deterministic PSSZERO uses an empty
+/// salt); production randomized signing uses `pss_sign_pad_with_salt_alg`,
+/// which generates a random salt. Validates `digest.len()` and the
 /// `emLen >= hLen + sLen + 2` bound (checked arithmetic, so a huge caller
 /// `salt.len()` cannot wrap) before encoding.
-#[cfg(feature = "kat-nonce")]
 pub(crate) fn pss_sign_pad_with_salt_bytes_alg(
     digest: &[u8],
     em_bits: usize,

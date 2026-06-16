@@ -93,13 +93,15 @@
 
 | # | I/T | 内容 | 估计 | 做法 |
 |---|---|---|---:|---|
-| B-1 | I163 | RFC 9474 EMSA-PSS RSABSSA + 确定性 hooks + TokenChallenge codec | ~产品 | `hitls_auth::privpass`:盲化 **EMSA-PSS-encode(msg, salt)** 而非 raw hash（RFC 9474 §5）；`kat-nonce`-gated 确定性 `nonce`/`salt`/`blind` 注入；RFC 9577 TokenChallenge `serialize`/`deserialize` |
-| B-2 | T280★ | 迁移 VECTOR request/response/token 字节级 | ~8 | `VECTOR_TEST_TC001` 的 `request`/`response`/`token` 字节级；challenge round-trip |
+| ✅ B-1+B-2 | ✅ I162 + T282 | RFC 9474 RSABSSA-SHA384-PSS conformance fix + 字节级迁移 | **1 byte-exact + prod fix** | (I162) `hitls_auth::privpass` 盲化改为 **EMSA-PSS-ENCODE(SHA384(token_input), modBits-1, salt48)**（sLen=48，非原 raw SHA-256）；`verify_token` 改 RSASSA-PSS-VERIFY；暴露 `hitls_crypto::rsa::emsa_pss_encode`；加 `Client::with_token_key_id` + `verify_token_with_key_id`。(T282) `kat-nonce` `create_token_request_with_randomness(challenge,nonce,salt,blind)` + `tc_privpass_rfc9474_vector_byte_exact` 断言 `blinded_msg`/`blind_sig`/`authenticator` 字节级 + token 验证，全对独立 C 向量 ground-truth 通过。118/118 hitls-auth 无回归 |
 
-### 3.2 验收
-- [ ] EMSA-PSS RSABSSA 实现命中 RFC 9474 Appendix（独立第三方向量）
-- [ ] C `VECTOR_TEST_TC001` 的 request/response/token 字节级
-- [ ] na-list Privacy Pass Structural Gap 行 resolved
+> **B-0 探查的价值**：与 WP-A 同样，迁移驱动**抓到生产互通 bug**（Rust privpass 是非标简化 blind-RSA，不与 RFC 9474 互通）。变体（PSS sLen=48 + emBits=modBits-1，非起初推测的 PSSZERO）是从 RNG-stub 消费顺序（nonce→salt→blind）+ 独立 Python 参考逆向确定的。
+
+### 3.2 验收 ✅
+- [x] EMSA-PSS RSABSSA 实现对独立 C 向量字节级命中
+- [x] C `VECTOR_TEST_TC001` 的 request/response/token 字节级
+- [x] na-list Privacy Pass Structural Gap 行 resolved（P-256 RSA-2048 向量）
+- 剩余：RFC 9577 TokenChallenge codec + 生产 `token_key_id = SHA256(SPKI)`（需在 hitls-auth 构建 id-RSASSA-PSS SPKI DER，follow-up）
 
 ---
 

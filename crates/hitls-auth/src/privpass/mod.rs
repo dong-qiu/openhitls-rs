@@ -14,7 +14,8 @@
 //! Where `token_input = 0x0002 || nonce(32) || challenge_digest(32) || token_key_id(32)`.
 
 use hitls_bignum::BigNum;
-use hitls_crypto::sha2::Sha256;
+use hitls_crypto::rsa::{emsa_pss_encode, RsaHashAlg, RsaPublicKey};
+use hitls_crypto::sha2::{Sha256, Sha384};
 use hitls_types::CryptoError;
 
 /// Privacy Pass token type.
@@ -193,62 +194,103 @@ impl Client {
         })
     }
 
-    /// Create a blinded token request for the given challenge.
+    /// Create a `Client` with an explicit `token_key_id` (RFC 9578 §6.5:
+    /// `token_key_id = SHA-256(DER SubjectPublicKeyInfo of the issuer key)`).
     ///
-    /// Returns a `TokenRequest` to send to the issuer and a `BlindState` to keep locally
-    /// for unblinding the response.
+    /// The default `Client::new` derives a placeholder `SHA-256(n || e)` key id,
+    /// which is **not** RFC 9578-conformant; use this constructor with the
+    /// SHA-256 of the issuer's published SPKI to interoperate / reproduce
+    /// RFC 9578 test vectors.
+    pub fn with_token_key_id(
+        n: &[u8],
+        e: &[u8],
+        token_key_id: [u8; 32],
+    ) -> Result<Self, CryptoError> {
+        let mut c = Self::new(n, e)?;
+        c.token_key_id = token_key_id;
+        Ok(c)
+    }
+
+    /// Create a blinded token request for the given challenge (RFC 9474
+    /// RSABSSA-SHA384-PSSZERO Blind + RFC 9578 token_input).
     ///
-    /// Steps:
-    /// 1. Generate a random 32-byte nonce.
-    /// 2. Compute `challenge_digest = SHA-256(challenge)`.
-    /// 3. Build `token_input = 0x0002 || nonce || challenge_digest || token_key_id`.
-    /// 4. Compute `msg_hash = SHA-256(token_input)`.
-    /// 5. Generate a random blinding factor `r` coprime to `n`.
-    /// 6. Compute `blinded = msg_hash * r^e mod n`.
-    /// 7. Store `r^(-1) mod n` in `BlindState`.
+    /// Returns a `TokenRequest` to send to the issuer and a `BlindState` to keep
+    /// locally for unblinding the response. The nonce and blinding factor are
+    /// drawn randomly.
     pub fn create_token_request(
         &self,
         challenge: &[u8],
     ) -> Result<(TokenRequest, BlindState), CryptoError> {
-        // Step 1: Generate random nonce
         let mut nonce = [0u8; 32];
         getrandom::fill(&mut nonce).map_err(|_| CryptoError::BnRandGenFail)?;
+        let mut salt = [0u8; 48]; // RSABSSA-SHA384-PSS salt length
+        getrandom::fill(&mut salt).map_err(|_| CryptoError::BnRandGenFail)?;
+        let (r, r_inv) = generate_blind_factor(&self.n)?;
+        self.blind_request(challenge, nonce, &salt, &r, &r_inv)
+    }
 
-        // Step 2: Compute challenge_digest = SHA-256(challenge)
+    /// Test-only: create a token request with a caller-supplied nonce, PSS salt
+    /// (48 bytes), and blinding factor `r` (big-endian) — for byte-exact
+    /// reproduction of RFC 9578 test vectors. Gated behind the non-default
+    /// `kat-nonce` feature; reusing fixed randomness in a real exchange is
+    /// insecure.
+    #[cfg(feature = "kat-nonce")]
+    #[doc(hidden)]
+    #[deprecated(note = "test-only: caller-chosen nonce/salt/blind is insecure")]
+    pub fn create_token_request_with_randomness(
+        &self,
+        challenge: &[u8],
+        nonce: [u8; 32],
+        salt: &[u8],
+        blind_r: &[u8],
+    ) -> Result<(TokenRequest, BlindState), CryptoError> {
+        let r = BigNum::from_bytes_be(blind_r).mod_reduce(&self.n)?;
+        let r_inv = r.mod_inv(&self.n)?;
+        self.blind_request(challenge, nonce, salt, &r, &r_inv)
+    }
+
+    /// RFC 9474 §4.2 Blind, for RSABSSA-SHA384-PSS (SHA-384, MGF1-SHA-384,
+    /// salt length 48 — the variant RFC 9578 Token Type 0x0002 uses):
+    ///   token_input  = 0x0002 || nonce || SHA256(challenge) || token_key_id
+    ///   encoded_msg  = EMSA-PSS-ENCODE(token_input, bit_len(n)-1)  [SHA-384, sLen=48]
+    ///   m            = OS2IP(encoded_msg)
+    ///   blinded_msg  = (m * r^e) mod n
+    fn blind_request(
+        &self,
+        challenge: &[u8],
+        nonce: [u8; 32],
+        salt: &[u8],
+        r: &BigNum,
+        r_inv: &BigNum,
+    ) -> Result<(TokenRequest, BlindState), CryptoError> {
         let challenge_digest = Sha256::digest(challenge)?;
-
-        // Step 3: Build token_input = 0x0002 || nonce || challenge_digest || token_key_id
         let mut token_input = Vec::with_capacity(2 + 32 + 32 + 32);
         token_input.extend_from_slice(&[0x00, 0x02]); // PubliclyVerifiable type
         token_input.extend_from_slice(&nonce);
         token_input.extend_from_slice(&challenge_digest);
         token_input.extend_from_slice(&self.token_key_id);
 
-        // Step 4: Compute msg_hash = SHA-256(token_input) and convert to BigNum
-        let msg_hash = Sha256::digest(&token_input)?;
-        let m = BigNum::from_bytes_be(&msg_hash);
+        // EMSA-PSS-ENCODE(token_input) with SHA-384, emBits = modBits-1, and the
+        // 48-byte salt → m = OS2IP(encoded).
+        let digest = Sha384::digest(&token_input)?;
+        let em_bits = self.n.bit_len() - 1;
+        let encoded = emsa_pss_encode(&digest, em_bits, salt, RsaHashAlg::Sha384)?;
+        let m = BigNum::from_bytes_be(&encoded);
 
-        // Step 5: Generate random blinding factor r coprime to n
-        let (r, r_inv) = generate_blind_factor(&self.n)?;
-
-        // Step 6: Compute blinded = m * r^e mod n
+        // blinded_msg = (m * r^e) mod n
         let r_e = r.mod_exp(&self.e, &self.n)?;
         let blinded = m.mul(&r_e).mod_reduce(&self.n)?;
-
         let n_len = self.n.bit_len().div_ceil(8);
 
-        // Step 7: Build request and blind state
         let request = TokenRequest {
             token_type: TokenType::PubliclyVerifiable,
             blinded_element: blinded.to_bytes_be_padded(n_len)?,
         };
-
         let state = BlindState {
             nonce,
-            blind_inv: r_inv,
+            blind_inv: r_inv.clone(),
             token_input,
         };
-
         Ok((request, state))
     }
 
@@ -298,63 +340,43 @@ pub fn verify_token(
     e: &[u8],
     challenge: &[u8],
 ) -> Result<bool, CryptoError> {
-    use subtle::ConstantTimeEq;
+    // Default (non-RFC) key id = SHA-256(n || e); RFC 9578 uses SHA-256(SPKI) —
+    // callers reproducing RFC 9578 should use `verify_token_with_key_id`.
+    let token_key_id = compute_token_key_id(n, e)?;
+    verify_token_with_key_id(token, n, e, challenge, &token_key_id)
+}
 
+/// Verify a Privacy Pass token with an explicit `token_key_id` (RFC 9578 §6.5:
+/// SHA-256 of the issuer's DER SubjectPublicKeyInfo).
+///
+/// Verifies the RFC 9474 RSABSSA-SHA384-PSSZERO signature via
+/// `RSASSA-PSS-VERIFY` (SHA-384, MGF1-SHA-384, salt length 0) over
+/// `token_input = 0x0002 || nonce || SHA256(challenge) || token_key_id`.
+pub fn verify_token_with_key_id(
+    token: &Token,
+    n: &[u8],
+    e: &[u8],
+    challenge: &[u8],
+    token_key_id: &[u8; 32],
+) -> Result<bool, CryptoError> {
     if token.token_type != TokenType::PubliclyVerifiable {
         return Err(CryptoError::InvalidArg(""));
     }
-
     if token.nonce.len() != 32 {
         return Err(CryptoError::InvalidArg(""));
     }
 
-    let n_bn = BigNum::from_bytes_be(n);
-    let e_bn = BigNum::from_bytes_be(e);
-
-    if n_bn.is_zero() || n_bn.is_even() {
-        return Err(CryptoError::InvalidKey);
-    }
-    if e_bn.is_zero() || e_bn.is_even() {
-        return Err(CryptoError::InvalidKey);
-    }
-
-    // Step 1: Recompute token_key_id
-    let token_key_id = compute_token_key_id(n, e)?;
-
-    // Step 2: Recompute challenge_digest
     let challenge_digest = Sha256::digest(challenge)?;
-
-    // Step 3: Rebuild token_input
     let mut token_input = Vec::with_capacity(2 + 32 + 32 + 32);
     token_input.extend_from_slice(&[0x00, 0x02]);
     token_input.extend_from_slice(&token.nonce);
     token_input.extend_from_slice(&challenge_digest);
-    token_input.extend_from_slice(&token_key_id);
+    token_input.extend_from_slice(token_key_id);
 
-    // Step 4: Compute expected hash
-    let expected = Sha256::digest(&token_input)?;
-    let expected_bn = BigNum::from_bytes_be(&expected);
-
-    // Step 5: Compute recovered = sig^e mod n
-    let sig = BigNum::from_bytes_be(&token.authenticator);
-    if sig.is_zero() || sig >= n_bn {
-        return Ok(false);
-    }
-    let recovered = sig.mod_exp(&e_bn, &n_bn)?;
-
-    // Step 6: Compare (constant-time via subtle)
-    let expected_bytes = expected_bn.to_bytes_be();
-    let recovered_bytes = recovered.to_bytes_be();
-
-    // Pad both to the same length for constant-time comparison
-    let max_len = expected_bytes.len().max(recovered_bytes.len());
-    let mut expected_padded = vec![0u8; max_len];
-    let mut recovered_padded = vec![0u8; max_len];
-    expected_padded[max_len - expected_bytes.len()..].copy_from_slice(&expected_bytes);
-    recovered_padded[max_len - recovered_bytes.len()..].copy_from_slice(&recovered_bytes);
-
-    let eq: bool = expected_padded.ct_eq(&recovered_padded).into();
-    Ok(eq)
+    let digest = Sha384::digest(&token_input)?;
+    let pk = RsaPublicKey::new(n, e)?;
+    // RSABSSA-SHA384-PSS uses a 48-byte salt (RFC 9578 §6.4).
+    pk.verify_pss_with_salt(&digest, &token.authenticator, RsaHashAlg::Sha384, 48)
 }
 
 /// Compute `token_key_id = SHA-256(n_bytes || e_bytes)`.
