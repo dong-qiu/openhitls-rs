@@ -85,7 +85,8 @@ Counts are the `Generation summary` footer of each generated file
 | OTP (HOTP/TOTP) | 52 | 32 | 0 | 0 | 84 |
 | ElGamal | 3 | 61 | 0 | 0 | 64 |
 | Paillier | 3 | 71 | 0 | 0 | 74 |
-| **Total** | **3257** | **3936** | **240** | **7** | **6716** |
+| HybridKEM | 3 | 65 | 0 | 0 | 68 |
+| **Total** | **3260** | **4001** | **240** | **7** | **6784** |
 
 > **ElGamal / Paillier (round-trip migration, not xtask byte-exact)**: these two
 > algorithms were never in the Phase A scope (they have no `migrated_*` file and
@@ -103,6 +104,23 @@ Counts are the `Generation summary` footer of each generated file
 > ElGamal has no standard wire format and the Rust port uses its own framing
 > (`4-byte c1_len ‖ c1 ‖ c2`); see `migrated_elgamal.rs` / `migrated_paillier.rs`
 > headers. The remaining API rows are EAL ctx mechanics with no Rust 1:1.
+
+> **HybridKEM (round-trip migration + new `from_decapsulation_key` constructor)**:
+> `crypto/hybridkem` was likewise never in scope (working Rust impl, zero migrated
+> C tests). The C suite is API-test format; the only C-vector-driven rows are
+> `ENCAPS_DECAPS_FUNC_TC002` (injected key pair A → cross-party round-trip). Migrated
+> via a new default-feature `HybridKemKeyPair::from_decapsulation_key(param, combined_sk)`
+> constructor (FrodoKEM-I145 / McEliece-I160 pattern), driving (1) a **byte-exact**
+> public-key reconstruction KAT (`from_decapsulation_key(dk).public_key() == encapsKeyA`
+> — pins the combined-secret-key byte layout against the C vector) and (2) the
+> `encapsulate`→`decapsulate` shared-secret agreement. Scope: the **X25519**
+> variants (ML-KEM-512/768/1024). The 9 **ECDH** hybrid variants are deferred —
+> the C SDV encodes the ECDH public key as a **compressed** point
+> (`CRYPT_POINT_COMPRESSED`) while the Rust port uses **uncompressed** ECDH points,
+> so the C `encapsKeyA` does not load via `from_public_key` without a decompression
+> shim (documented gap; the new `EcPoint::from_compressed` from I164 is the unblock
+> path). See `migrated_hybridkem.rs` header. Three previously-unmigrated algorithms
+> (ElGamal / Paillier / HybridKEM) are now closed.
 
 > **Phase J onward**: the per-algorithm table above was originally the Phase A
 > (crypto) deliverable. Phase J extends the migration to the previously-unplanned

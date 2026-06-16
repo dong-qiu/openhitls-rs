@@ -18074,3 +18074,20 @@ T286：ElGamal + Paillier 迁移（两个零覆盖算法）。
 HybridKEM（第 3 个未迁移算法）单独成 PR（需 from_decapsulation_key 产品构造器）。Privacy Pass 序列化为 item 2。
 
 Recorded as DEV_LOG Phase T286.
+
+---
+
+> 请继续中断的任务 (HybridKEM — item 1 第 3 个算法)
+
+I165/T287：HybridKEM 迁移（3 个未迁移算法的最后一个）+ from_decapsulation_key 构造器。
+  - C crypto/hybridkem 套件 API-test 格式；唯一 C-vector 驱动行是 ENCAPS_DECAPS_FUNC_TC002（10 行，注入密钥对 A，跨方 round-trip）。
+  - I165（产品改动）：新增默认 feature `HybridKemKeyPair::from_decapsulation_key(param, combined_sk)`（仿 from_public_key，FrodoKEM-I145/McEliece-I160 血统）——按 C 字节序拆 combined sk（X25519: [mlkem_dk‖x25519_sk]；ECDH: [ecdh_sk‖mlkem_dk]，复用 split_combined），重建 classic DH + MlKem::from_decapsulation_key；加 mlkem_dk_len + classic_sk_len helper。
+  - T287：migrated_hybridkem.rs（3 测试，X25519 MLKEM-512/768/1024）——每个断言字节级 from_decapsulation_key(dk).public_key()==encapsKeyA（mlkem dk 内嵌 ek + x25519 pk 从 sk 重导，钉住 combined-sk 布局）+ encaps→decaps 32 字节共享密钥一致。
+  - combined-sk 布局猜测（[mlkem_dk‖x25519_sk]）首跑字节级验证通过（飞轮——布局错会让公钥重建失败）。
+  - scope-cut：9 个 ECDH hybrid 变体 deferred——C SDV 用压缩点（CRYPT_POINT_COMPRESSED），Rust 用非压缩 ECDH 点，C encapsKeyA 不经解压 shim 无法 from_public_key 加载（文档化，I164 EcPoint::from_compressed 是解锁路径）。
+  - 验证：migrated_hybridkem 3/0；hybridkem lib 593/0 无回归；clippy --all-features --all-targets -D warnings clean；fmt clean。
+  - na-list：新增 HybridKEM(3/65/0/0/68)，Total 3257→3260 / 6716→6784。
+
+三个从未迁移的算法（ElGamal/Paillier/HybridKEM）全部收口。item 2（Privacy Pass 序列化）为下一步。
+
+Recorded as DEV_LOG Phase I165/T287.
