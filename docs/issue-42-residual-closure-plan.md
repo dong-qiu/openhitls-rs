@@ -65,9 +65,11 @@
 
 | # | I/T | 内容 | 估计 | 做法 |
 |---|---|---|---:|---|
-| **A-0 probe** | （并入 A-1） | RFC 9383 KDF/confirm 一致性验证 | — | **先验**：给 Rust `Spake2Plus` 注入向量的 `x`，看 `shareP`/`kShared`/`confirmP` 是否字节级命中 RFC 9383 P-256 向量。Rust 现用自有 `ke/kc_a/kc_b` 推导，**可能不匹配 RFC 9383 transcript-based confirm** —— 若不匹配，A-1 升级为 conformance-fix（flywheel，参照 Phase A 的 I137 ML-DSA） |
-| A-1 | I161 + T278★ | 标量注入 hook + P-256-SHA256-HMAC 向量字节级 | ~6 | 新 `kat-nonce`-gated `generate_share_with_scalar(x)`（参照 ECDSA `sign_with_nonce` I134 模式）；emit `shareP`/`kShared`/`confirmP`/`confirmV` 字节级（1 个 suite，1 向量）|
-| A-2 | I162 + T279★ | 多 suite：P-384/P-521 + SHA-512 + CMAC-AES | ~13 | 泛化 `Spake2Plus` 的 group/hash/MAC（去掉硬编码 P-256+SHA256+HMAC）；迁移剩余 13 向量。**LARGE** —— 多曲线 SPAKE2+ M/N 点 + decompress + KDF；可按曲线再拆 |
+| ✅ **A-0 probe** | （并入 A-1） | RFC 9383 KDF/confirm 一致性验证 | done | **结论：no-go（发现 2 个真 conformance bug）**。share 计算 `x·G+w0·M`（RFC M/N 点）conformant；但 (1) key schedule 用非标 `Hash(TT)[..16]`+`HMAC(·,"ConfirmProver")` 而非 RFC 9383 §3.4 HKDF；(2) TT 硬编码空 Context/idProver/idVerifier。二者使 Rust SPAKE2+ **不与标准互通**。A-1 升级为 conformance-fix |
+| ✅ A-1 | ✅ I161 + T281 | conformance fix + P-256 向量字节级 | **1 byte-exact + 2 prod fix** | (I161) 重写 §3.4 HKDF key schedule（`HKDF(nil,K_main,"ConfirmationKeys")`/`"SharedKey"`）+ 加 `set_identities`；(T281) `kat-nonce`-gated `generate_share_with_scalar(x)` + `tc_spake2plus_rfc9383_p256_vector_byte_exact` 断言 `shareP`/`K_shared`/`confirmP` 字节级 + `confirmV` 验证，**全部对独立 C 向量 ground-truth 通过**。117/117 hitls-auth 无回归 |
+| A-2 | future I-phase | 多 suite：P-384/P-521 + SHA-512 + CMAC-AES | ~13 | 泛化 `Spake2Plus` 的 group/hash/MAC（去掉硬编码 P-256+SHA256+HMAC）；剩 13 向量经同一 hook 字节级。**LARGE** —— 多曲线 M/N + decompress；可按曲线再拆 |
+
+> **A-0 的价值**：probe 不只是测试决策，它**抓到了一个生产互通 bug**（Rust SPAKE2+ 的 key schedule 不符合 RFC 9383 §3.4，无法与标准实现互通）。I161 修复后 Rust SPAKE2+ 才真正 RFC 9383-conformant。这是 Phase A 飞轮（迁移驱动发现实现 bug）的又一例。
 
 ★ T 编号与 WP-C 的 T278/T279 冲突 —— 实际落地时按合并顺序重新分配连续 T 号；此处仅示意 I+T 配对。
 

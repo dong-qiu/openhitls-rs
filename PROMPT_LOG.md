@@ -17927,3 +17927,29 @@ M-5（0-RTT/PSK）是 disposition 非 C 迁移项 —— 0-RTT 接受已由 T109
 WP-C 完成；next 是 WP-A（SPAKE2+ byte-exact 解锁 —— 最高字节级产出的残余）。
 
 Recorded as DEV_LOG Phase T280.
+
+### I161/T281 — WP-A: SPAKE2+ RFC 9383 key-schedule conformance fix + P-256 byte-exact（迁移飞轮抓到 2 个生产互通 bug）
+
+> 请按照 C → A → B → D 的顺序依次完成
+
+WP-A A-0 probe（注入 RFC 9383 P-256 向量的 x 比对输出）发现 hitls_auth::spake2plus **不与标准 RFC 9383 互通**，2 个 bug：
+  (1) key schedule：用非标 ke=Hash(TT)[..16] + HMAC(Hash(TT)[16..],"ConfirmProver") 而非 RFC 9383 §3.4 HKDF(nil,K_main,"ConfirmationKeys")/"SharedKey"
+  (2) transcript：TT 硬编码空 Context/idProver/idVerifier，无 setter（向量用 Context="SPAKE2+...Test Vectors"/client/server）
+  share 计算 shareP=x·G+w0·M（RFC M/N 点）本就 conformant。
+
+I161（产品修复）：重写 §3.4 HKDF key schedule + 加 set_identities()。K_shared 现 32 字节（RFC-correct，原非标 16）—— test_key_length 更新。
+T281（字节级迁移）：kat-nonce-gated generate_share_with_scalar(x) hook + hitls-auth kat-nonce feature；
+  tc_spake2plus_rfc9383_p256_vector_byte_exact 断言 shareP/K_shared/confirmP 字节级 + confirmV 验证，全部对独立 C 向量 ground-truth 通过（错的 schedule 不可能 false-pass）。
+
+这是 Phase A 迁移飞轮的又一例（迁移向量暴露并修复真实现 bug，cf. I137/I145/I146）—— Rust SPAKE2+ 现真正 RFC 9383-互通。
+行为变更：SPAKE2+ 密钥/身份现遵循 RFC 9383（旧非标输出消失）；非默认 feature + 旧 schedule 从不互通，故是 bug fix 非回归。
+
+验证：
+  cargo test -p hitls-auth --all-features                          117/0（J-3 round-trip + lib round-trip 全过，双方用新 schedule）
+  cargo clippy -p hitls-auth --all-features/--features spake2plus  clean（hook 正确 cfg-excluded）
+  cargo fmt --all --check                                         clean
+
+na-list SPAKE2+ gap → P-256 RESOLVED；A-2（P-384/P-521/SHA-512/CMAC 多 suite，13 向量）留 future I-phase。
+WP-A A-1 完成；next WP-B（Privacy Pass）。
+
+Recorded as DEV_LOG Phase I161/T281.
