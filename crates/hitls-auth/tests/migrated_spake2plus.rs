@@ -25,7 +25,7 @@
 
 #![cfg(feature = "spake2plus")]
 
-use hitls_auth::spake2plus::{Spake2Plus, Spake2Role, Spake2Suite};
+use hitls_auth::spake2plus::{Spake2Plus, Spake2Role};
 use hitls_utils::hex::hex;
 
 /// Registration triple from the C SDV `SPAKE2PLUS_TC001`
@@ -113,6 +113,7 @@ fn tc_spake2plus_rfc9383_p256_vector_byte_exact() {
 #[cfg(feature = "kat-nonce")]
 #[test]
 fn tc_spake2plus_rfc9383_p256_sha512_vector_byte_exact() {
+    use hitls_auth::spake2plus::Spake2Suite;
     // SPAKE2PLUS_TC001, suite "SPAKE2+-P256-SHA512-HKDF-SHA512-HMAC-SHA512".
     let w0 = hex("1cc5207d6e34b8f7828206fb64b86aa9c712bc952abf251bb9f5856b24d8c8cc");
     let w1 = hex("4279649e62532b01dc27d2ed39100ba350518fb969672061a01edce752d0e672");
