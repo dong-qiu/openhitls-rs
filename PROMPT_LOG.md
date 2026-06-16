@@ -17953,3 +17953,34 @@ na-list SPAKE2+ gap → P-256 RESOLVED；A-2（P-384/P-521/SHA-512/CMAC 多 suit
 WP-A A-1 完成；next WP-B（Privacy Pass）。
 
 Recorded as DEV_LOG Phase I161/T281.
+
+### I162/T282 — WP-B: Privacy Pass RFC 9474 RSABSSA-SHA384-PSS conformance fix + byte-exact（迁移飞轮抓到第 3 个生产互通 bug）
+
+> 348合并后 继续 WP-B
+
+B-0 probe 发现 hitls_auth::privpass 是简化版非互通 blind-RSA：直接盲化 SHA-256(token_input)（raw FDH），而非 RFC 9474 RSABSSA（盲化 EMSA-PSS-编码的消息）。
+
+I162（产品修复）：盲化改为 RFC 9474 RSABSSA-SHA384-PSS：
+  m = OS2IP(EMSA-PSS-ENCODE(SHA384(token_input), modBits-1, salt))，SHA-384/MGF1-SHA-384/sLen=48，blinded = m·r^e mod n
+  verify_token 改 RSASSA-PSS-VERIFY(SHA-384, sLen=48)
+  暴露 hitls_crypto::rsa::emsa_pss_encode（解除 pss_sign_pad_with_salt_bytes_alg 的 kat-nonce gate —— EMSA-PSS-ENCODE 带显式 salt 是 RSABSSA 的合法生产原语）
+  加 Client::with_token_key_id（RFC 9578 §6.5 token_key_id=SHA256(SPKI)）+ verify_token_with_key_id
+  hitls-auth 加 rsa dep feature
+
+T282（字节级迁移）：kat-nonce create_token_request_with_randomness(challenge,nonce,salt,blind) +
+  tc_privpass_rfc9474_vector_byte_exact 断言 blinded_msg/blind_sig/authenticator 字节级 + token 验证，全对独立 C 向量 ground-truth 通过。
+
+变体逆向：起初假设 PSSZERO(sLen=0, emBits=bit_len(n)) 失败；用独立 Python 参考 + C RNG-stub 消费顺序（nonce→salt(48)→blind r(256)）确定真实变体是 RSABSSA-SHA384-PSS（sLen=48, emBits=modBits-1；salt 字段是 48 字节 PSS salt 非 blind）。
+
+第 3 个迁移飞轮互通修复（cf. WP-A I161 + Phase A I137/I145/I146）—— Rust Privacy Pass 现真正 RFC 9474/9578 互通。
+行为变更：token 字节现遵循 RFC 9474（旧简化输出消失）；非默认 feature + 旧方案从不互通，故 bug fix。
+
+验证：
+  cargo test -p hitls-auth --all-features                                  118/0（J-2 round-trip + lib 全过）
+  cargo clippy -p hitls-auth --all-features/--features privpass + hitls-crypto --features rsa   clean
+  cargo fmt --all --check                                                  clean
+
+na-list Privacy Pass gap → RESOLVED。剩余 follow-up：RFC 9577 TokenChallenge codec + 生产 token_key_id=SHA256(SPKI)（需 hitls-auth 构建 id-RSASSA-PSS SPKI DER）。
+WP-B 完成；残余计划只剩 WP-D（PKI emitter，收益边际）。
+
+Recorded as DEV_LOG Phase I162/T282.

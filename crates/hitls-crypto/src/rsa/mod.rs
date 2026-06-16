@@ -144,6 +144,23 @@ impl std::fmt::Debug for RsaPublicKey {
     }
 }
 
+/// EMSA-PSS-ENCODE (RFC 8017 §9.1.1): encode a message digest into the PSS
+/// encoded message `EM` of `em_bits` bits, with an explicit (possibly empty)
+/// salt and hash algorithm. `digest` must be `Hash(M)` (its length must equal
+/// the hash output size).
+///
+/// Exposed for blind-signature schemes (RFC 9474 RSABSSA) that blind the
+/// PSS-encoded message before the RSA operation. A salt length of 0 yields the
+/// deterministic PSSZERO encoding.
+pub fn emsa_pss_encode(
+    digest: &[u8],
+    em_bits: usize,
+    salt: &[u8],
+    alg: RsaHashAlg,
+) -> Result<Vec<u8>, CryptoError> {
+    pss::pss_sign_pad_with_salt_bytes_alg(digest, em_bits, salt, alg)
+}
+
 impl RsaPublicKey {
     /// Create an RSA public key from modulus and exponent (big-endian bytes).
     pub fn new(n: &[u8], e: &[u8]) -> Result<Self, CryptoError> {

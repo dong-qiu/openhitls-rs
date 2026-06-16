@@ -3,30 +3,121 @@
 // Source: openHiTLS C SDV auth/privpass_token/test_suite_sdv_privpass_token.data
 //         (SDV_AUTH_PRIVPASS_TOKEN_VECTOR_TEST_TC001).
 //
-// NOT byte-exact. The C VECTOR_TEST publishes RFC 9474 RSABSSA vectors
-// (token_request / token_response / token) produced with EMSA-PSS encoding and
-// a stubbed RNG injecting fixed `nonce` / `salt` / `blind`. The Rust
-// `hitls_auth::privpass` implementation is a *simplified* blind-RSA that blinds
-// `SHA-256(token_input)` directly — it has no EMSA-PSS step, no salt, no
-// TokenChallenge wire codec, and draws the nonce / blind internally via
-// `getrandom`. Consequently the C `request` / `response` / `token` bytes are
-// NOT reproducible by the Rust port. See `docs/c-test-na-list.md` "Structural
-// gaps" → Privacy Pass for the byte-exact unblock path (a future Implementation
-// phase adding RFC 9474 EMSA-PSS + deterministic nonce/salt/blind hooks +
-// RFC 9577 TokenChallenge serialization).
+// This file has two layers:
+//   * T256 (J-2) round-trip pins: drive the Rust Issuer/Client/verify pipeline
+//     end-to-end with the C vector's actual RSA-2048 keypair (extracted from its
+//     PKCS#8 `ski` field) + challenge, proving the key material is usable and
+//     that tamper / wrong-key paths reject (SM9/T158 round-trip methodology).
+//   * T282 (WP-B) byte-exact pin: after the I162 conformance rewrite of
+//     `hitls_auth::privpass` to RFC 9474 RSABSSA-SHA384-PSS (sLen=48) — the C
+//     VECTOR_TEST's `request` / `response` / `token` are now reproduced
+//     byte-exact via the `kat-nonce` randomness-injection hook (see below).
 //
-// What IS migratable (this file, T256): the *key material* of the C vector.
-// We drive the Rust Issuer/Client/verify pipeline end-to-end with the actual
-// RSA-2048 keypair the C VECTOR_TEST_TC001 row publishes (extracted from its
-// PKCS#8 `ski` field) and its `challenge` bytes, proving the C vector's key is
-// usable by the Rust port (create → issue → finalize → verify round-trips, and
-// tamper / wrong-key paths reject). This mirrors the SM9 (T158) round-trip
-// migration methodology for C SDV families that carry no Rust-reproducible KAT.
+// The C VECTOR_TEST publishes RFC 9474 RSABSSA-SHA384-PSS vectors produced with
+// EMSA-PSS encoding (salt length 48) and a stubbed RNG injecting fixed
+// `nonce` / `salt` / `blind`.
 
 #![cfg(feature = "privpass")]
 
+#[cfg(feature = "kat-nonce")]
+use hitls_auth::privpass::verify_token_with_key_id;
 use hitls_auth::privpass::{verify_token, Client, Issuer};
 use hitls_utils::hex::hex;
+
+/// Byte-exact migration of the C SDV `VECTOR_TEST_TC001` (T282, WP-B).
+///
+/// Drives the RFC 9474 RSABSSA-SHA384-PSS (sLen=48) + RFC 9578 flow with the
+/// vector's injected `nonce` / `salt` / blinding factor `r` and the correct
+/// `token_key_id = SHA256(issuer SPKI)`, and asserts the `blinded_msg`,
+/// `blind_sig` (response), and token `authenticator` byte-exact against the
+/// independent C vector — true RFC 9474/9578 ground-truth verification, only
+/// possible after the I162 EMSA-PSS-SHA384 RSABSSA conformance rewrite.
+#[cfg(feature = "kat-nonce")]
+#[test]
+fn tc_privpass_rfc9474_vector_byte_exact() {
+    let (n, e, d) = vector_key();
+    let challenge = vector_challenge();
+    // token_key_id = SHA-256(DER SPKI), nonce, and blinding factor r from the
+    // C VECTOR_TEST_TC001 row.
+    let token_key_id: [u8; 32] =
+        hex("ca572f8982a9ca248a3056186322d93ca147266121ddeb5632c07f1f71cd2708")
+            .try_into()
+            .unwrap();
+    let nonce: [u8; 32] = hex("aa72019d1f951df197021ce63876fe8b0a02dc1c31a12b0a2dd1508d07827f05")
+        .try_into()
+        .unwrap();
+    // RSABSSA-SHA384-PSS uses a 48-byte salt (the C vector's `salt` field).
+    let salt =
+        hex("3d980852fa570c064204feb8d107098db976ef8c2137e8641d234bbd88a986fdb306a7af220cfadede08f51e1ef61766");
+    let blind = hex(
+        "425421de54c7381864ce36473abfb988c454fe6c27de863de702a6a2adca153f\
+         a2de47bd8fcd62734caa8ce1f920b77d980ab58c32d16dde54873f28ca968e8c\
+         125b8363514be68972f553655bcc7f80a284cc327e47e804a47333c5b3cdf773\
+         312cc7ad9fda748aed0baa7e19c5a2d1dafda718f086d7fc0a4bc02d488e0f208\
+         12daee335af7177b7a8369bd617066aed7a58f659f295c36b418827f679725b81\
+         ca14ea16fb82df21ad76da1ac38dcf24bf6252f8510e2308608ac9197f6cb54f\
+         dcb19db17837302a2b87d659c5605f35f3709a130f0c3d50e172f0cae36cbc946\
+         7f9914895a215a9e32443bcafff795273ccf8965a7eaa8c0b2184763e3e5c",
+    );
+    let expected_blinded_msg = hex(
+        "6a95be84b63cfed0993bb579194a72a95057e1548ac463a9a5b33b011f2b2011\
+         d59487f01862f1d8e4d5ea42e73a660fbc3d010b944a54da3a4e0942f8894c088\
+         4589b438cb902e9a34278970f33c16f351f7dae58d273c3ab66ef368da36f785e\
+         89e24d1d983d5c34311cd21f290f9e89e8646ab0d0a48988fcd46230de5e7603c\
+         d12cc95c7ec5002e5e26737aa7eb69c626476e6c8d46510ee404a3d7daf3a23b7\
+         c66735d363ca13676925c6ed0117f60d165ce1f8ba616d041b6384baf6da3e2f7\
+         57cb18e879a4f8595c2dc895ddf1f4279c75768d108b5c47f95f94e81e2d8b9c8\
+         b74476924ab3b7c45243fc99ac5466e8a3680ad37fa15c96010b274094",
+    );
+    let expected_response = hex(
+        "675d84b751d9e593330ec4b6d7ab69c9a61517e98971f4b736150508174b4335\
+         761464f237be2d72bbae4b94dffc6143413f6351f1aa4efde6c32d4d6d9392a00\
+         8290d56d1222f9b77a1336213e01934f7d972f3bf9ea5a5786c321352f103b366\
+         7e605379a55f0fb925fbb09b8a9f85e7dd4b388a3b49d06fd70ba28f6a780e3bc\
+         8f6421554fd6c38b63ef19f84ccfcf14709dd0b4d72213c1f060893854eba0ea1\
+         a147e275da320db5e9849882d5f9179efa8a2d8d3b803f9d1445ef5c1f660be08\
+         883ce9b29a0a992fc035d2938cbb61c440044438dbb8b3ce7158a8f9827d23048\
+         2f622d291406ab236b32b122627ae0fd36bd0d6b7607b8044ace404d44",
+    );
+    let expected_authenticator = hex(
+        "bc6a21b533d07294b5e900faf5537dd3eb33cee4e08c9670d1e5358fd184b0e0\
+         0c637174f5206b14c7bb0e724ebf6b56271e5aa2ed94c051c4a433d302b23bc52\
+         460810d489fb050f9de5c868c6c1b06e3849fd087629f704cc724bc0d0984d5c3\
+         39686fcdd75f9a9cdd25f37f855f6f4c584d84f716864f546b696d620c5bd41a8\
+         11498de84ff9740ba3003ba2422d26b91eb745c084758974642a4207820154324\
+         6ddb58030ea8e722376aa82484dca9610a8fb7e018e396165462e17a03e40ea7e\
+         128c090a911ecc708066cb201833010c1ebd4e910fc8e27a1be467f78671836a5\
+         08257123a45e4e0ae2180a434bd1037713466347a8ebe46439d3da1970",
+    );
+
+    let client = Client::with_token_key_id(&n, &e, token_key_id).unwrap();
+    #[allow(deprecated)]
+    let (request, state) = client
+        .create_token_request_with_randomness(&challenge, nonce, &salt, &blind)
+        .unwrap();
+    assert_eq!(
+        request.blinded_element, expected_blinded_msg,
+        "RFC 9474 blinded_msg byte-exact"
+    );
+
+    let issuer = Issuer::new(&n, &d, &e).unwrap();
+    let response = issuer.issue(&request).unwrap();
+    assert_eq!(
+        response.blind_sig, expected_response,
+        "RFC 9474 BlindSign blind_sig byte-exact"
+    );
+
+    let token = client.finalize_token(&response, &state).unwrap();
+    assert_eq!(
+        token.authenticator, expected_authenticator,
+        "RFC 9474 Finalize token authenticator byte-exact"
+    );
+
+    assert!(
+        verify_token_with_key_id(&token, &n, &e, &challenge, &token_key_id).unwrap(),
+        "the finalized token must verify under RSASSA-PSS-SHA384 (sLen=48)"
+    );
+}
 
 /// RSA-2048 keypair from the C SDV `VECTOR_TEST_TC001` `ski` PKCS#8 key
 /// (`e = 65537`). Returns `(n, e, d)` big-endian.
