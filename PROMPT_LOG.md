@@ -18139,3 +18139,15 @@ T289：migrated_encode_sign.rs（4 测试：3 字节级 encode 含 RFC 6979 + 3 
 剩余 crypto/encode（后续 phase）：SM2 密文 DER（需独立 codec）、PKCS#8 DH/DSA key codec、RSA/ECC/Ed25519/X25519 key parse+encode。
 
 Recorded as DEV_LOG Phase I167/T289.
+
+---
+
+> 请按照 推荐执行序 依次执行（Phase 3a: PKCS#8 DH/DSA）
+
+T290：crypto/encode Phase 3a —— PKCS#8 DH/DSA 私钥 codec 迁移（+ 2 个文档化 codec gap）。
+  - C SDV_PKCS8_DECODE_DHKEY_DSAKEY_TC001 + DECODE_{DSA,DH}KEY_BUFF_TC001 私钥行。C 测试用 inline DER asn1 对照磁盘 PEM 文件（未随 .data 发布）→ 文件无关迁移，只用 inline DER。
+  - migrated_encode_pkcs8_dhdsa.rs（1 个数据驱动测试，9 向量）：(a) DECODE KAT —— parse_pkcs8_der 全 9 成功 + DSA/DH 变体（4 DSA + 5 X9.42 DH）；(b) 4 个 DSA 字节级 re-encode（encode_dsa_pkcs8_der）。零新产品代码。
+  - 飞轮抓到并文档化 2 个真实 codec gap：(1) 5 个 DH 是 X9.42 dhpublicnumber（OID ...10046.2.1，params p,q,g），但 encode_dh_pkcs8_der 只出 PKCS#3 dhKeyAgreement（p,g 无 q，不同 OID）→ X9.42 无法字节级 re-encode（迁移为 decode-only）；(2) CRYPT_PUBKEY_SUBKEY DSA/DH 公钥行 deferred —— parse_spki_der 仅支持 X25519/X448/EC（无 DSA/DH SPKI 变体）。均为后续 follow-up。
+  - 验证：migrated_encode_pkcs8_dhdsa 1/0；clippy --features x509,pkcs8 --tests -D warnings clean；fmt clean。
+
+Recorded as DEV_LOG Phase T290.
