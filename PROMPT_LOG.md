@@ -18116,3 +18116,26 @@ na-list Privacy Pass structural-gap "Remaining" → TokenChallenge/wire codec RE
 item 1（ElGamal/Paillier/HybridKEM）+ item 2（Privacy Pass 序列化）全部完成。
 
 Recorded as DEV_LOG Phase I166/T288.
+
+---
+
+> 好的（开始 crypto/encode 迁移）
+
+I167/T289：crypto/encode part 1 —— ECDSA/DSA 签名 DER codec（公共 API + 严格 DER 加固）+ SIGN_BN 迁移。开启 crypto/encode（最后一个真·可迁移 crypto 块，~51 fn ASN.1 key/sig codec，之前误判为框架-N/A）。
+
+本切片做签名 codec：
+- C SDV_ENCODE_SIGN_BN_FUNC（EncodeSign(r,s)==expect 字节级，含 RFC 6979 A.1.3）+ DECODE_SIGN_BN_FUNC + ENCODE_DECODE_SIGN_COMBO。
+
+I167（产品改动）：
+  (1) 新公共 `hitls_crypto::ecdsa::{encode_signature, decode_signature}` —— 暴露 ECDSA sign/verify 内部已用的 SEQUENCE{INTEGER r, INTEGER s} codec。
+  (2) **严格 DER 加固** decode_der_signature（新 check_der_positive_integer）—— 拒绝空 / 负（高位置位无 0x00 符号字节）/ 非最小（多余前导 0x00）的 r/s INTEGER。
+
+飞轮抓到：C reject 向量（02 02 00 00 非最小、02 01 f1 负）暴露 Rust 签名解码器对非规范 INTEGER 编码**过于宽松** —— 真实的签名可塑性严格度缺口（cf. I133 ASN.1 / I155 CRL parser）。规范签名（Rust 签名器 + OpenSSL 输出）不受影响，0 回归验证。
+
+T289：migrated_encode_sign.rs（4 测试：3 字节级 encode 含 RFC 6979 + 3 decode-success + 8 decode-reject + round-trip）。钉了一个刻意严格度差异：C DecodeSign 容忍 SEQUENCE 后尾随字节（300602010002010001→SUCCESS），Rust 拒绝（更安全）—— 迁移为 rejection。
+
+验证：migrated_encode_sign 4/0；ecdsa lib 464/0 + ecdsa/sm2 490/0 无回归；clippy --all-features --all-targets -D warnings clean；fmt clean。
+
+剩余 crypto/encode（后续 phase）：SM2 密文 DER（需独立 codec）、PKCS#8 DH/DSA key codec、RSA/ECC/Ed25519/X25519 key parse+encode。
+
+Recorded as DEV_LOG Phase I167/T289.
