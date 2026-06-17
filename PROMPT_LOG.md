@@ -18091,3 +18091,28 @@ I165/T287：HybridKEM 迁移（3 个未迁移算法的最后一个）+ from_deca
 三个从未迁移的算法（ElGamal/Paillier/HybridKEM）全部收口。item 2（Privacy Pass 序列化）为下一步。
 
 Recorded as DEV_LOG Phase I165/T287.
+
+---
+
+> 请继续中断的任务 (item 2 — Privacy Pass 序列化)
+
+I166/T288：Privacy Pass RFC 9577/9578 wire 序列化 codec + SERIALIZATION 套件迁移。收口 WP-B/I162 留的 RFC 9577 TokenChallenge codec follow-up。
+
+I166（产品改动）：新增 hitls_auth::privpass::wire 模块，5 个 RFC 9577/9578 wire 结构的字节级 serialize/deserialize：
+  - TokenChallengeRequest（uint16 token_type）
+  - TokenChallenge（RFC 9577 §2.1：type ‖ u16-len issuer_name ‖ u8-len redemption_context(0|32) ‖ u16-len origin_info）
+  - TokenRequest（RFC 9578 §5.2：type ‖ truncated_token_key_id ‖ blinded_msg[Nk]）
+  - TokenResponse（blind_sig[Nk]）
+  - Token（RFC 9578 §5.4：type ‖ nonce(32) ‖ challenge_digest(32) ‖ token_key_id(32) ‖ authenticator[Nk]）
+  严格 bounds-checked Reader；deserialize 拒绝尾随字节/截断/越界长度前缀/空 issuer_name（RFC <1..>）/错误 redemption 长度（0 或 32）/Nk-固定字段总长不符（故 Request/Response/Token deserialize 取 nk 参数）。与 issuance-flow 结构解耦。
+
+T288（迁移）：migrated_privpass_serialization.rs（9 个数据驱动测试，19 个 TC001 字节级 round-trip + 33 个 INVALID_TC002 reject，覆盖全部 5 结构）。INVALID_TC003 文档化为不迁移（buffer 反序列化成功，测的是 C type-aware serialize 校验，type-agnostic wire 序列化器不复刻）。
+
+飞轮：round-trip 首跑即过（codec 字节级正确）；reject 向量驱动出两条真实校验规则（issuer_name 最小长度 + Request/Response/Token 的 Nk-精确长度），naive parser 会漏。无既有代码 bug。
+
+验证：auth --all-features 131/0（6 suites）+ privpass-only 32/0；clippy --all-features --all-targets + --features privpass -D warnings clean；fmt clean。
+na-list Privacy Pass structural-gap "Remaining" → TokenChallenge/wire codec RESOLVED。
+
+item 1（ElGamal/Paillier/HybridKEM）+ item 2（Privacy Pass 序列化）全部完成。
+
+Recorded as DEV_LOG Phase I166/T288.
