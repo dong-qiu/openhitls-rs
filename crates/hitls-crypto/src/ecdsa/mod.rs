@@ -301,6 +301,23 @@ fn truncate_digest(digest: &[u8], n_bits: usize) -> BigNum {
     }
 }
 
+/// DER-encode a `(r, s)` signature pair as `SEQUENCE { INTEGER r, INTEGER s }`.
+///
+/// This is the standard ECDSA / DSA signature encoding (the same wire form
+/// produced internally by [`EcdsaKeyPair::sign`]). `r` and `s` are treated as
+/// non-negative integers and emitted as canonical DER `INTEGER`s (a leading
+/// `0x00` is added when the high bit is set).
+pub fn encode_signature(r: &BigNum, s: &BigNum) -> Result<Vec<u8>, CryptoError> {
+    encode_der_signature(r, s)
+}
+
+/// DER-decode a `SEQUENCE { INTEGER r, INTEGER s }` signature into `(r, s)`.
+///
+/// Rejects trailing bytes (inside or after the `SEQUENCE`) and malformed DER.
+pub fn decode_signature(der: &[u8]) -> Result<(BigNum, BigNum), CryptoError> {
+    decode_der_signature(der)
+}
+
 /// DER-encode an ECDSA signature: SEQUENCE { INTEGER r, INTEGER s }.
 fn encode_der_signature(r: &BigNum, s: &BigNum) -> Result<Vec<u8>, CryptoError> {
     let r_bytes = r.to_bytes_be();
@@ -333,11 +350,35 @@ fn decode_der_signature(data: &[u8]) -> Result<(BigNum, BigNum), CryptoError> {
         return Err(CryptoError::EcdsaVerifyFail);
     }
 
+    // Strict-DER validation of r and s (signature components are non-negative
+    // integers in minimal DER form): rejects empty, negative, and non-minimal
+    // encodings. Canonical signatures never trip this; rejecting the variants
+    // hardens against malleable / malformed signature encodings.
+    check_der_positive_integer(r_bytes)?;
+    check_der_positive_integer(s_bytes)?;
+
     // Strip leading zeros (ASN.1 INTEGER may have a leading 0x00 for positive sign)
     let r = BigNum::from_bytes_be(r_bytes);
     let s = BigNum::from_bytes_be(s_bytes);
 
     Ok((r, s))
+}
+
+/// Validate the raw content octets of a DER `INTEGER` that must be a
+/// non-negative, minimally-encoded value (an ECDSA/DSA signature `r` or `s`).
+///
+/// Per X.690 a positive `INTEGER` with its top bit set carries a single leading
+/// `0x00` sign octet, and no other leading `0x00` is permitted; `0` is the
+/// single octet `0x00`. This rejects empty content, a set high bit on the first
+/// octet (negative), and a superfluous leading `0x00` (non-minimal).
+fn check_der_positive_integer(bytes: &[u8]) -> Result<(), CryptoError> {
+    match bytes {
+        [] => Err(CryptoError::EcdsaVerifyFail),
+        [0x00] => Ok(()),
+        [0x00, second, ..] if second & 0x80 == 0 => Err(CryptoError::EcdsaVerifyFail),
+        [first, ..] if first & 0x80 != 0 => Err(CryptoError::EcdsaVerifyFail),
+        _ => Ok(()),
+    }
 }
 
 #[cfg(test)]
