@@ -18164,3 +18164,16 @@ I168/T291：crypto/encode Phase 2 —— SM2 密文 DER codec（新公共 API）
   - 验证：migrated_encode_sm2_cipher 4/0；sm2,ecdsa lib 490/0 无回归；clippy --all-features --all-targets -D warnings clean；fmt clean。
 
 Recorded as DEV_LOG Phase I168/T291.
+
+---
+
+> 请继续刚才未完成的工作 / 推荐执行序（Phase 3b: 密钥 codec，最后一片）
+
+I169/T292：crypto/encode Phase 3b（最后一片）—— PKCS#8 私钥 codec 迁移 + RFC 8410 parameters-absent encoder 修复。
+  - 迁移 SDV_BSL_ASN1_ENCODE_PRIKEY_BUFF_TC001（inline PKCS#8 PrivateKeyInfo DER），文件无关：migrated_encode_key_codec.rs（1 测试，5 向量）—— Ed25519+X25519 parse→字节级 re-encode round-trip；EC/RSA/SM2 parse-only decode KAT。
+  - I169（真·conformance bug 修复，飞轮）：Ed25519/X25519 round-trip 失败，因 encode_pkcs8_der_raw 在 params=None 时写了多余的 NULL parameters，但 RFC 8410 §3 禁止 Ed25519/Ed448/X25519/X448 的 parameters 字段（必须 absent：30 05 06 03 2b656e，非 30 07 …05 00）。所有 None 调用方（Ed/X 25519/448/SM2）都要 absent，故修复为不写 —— Rust 编码的 EdDSA/X-DH PKCS#8 密钥现 RFC 8410 conformant（之前带非标 NULL，其他实现可能拒绝）。
+  - 3 个文档化 encoder gap（decode-only，follow-up）：EC encode_ec_pkcs8_der 漏 SEC1 可选 [1] publicKey；RSA/SM2 re-encode 需 per-type plumbing；非标 SDV "subKeyInfo" SPKI 碎片（AlgId+BITSTRING 无外层 SEQUENCE）被 parse_spki_der 正确拒绝。
+  - 验证：migrated_encode_key_codec 1/0；pki lib 458/0 + x509 1073/0 + interop pki 12/0 无回归；clippy --features x509,pkcs8 --all-targets -D warnings clean；fmt clean。
+  - 完成 crypto/encode 整条 arc（sig I167/T289 + PKCS#8 DH/DSA T290 + SM2 密文 I168/T291 + 本片）。
+
+Recorded as DEV_LOG Phase I169/T292.

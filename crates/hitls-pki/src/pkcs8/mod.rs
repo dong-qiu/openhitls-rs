@@ -182,11 +182,13 @@ pub fn encode_pkcs8_der_raw(
     let mut alg_enc = Encoder::new();
     alg_enc.write_oid(&algorithm_oid.to_der_value());
     if let Some(params) = algorithm_params {
-        // Write raw param bytes (already DER-encoded)
+        // Write raw param bytes (already DER-encoded).
         alg_enc.write_raw(params);
-    } else {
-        alg_enc.write_null();
     }
+    // When `algorithm_params` is `None` the parameters field is *absent* (no
+    // NULL): RFC 8410 §3 forbids parameters for Ed25519/Ed448/X25519/X448, and
+    // the other `None` callers likewise omit them. (Previously a NULL was
+    // emitted here, producing non-conformant keys that did not round-trip.)
     let alg_bytes = alg_enc.finish();
 
     // Build PrivateKeyInfo SEQUENCE
