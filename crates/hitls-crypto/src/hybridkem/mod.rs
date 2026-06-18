@@ -8,6 +8,7 @@
 //! - X25519 variants: `[ML-KEM data || X25519 data]`
 //! - ECDH variants:   `[ECDH data || ML-KEM data]`
 
+use crate::ecc::{EcGroup, EcPoint};
 use crate::ecdh::EcdhKeyPair;
 use crate::mlkem::MlKemKeyPair;
 use crate::sha2::Sha256;
@@ -252,30 +253,47 @@ impl HybridKemKeyPair {
     ) -> Result<Self, CryptoError> {
         let params = get_params(param_id);
         let ek_len = mlkem_ek_len(params.mlkem_param);
-        let expected_len = params.classic_pk_len + ek_len;
-        if combined_pk.len() != expected_len {
-            return Err(CryptoError::InvalidArg(""));
-        }
 
-        let (classic_pk, mlkem_ek) = split_combined(
-            combined_pk,
-            params.classic_type,
-            params.classic_pk_len,
-            ek_len,
-        );
-
-        let classic = match params.classic_type {
+        let (classic, mlkem_ek) = match params.classic_type {
             ClassicType::X25519 => {
-                let mut pk_bytes = [0u8; 32];
+                // Combined layout `[ML-KEM ek || X25519 pk]` (fixed 32-byte pk).
+                if combined_pk.len() != X25519_KEY_SIZE + ek_len {
+                    return Err(CryptoError::InvalidArg(""));
+                }
+                let (mlkem_ek, classic_pk) = combined_pk.split_at(ek_len);
+                let mut pk_bytes = [0u8; X25519_KEY_SIZE];
                 pk_bytes.copy_from_slice(classic_pk);
-                ClassicDh::X25519PubOnly { pk_bytes }
+                (ClassicDh::X25519PubOnly { pk_bytes }, mlkem_ek)
             }
             _ => {
-                let curve_id = classic_curve_id(params.classic_type);
-                ClassicDh::EcdhPubOnly {
-                    curve_id,
-                    pk_bytes: classic_pk.to_vec(),
+                // Combined layout `[ECDH pk || ML-KEM ek]`. The ECDH public key
+                // may be either SEC1 uncompressed (`0x04 || x || y`) or
+                // compressed (`0x02|0x03 || x`); the ML-KEM ek is fixed-length,
+                // so the classic portion is whatever precedes it. Normalise to
+                // uncompressed (the DH path decodes uncompressed points).
+                if combined_pk.len() <= ek_len {
+                    return Err(CryptoError::InvalidArg(""));
                 }
+                let classic_len = combined_pk.len() - ek_len;
+                let (classic_pk, mlkem_ek) = combined_pk.split_at(classic_len);
+                let curve_id = classic_curve_id(params.classic_type);
+                let group = EcGroup::new(curve_id)?;
+                let fs = group.field_size();
+                let uncompressed = if classic_len == 1 + 2 * fs && classic_pk[0] == 0x04 {
+                    classic_pk.to_vec()
+                } else if classic_len == 1 + fs && (classic_pk[0] == 0x02 || classic_pk[0] == 0x03)
+                {
+                    EcPoint::from_compressed(&group, classic_pk)?.to_uncompressed(&group)?
+                } else {
+                    return Err(CryptoError::InvalidArg(""));
+                };
+                (
+                    ClassicDh::EcdhPubOnly {
+                        curve_id,
+                        pk_bytes: uncompressed,
+                    },
+                    mlkem_ek,
+                )
             }
         };
 
