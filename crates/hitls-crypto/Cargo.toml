@@ -15,13 +15,13 @@ hitls-bignum = { path = "../hitls-bignum", optional = true }
 hitls-utils = { path = "../hitls-utils", optional = true }
 zeroize = { version = "1.8", features = ["derive"] }
 subtle = "2.6"
-getrandom = "0.3"
+getrandom = "0.4"
 
 # wasm32-unknown-unknown has no OS RNG; pair the `wasm_js` backend cfg
 # (set in `.cargo/config.toml`) with the matching Cargo feature so the
 # wasm-bindgen / js-sys deps are pulled in.
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
-getrandom = { version = "0.3", features = ["wasm_js"] }
+getrandom = { version = "0.4", features = ["wasm_js"] }
 
 [features]
 default = ["aes", "sha2", "rsa", "ecdsa", "hmac"]
