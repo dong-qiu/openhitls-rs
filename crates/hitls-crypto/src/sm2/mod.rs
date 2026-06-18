@@ -602,6 +602,104 @@ fn decode_der_signature(data: &[u8]) -> Result<(BigNum, BigNum), CryptoError> {
     ))
 }
 
+/// DER-encode an SM2 ciphertext in the GB/T 32918.4 / GM/T 0009 ASN.1 form:
+///
+/// ```text
+/// SM2Cipher ::= SEQUENCE {
+///     XCoordinate  INTEGER,        -- C1 x
+///     YCoordinate  INTEGER,        -- C1 y
+///     HASH         OCTET STRING,   -- C3 (SM3 digest)
+///     CipherText   OCTET STRING    -- C2
+/// }
+/// ```
+///
+/// `c1x` / `c1y` are the affine coordinates of `C1 = k·G` (big-endian, emitted
+/// as canonical DER `INTEGER`s — a leading `0x00` is added when the top bit is
+/// set). This is the structured wire form; the raw `encrypt` output uses the
+/// `C1 ‖ C3 ‖ C2` concatenation instead.
+pub fn encode_sm2_ciphertext(
+    c1x: &[u8],
+    c1y: &[u8],
+    c3: &[u8],
+    c2: &[u8],
+) -> Result<Vec<u8>, CryptoError> {
+    // The C1 coordinates are EC field elements and cannot be empty (a
+    // zero-length DER INTEGER is invalid).
+    if c1x.is_empty() || c1y.is_empty() {
+        return Err(CryptoError::InvalidArg(""));
+    }
+    let mut inner = Encoder::new();
+    inner
+        .write_integer(c1x)
+        .write_integer(c1y)
+        .write_octet_string(c3)
+        .write_octet_string(c2);
+    let inner_bytes = inner.finish();
+
+    let mut outer = Encoder::new();
+    outer.write_sequence(&inner_bytes);
+    Ok(outer.finish())
+}
+
+/// The four components of an SM2 ciphertext: `(C1x, C1y, C3, C2)`.
+pub type Sm2CiphertextParts = (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>);
+
+/// DER-decode an SM2 ciphertext (GB/T 32918.4) into `(C1x, C1y, C3, C2)`.
+///
+/// `C1x` / `C1y` are the raw `INTEGER` content octets (a DER sign-pad `0x00`, if
+/// present, is preserved). Rejects trailing bytes inside or after the SEQUENCE.
+pub fn decode_sm2_ciphertext(der: &[u8]) -> Result<Sm2CiphertextParts, CryptoError> {
+    let mut decoder = Decoder::new(der);
+    let mut seq = decoder
+        .read_sequence()
+        .map_err(|_| CryptoError::InvalidArg(""))?;
+
+    let c1x = seq
+        .read_integer()
+        .map_err(|_| CryptoError::InvalidArg(""))?;
+    let c1y = seq
+        .read_integer()
+        .map_err(|_| CryptoError::InvalidArg(""))?;
+    // Strict-DER: the C1 coordinates must be non-empty, non-negative, minimally
+    // encoded INTEGERs (rejects the non-minimal / negative encodings the C
+    // reference also rejects).
+    check_der_positive_integer(c1x)?;
+    check_der_positive_integer(c1y)?;
+    let (c1x, c1y) = (c1x.to_vec(), c1y.to_vec());
+    let c3 = seq
+        .read_octet_string()
+        .map_err(|_| CryptoError::InvalidArg(""))?
+        .to_vec();
+    let c2 = seq
+        .read_octet_string()
+        .map_err(|_| CryptoError::InvalidArg(""))?
+        .to_vec();
+
+    // C3 (the SM3 digest) and C2 (the ciphertext over a non-empty plaintext)
+    // are never empty; the C reference rejects zero-length octet strings.
+    if c3.is_empty() || c2.is_empty() {
+        return Err(CryptoError::InvalidArg(""));
+    }
+    if !seq.is_empty() || !decoder.is_empty() {
+        return Err(CryptoError::InvalidArg(""));
+    }
+    Ok((c1x, c1y, c3, c2))
+}
+
+/// Validate the raw content octets of a DER `INTEGER` that must be a
+/// non-negative, minimally-encoded value (an SM2 ciphertext `C1` coordinate).
+/// Rejects empty content, a set high bit on the first octet (negative), and a
+/// superfluous leading `0x00` (non-minimal).
+fn check_der_positive_integer(bytes: &[u8]) -> Result<(), CryptoError> {
+    match bytes {
+        [] => Err(CryptoError::InvalidArg("")),
+        [0x00] => Ok(()),
+        [0x00, second, ..] if second & 0x80 == 0 => Err(CryptoError::InvalidArg("")),
+        [first, ..] if first & 0x80 != 0 => Err(CryptoError::InvalidArg("")),
+        _ => Ok(()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
