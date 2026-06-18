@@ -610,6 +610,43 @@ pub fn encode_ec_pkcs8_der(curve_id: EccCurveId, private_key: &[u8]) -> Vec<u8> 
     encode_pkcs8_der_raw(&known::ec_public_key(), Some(&params), &private_key_der)
 }
 
+/// Encode an EC private key as PKCS#8 **including the SEC1 OPTIONAL
+/// `[1] publicKey`** field (RFC 5915 §3) — the fuller form that OpenSSL and the
+/// openHiTLS C reference emit. `public_key` is the uncompressed point
+/// (`0x04 || x || y`). The plain [`encode_ec_pkcs8_der`] omits this field;
+/// callers that need a byte-identical round-trip of such keys use this variant.
+pub fn encode_ec_pkcs8_der_with_public_key(
+    curve_id: EccCurveId,
+    private_key: &[u8],
+    public_key: &[u8],
+) -> Vec<u8> {
+    let curve_oid = curve_id_to_oid(curve_id);
+
+    // ECPrivateKey ::= SEQUENCE {
+    //   version INTEGER (1), privateKey OCTET STRING,
+    //   [1] EXPLICIT publicKey BIT STRING OPTIONAL }   (parameters live in the
+    //   outer PKCS#8 AlgorithmIdentifier, so [0] is omitted here).
+    let mut bit_string = Encoder::new();
+    bit_string.write_bit_string(0, public_key);
+    let pub_bit_string = bit_string.finish();
+
+    let mut ec_enc = Encoder::new();
+    ec_enc.write_integer(&[1]);
+    ec_enc.write_octet_string(private_key);
+    ec_enc.write_context_specific(1, true, &pub_bit_string);
+    let ec_body = ec_enc.finish();
+
+    let mut ec_seq_enc = Encoder::new();
+    ec_seq_enc.write_sequence(&ec_body);
+    let private_key_der = ec_seq_enc.finish();
+
+    let mut param_enc = Encoder::new();
+    param_enc.write_oid(&curve_oid.to_der_value());
+    let params = param_enc.finish();
+
+    encode_pkcs8_der_raw(&known::ec_public_key(), Some(&params), &private_key_der)
+}
+
 /// Encode an Ed448 seed as a PKCS#8 DER PrivateKeyInfo.
 pub fn encode_ed448_pkcs8_der(seed: &[u8]) -> Vec<u8> {
     let mut inner_enc = Encoder::new();

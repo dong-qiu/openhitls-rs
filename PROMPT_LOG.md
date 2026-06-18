@@ -18189,3 +18189,16 @@ I170/T293：A1 —— HybridKEM 压缩 ECDH 支持 + 5 个 deferred ECDH hybrid 
   - post-crypto/encode "implement-then-migrate" follow-up 的第 1 个（A1→A5→B）。
 
 Recorded as DEV_LOG Phase I170/T293.
+
+---
+
+> 按顺序依次完成 ... A2（encode_ec_pkcs8_der 补 SEC1 [1] publicKey）
+
+I171/T294：A2 —— encode_ec_pkcs8_der_with_public_key（SEC1 [1] publicKey）+ EC PKCS#8 字节级 re-encode。
+  - Phase 3b/T292 把 EC 私钥迁为 decode-only,因 encode_ec_pkcs8_der 漏 SEC1 可选 [1] publicKey（RFC 5915 §3),而 C ENCODE_PRIKEY_BUFF 向量带它。
+  - I171（产品改动）：新公共 encode_ec_pkcs8_der_with_public_key(curve_id, private_key, public_key) —— 出带 [1] EXPLICIT BIT STRING 公钥字段的 ECPrivateKey（OpenSSL/C 参考的完整形式）；public_key 是非压缩点。作为独立函数（原 encode_ec_pkcs8_der + 其 ~6 个 cms/cli/tls 调用方不动 —— 零级联/回归）。
+  - T294：migrated_encode_ec_pubkey.rs（1 测试）—— parse_pkcs8_der C P-384 EC 密钥 → 用新 fn + 从解析出的 key_pair 导出公钥（public_key_bytes()）re-encode → 字节级 == inline asn1。
+  - 验证：migrated_encode_ec_pubkey 1/0；pki lib 458/0（纯增,无回归）；clippy --features x509,pkcs8 --all-targets -D warnings clean；fmt clean。
+  - implement-then-migrate 第 2 个（A1✓→A2✓→A3→A4→A5→B）。
+
+Recorded as DEV_LOG Phase I171/T294.
