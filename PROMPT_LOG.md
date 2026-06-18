@@ -18151,3 +18151,16 @@ T290：crypto/encode Phase 3a —— PKCS#8 DH/DSA 私钥 codec 迁移（+ 2 个
   - 验证：migrated_encode_pkcs8_dhdsa 1/0；clippy --features x509,pkcs8 --tests -D warnings clean；fmt clean。
 
 Recorded as DEV_LOG Phase T290.
+
+---
+
+> 请继续刚才未完成的工作 / 请按照 推荐执行序 依次执行（Phase 2: SM2 密文 DER）
+
+I168/T291：crypto/encode Phase 2 —— SM2 密文 DER codec（新公共 API）+ ENCODE/DECODE_SM2_ENCRYPT 迁移。
+  - Rust SM2 encrypt/decrypt 用 raw C1‖C3‖C2 拼接；C crypto/encode 测的是结构化 GB/T 32918.4 / GM/T 0009 ASN.1 密文（SEQUENCE{INTEGER C1x, INTEGER C1y, OCTET C3, OCTET C2}），Rust 无此 codec。
+  - I168（产品改动）：新公共 hitls_crypto::sm2::{encode_sm2_ciphertext, decode_sm2_ciphertext}（+ Sm2CiphertextParts 别名），基于 hitls-utils ASN.1 Encoder/Decoder。decoder 严格（同 I167 签名 decoder）：拒绝非最小/负/空 INTEGER C1 坐标、空 C3/C2、尾随字节 —— 各对应 C reject。encoder 拒绝空 C1 坐标（C INVALID_ARG 行）。
+  - T291：migrated_encode_sm2_cipher.rs（4 测试：字节级 encode 含 2 个 C SUCCESS 向量 + decode + malformed-reject + round-trip）。
+  - 飞轮抓到 3 个严格度行为（C reject 向量驱动入 codec）：非最小 INTEGER、空 C3（04 00 → C BUFF_LEN_ZERO）、C-SUCCESS 但带尾随字节（C 容忍 Rust 拒绝，更安全 —— decode KAT count-guard 2/3）。
+  - 验证：migrated_encode_sm2_cipher 4/0；sm2,ecdsa lib 490/0 无回归；clippy --all-features --all-targets -D warnings clean；fmt clean。
+
+Recorded as DEV_LOG Phase I168/T291.
