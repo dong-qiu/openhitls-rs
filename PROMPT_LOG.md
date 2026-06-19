@@ -18215,3 +18215,17 @@ Recorded as DEV_LOG Phase I171/T294.
   - §5 关联既有 6 个文档（全部核实存在）。
 
 docs-only,AI review 自动跳过。完成质量 pass 改进 #3。
+
+---
+
+> 补 async TLS 1.2 覆盖
+
+T295 —— 补齐 §3 实测出的唯一 async 覆盖 gap：`connection12_async.rs` 59.7% → **75.71%** 行覆盖（`hitls-tls` 最低覆盖的生产文件）。
+  - 新增 5 个 `#[tokio::test]`,全部走 `tokio::io::duplex` + `tokio::join!` 双端并发:
+    - `cipher_suite_matrix` —— 9 个 `TLS_ECDHE_ECDSA_WITH_*` suite（CBC-SHA/SHA256/SHA384 + GCM-384 + CCM/CCM-8 128/256）完整握手 + 双向 app-data round-trip,覆盖此前 GCM-128-only 测试漏掉的 CBC MtE / CCM / SHA-384-PRF 解密分支;
+    - `large_multirecord_payload` —— 40000 字节载荷过 256KiB duplex,逼出 async 记录分片/重组循环;
+    - `handshake_fails_no_common_suite` —— 客户端/服务端 cipher 集不相交必须握手失败（async 错误路径）;
+    - `full_renegotiation_roundtrip` —— 握手→app data→服务端 `initiate_renegotiation()`（HelloRequest）→客户端重握手→换钥后 app data,双端并发驱动（覆盖最大未测块:client `do_renegotiation` + server `do_server_renego_full`）;
+    - `renegotiation_disabled_rejects` —— 客户端禁用 renego 时回 `no_renegotiation` warning（RFC 5746）原连接存活（覆盖 client warning 路径 + server Renegotiating read 循环）。
+  - 镜像既有 sync `make_renego_configs`/`test_full_renegotiation_roundtrip` 编排;服务端 Renegotiating read 会缓冲在途 app-data,故 join 对顺序鲁棒。
+  - 验证:`connection12_async` 35/0（原 30,+5）;llvm-cov 实测 59.7%→75.71% 行（region 65.0→77.7% / function 66.3→72.0%）;fmt + `clippy --all-features --lib -D warnings` clean（窄 `tls12,async` 特性组合下的 `large_enum_variant` lint 是 main 上预存,CI 的 `--all-features` 不触发）。Test-only,零生产改动。
