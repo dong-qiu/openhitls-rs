@@ -1,6 +1,8 @@
 # Architecture Analysis Report — openHiTLS-rs
 
 > Generated: 2026-02-20 | Updated: 2026-03-02 | Branch: `main`
+>
+> ⚠️ **ARCHIVED SNAPSHOT** — frozen at **2026-03-02** (circa Phase I80 / early R-phases; 3,699 tests / 22 ignored at the time of writing). The structural-debt analysis, line counts, and refactoring recommendations below reflect that date; much of the flagged debt (sync/async mirroring, oversized `connection.rs`, PKI helper proliferation) was subsequently addressed in later R-phases. Current canonical project state (per [DEV_LOG.md](DEV_LOG.md) / [CLAUDE.md](CLAUDE.md)): **I1–I171, T1–T295, R1–R23, P1–P94**. Treat this as a historical architecture review, not a current dashboard.
 
 ---
 

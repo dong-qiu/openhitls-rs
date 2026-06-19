@@ -32,16 +32,22 @@ Run tests for the openHiTLS-rs workspace.
 
 ## Expected Test Counts
 
+Snapshot measured 2026-06-19 via `cargo test -p <crate> --all-features` (all
+targets: lib + integration + migrated C→Rust KAT files). These grow every phase
+— `DEV_LOG.md` is the authoritative per-phase tally; refresh this table when it
+drifts materially (a small positive delta is almost always new tests, not a
+regression).
+
 | Crate | Expected Tests | Ignored |
 |-------|---------------|---------|
-| hitls-crypto | 652 | 31 |
-| hitls-tls | 1164 | 0 |
-| hitls-pki | 349 | 1 |
-| hitls-bignum | 49 | 0 |
-| hitls-utils | 53 | 0 |
-| hitls-auth | 33 | 0 |
-| hitls-cli | 117 | 5 |
-| hitls-integration-tests | 125 | 3 |
-| **Total workspace** | **2585** | **40** |
+| hitls-crypto | 4523 | 25 |
+| hitls-tls | 1720 | 0 |
+| hitls-pki | 1683 | 0 |
+| hitls-bignum | 325 | 1 |
+| hitls-utils | 90 | 0 |
+| hitls-auth | 131 | 0 |
+| hitls-cli | 310 | 7 |
+| hitls-integration-tests | 542 | 13 |
+| **Total workspace** | **9324** | **46** |
 
 If test counts differ from expected, explicitly note the delta and whether it indicates new tests or regressions.
