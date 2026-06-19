@@ -31,7 +31,7 @@ A production-grade cryptographic and TLS library in pure Rust, rewritten from [o
 | Item | Reason |
 |------|--------|
 | eFrodoKEM variants | Optimization, not a functional gap |
-| Multi-buffer SHA-256 | Performance optimization only |
+| Multi-buffer SHA-256 (hand-tuned NEON body) | 4-way batch API shipped (P94); the standalone NEON-without-SHA-2 SIMD body is a future embedded-ARM optimization |
 | EAL Provider Framework | Rust traits are more idiomatic |
 | genrsa/rsa CLI | Covered by existing genpkey/pkey |
 | Conditional FIPS algorithm disabling | Low priority |
@@ -108,7 +108,7 @@ A production-grade cryptographic and TLS library in pure Rust, rewritten from [o
 
 ### Big Number Arithmetic (`hitls-bignum`)
 
-Montgomery multiplication/exponentiation, Miller-Rabin primality, prime generation (safe prime), GCD/mod-inverse, constant-time operations, cryptographic random generation, hex/decimal string conversions. 95 tests.
+Montgomery multiplication/exponentiation, Miller-Rabin primality, prime generation (safe prime), GCD/mod-inverse, constant-time operations, cryptographic random generation, hex/decimal string conversions. 325 tests.
 
 ## Protocol Support
 
@@ -232,8 +232,8 @@ Montgomery multiplication/exponentiation, Miller-Rabin primality, prime generati
 | Protocol | Standard |
 |----------|----------|
 | HOTP / TOTP | RFC 4226 / RFC 6238 |
-| SPAKE2+ (P-256) | RFC 9382 |
-| Privacy Pass (RSA blind signatures) | RFC 9578 |
+| SPAKE2+ (P-256/384/521 × SHA-256/512) | RFC 9383 |
+| Privacy Pass (RSA blind signatures) | RFC 9474 / 9577 / 9578 |
 
 ## Workspace Structure
 
@@ -248,7 +248,7 @@ openhitls-rs/
 │   ├── hitls-pki/       # X.509, PKCS#8/12, CMS
 │   ├── hitls-auth/      # HOTP/TOTP, SPAKE2+, Privacy Pass
 │   └── hitls-cli/       # Command-line tool (18 commands)
-├── tests/interop/       # Integration tests (261 cross-crate)
+├── tests/interop/       # Integration tests (542 cross-crate)
 ├── tests/vectors/       # Test vectors (NIST, Wycheproof, GM/T)
 ├── fuzz/                # 68 libfuzzer fuzz targets
 └── benches/             # Criterion benchmarks
