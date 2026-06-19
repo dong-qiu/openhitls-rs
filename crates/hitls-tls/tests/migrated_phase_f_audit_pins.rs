@@ -537,16 +537,17 @@ fn t247_audit_phase_f_followup3_plan_docs_in_sync() {
 // Cumulative: T116 (8) + T246 (10) + T247 (10) + T248 (10) = 38 tests.
 // ===========================================================================
 
-/// T248 audit pin #1: CLAUDE.md "4300+ tests" status line literal.
+/// T248 audit pin #1: CLAUDE.md "9000+ tests" status line literal.
 /// The rescoped §7.3 total-tests floor pin — guards against silent
-/// drops below 4 300 tests workspace-wide.
+/// drops below 9 000 tests workspace-wide. (Bumped from the original
+/// `4300+` anchor once the measured workspace total reached ~9 324.)
 #[test]
 fn t248_claude_md_workspace_tests_floor_pin() {
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let claude_md = std::fs::read_to_string(format!("{manifest_dir}/../../CLAUDE.md")).unwrap();
     assert!(
-        claude_md.contains("4300+ tests"),
-        "CLAUDE.md must retain the `4300+ tests` workspace-test floor anchor"
+        claude_md.contains("9000+ tests"),
+        "CLAUDE.md must retain the `9000+ tests` workspace-test floor anchor"
     );
 }
 
