@@ -51,7 +51,7 @@ Runs the complete verification pipeline: build → test → clippy → format. S
 
 Runs tests for the entire workspace or a specific crate. Reports pass/fail/ignored counts and compares against expected values.
 
-**Expected counts**: hitls-crypto 652, hitls-tls 1164, hitls-pki 349, hitls-bignum 49, hitls-utils 53, hitls-auth 33, hitls-cli 117, integration 125. **Total: 2585 tests, 40 ignored.**
+**Expected counts** (snapshot 2026-06-19, `cargo test -p <crate> --all-features`; `DEV_LOG.md` is authoritative): hitls-crypto 4523, hitls-tls 1720, hitls-pki 1683, hitls-bignum 325, hitls-utils 90, hitls-auth 131, hitls-cli 310, integration 542. **Total: 9324 tests, 46 ignored.**
 
 ---
 
