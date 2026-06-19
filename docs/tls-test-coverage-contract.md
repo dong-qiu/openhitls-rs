@@ -79,7 +79,7 @@ concentrated in **lower-risk glue / async paths**, not the core handshake:
 
 | File | Line% | Note |
 |---|--:|---|
-| `connection12_async.rs` | **59.7%** | async TLS 1.2 paths under-tested vs the sync path — **the highest-value gap to close**. |
+| `connection12_async.rs` | **75.7%** | _(was 59.7%; closed by T295)_ async TLS 1.2 cipher matrix + multi-record fragmentation + renegotiation roundtrip now covered. |
 | `connection12/server.rs` | 68.0% | TLS 1.2 server state-machine branches. |
 | `connection12/client.rs` | 70.6% | TLS 1.2 client state-machine branches. |
 | `connection/server.rs` | 75.0% | TLS 1.3 server branches. |
@@ -99,8 +99,10 @@ integration tests and so do not show in instrumented line coverage.)
 4. **Anything labelled "audit-pin" or "sampled" is *intentionally* not row-for-row.**
    Absence of a per-C-row Rust test for a TLS combination is **by design** when
    that combination is exercised by §2.1/§2.4 — it is not a migration gap.
-5. **Genuine gaps** (vs. design choices) are only the measured §3 items
-   (async TLS 1.2 first) — these are coverage to *grow*, tracked here.
+5. **Genuine gaps** (vs. design choices) are only the measured §3 items —
+   these are coverage to *grow*, tracked here. (The async-TLS-1.2 gap that
+   topped this list was closed by T295: 59.7% → 75.7%; the TLS 1.2
+   state-machine branch files are the next-lowest.)
 
 ## 5. Related documents
 - `docs/c-test-na-list.md` — the N/A exemption list + the dual-track rationale.

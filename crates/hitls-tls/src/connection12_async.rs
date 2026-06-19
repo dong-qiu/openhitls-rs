@@ -2633,4 +2633,209 @@ mod tests {
         conn.shutdown().await.unwrap();
         assert_eq!(conn.state, ConnectionState::Closed);
     }
+
+    // --- async TLS 1.2 coverage fill (cipher-suite matrix + payload/error paths) ---
+
+    /// Drive a full async handshake + bidirectional round-trip for `suite`.
+    async fn run_async_tls12_suite(suite: CipherSuite) {
+        let (client_config, server_config) = make_configs(suite);
+        let (cs, ss) = tokio::io::duplex(64 * 1024);
+        let mut client = AsyncTls12ClientConnection::new(cs, client_config);
+        let mut server = AsyncTls12ServerConnection::new(ss, server_config);
+
+        let (c, s) = tokio::join!(client.handshake(), server.handshake());
+        c.unwrap_or_else(|e| panic!("client handshake {suite:?}: {e:?}"));
+        s.unwrap_or_else(|e| panic!("server handshake {suite:?}: {e:?}"));
+        assert_eq!(client.cipher_suite(), Some(suite));
+        assert_eq!(server.cipher_suite(), Some(suite));
+
+        let mut buf = [0u8; 64];
+        client.write(b"c->s").await.unwrap();
+        let n = server.read(&mut buf).await.unwrap();
+        assert_eq!(&buf[..n], b"c->s", "{suite:?} client→server");
+        server.write(b"s->c").await.unwrap();
+        let n = client.read(&mut buf).await.unwrap();
+        assert_eq!(&buf[..n], b"s->c", "{suite:?} server→client");
+    }
+
+    /// Every ECDSA-compatible TLS 1.2 suite completes a full async handshake +
+    /// data transfer. Beyond the GCM-128 / ChaCha20 already covered, this
+    /// exercises the CBC (MtE), AES-256-GCM (SHA-384 PRF) and CCM async crypt
+    /// paths.
+    #[tokio::test]
+    async fn test_async_tls12_cipher_suite_matrix() {
+        for suite in [
+            CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA,
+            CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256,
+            CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA,
+            CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384,
+            CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+            CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_CCM,
+            CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_CCM_8,
+            CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_256_CCM,
+            CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_256_CCM_8,
+        ] {
+            run_async_tls12_suite(suite).await;
+        }
+    }
+
+    /// A payload larger than one TLS record (16384) is fragmented across
+    /// multiple records on write and reassembled on read.
+    #[tokio::test]
+    async fn test_async_tls12_large_multirecord_payload() {
+        let suite = CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256;
+        let (client_config, server_config) = make_configs(suite);
+        let (cs, ss) = tokio::io::duplex(256 * 1024);
+        let mut client = AsyncTls12ClientConnection::new(cs, client_config);
+        let mut server = AsyncTls12ServerConnection::new(ss, server_config);
+        let (c, s) = tokio::join!(client.handshake(), server.handshake());
+        c.unwrap();
+        s.unwrap();
+
+        let payload: Vec<u8> = (0..40_000u32).map(|i| (i % 251) as u8).collect();
+        client.write(&payload).await.unwrap();
+
+        let mut got = Vec::with_capacity(payload.len());
+        let mut buf = [0u8; 8192];
+        while got.len() < payload.len() {
+            let n = server.read(&mut buf).await.unwrap();
+            assert!(n > 0, "unexpected EOF before full payload");
+            got.extend_from_slice(&buf[..n]);
+        }
+        assert_eq!(got, payload, "multi-record payload must round-trip intact");
+    }
+
+    /// Disjoint cipher-suite sets (client GCM-128 only, server CBC-256 only)
+    /// fail the handshake on the async path.
+    #[tokio::test]
+    async fn test_async_tls12_handshake_fails_no_common_suite() {
+        let (client_config, _) = make_configs(CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256);
+        let (_, server_config) = make_configs(CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA);
+        let (cs, ss) = tokio::io::duplex(64 * 1024);
+        let mut client = AsyncTls12ClientConnection::new(cs, client_config);
+        let mut server = AsyncTls12ServerConnection::new(ss, server_config);
+        let (c, s) = tokio::join!(client.handshake(), server.handshake());
+        assert!(
+            c.is_err() || s.is_err(),
+            "disjoint cipher suites must fail the handshake"
+        );
+    }
+
+    /// ECDSA P-256 GCM-128 configs with renegotiation toggled, mirroring the
+    /// sync `make_renego_configs` helper.
+    fn make_renego_configs(allow: bool) -> (TlsConfig, TlsConfig) {
+        let suite = CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256;
+        let client_config = TlsConfig::builder()
+            .cipher_suites(&[suite])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .signature_algorithms(&[SignatureScheme::ECDSA_SECP256R1_SHA256])
+            .verify_peer(false)
+            .allow_renegotiation(allow)
+            .build();
+        let server_config = TlsConfig::builder()
+            .cipher_suites(&[suite])
+            .supported_groups(&[NamedGroup::SECP256R1])
+            .signature_algorithms(&[SignatureScheme::ECDSA_SECP256R1_SHA256])
+            .certificate_chain(vec![TEST_FAKE_CERT.to_vec()])
+            .private_key(ServerPrivateKey::Ecdsa {
+                curve_id: hitls_types::EccCurveId::NistP256,
+                private_key: ecdsa_private_key(),
+            })
+            .verify_peer(false)
+            .allow_renegotiation(allow)
+            .build();
+        (client_config, server_config)
+    }
+
+    /// Full async renegotiation roundtrip: handshake → app data → server
+    /// initiates renegotiation (HelloRequest) → client re-handshakes → app
+    /// data flows under the rekeyed connection. Mirrors the sync
+    /// `test_full_renegotiation_roundtrip` but drives both peers concurrently
+    /// over an in-memory duplex with `tokio::join!`.
+    #[tokio::test]
+    async fn test_async_tls12_full_renegotiation_roundtrip() {
+        let (client_config, server_config) = make_renego_configs(true);
+        let (cs, ss) = tokio::io::duplex(64 * 1024);
+        let mut client = AsyncTls12ClientConnection::new(cs, client_config);
+        let mut server = AsyncTls12ServerConnection::new(ss, server_config);
+
+        let (c, s) = tokio::join!(client.handshake(), server.handshake());
+        c.unwrap();
+        s.unwrap();
+        assert_eq!(client.state, ConnectionState::Connected);
+        assert_eq!(server.state, ConnectionState::Connected);
+
+        // Pre-renegotiation exchange (sequential; the duplex pipe buffers).
+        let mut buf = [0u8; 256];
+        client.write(b"before renego").await.unwrap();
+        let n = server.read(&mut buf).await.unwrap();
+        assert_eq!(&buf[..n], b"before renego");
+        server.write(b"ack before").await.unwrap();
+        let n = client.read(&mut buf).await.unwrap();
+        assert_eq!(&buf[..n], b"ack before");
+
+        // Server initiates renegotiation: HelloRequest goes onto the wire.
+        server.initiate_renegotiation().await.unwrap();
+        assert_eq!(server.state, ConnectionState::Renegotiating);
+
+        // The renegotiation handshake is bidirectional, so both peers must be
+        // driven concurrently. The client's read() sees the HelloRequest and
+        // re-handshakes; the server's read() buffers the in-flight app data,
+        // processes the ClientHello, then returns the buffered payload.
+        let client_side = async {
+            client.write(b"after renego").await.unwrap();
+            let mut cbuf = [0u8; 256];
+            let n = client.read(&mut cbuf).await.unwrap();
+            assert_eq!(&cbuf[..n], b"ack after");
+        };
+        let server_side = async {
+            let mut sbuf = [0u8; 256];
+            let n = server.read(&mut sbuf).await.unwrap();
+            assert_eq!(&sbuf[..n], b"after renego");
+            assert_eq!(server.state, ConnectionState::Connected);
+            server.write(b"ack after").await.unwrap();
+        };
+        tokio::join!(client_side, server_side);
+    }
+
+    /// When the client has renegotiation disabled, a server-initiated
+    /// HelloRequest is answered with a `no_renegotiation` warning alert and the
+    /// connection continues unbroken (RFC 5746). Exercises the client warning
+    /// path and the server's warning-aware Renegotiating read loop.
+    #[tokio::test]
+    async fn test_async_tls12_renegotiation_disabled_rejects() {
+        // Server may initiate; client refuses.
+        let (client_config, _) = make_renego_configs(false);
+        let (_, server_config) = make_renego_configs(true);
+        let (cs, ss) = tokio::io::duplex(64 * 1024);
+        let mut client = AsyncTls12ClientConnection::new(cs, client_config);
+        let mut server = AsyncTls12ServerConnection::new(ss, server_config);
+
+        let (c, s) = tokio::join!(client.handshake(), server.handshake());
+        c.unwrap();
+        s.unwrap();
+
+        server.initiate_renegotiation().await.unwrap();
+        assert_eq!(server.state, ConnectionState::Renegotiating);
+
+        // Client writes app data (arrives at the server first), then its read
+        // sees the HelloRequest and emits no_renegotiation before continuing.
+        // The server buffers the app data, consumes the warning, reverts to
+        // Connected, delivers the buffered payload, and replies — proving the
+        // original connection survived the refused renegotiation.
+        let client_side = async {
+            client.write(b"still works").await.unwrap();
+            let mut cbuf = [0u8; 256];
+            let n = client.read(&mut cbuf).await.unwrap();
+            assert_eq!(&cbuf[..n], b"confirmed");
+        };
+        let server_side = async {
+            let mut sbuf = [0u8; 256];
+            let n = server.read(&mut sbuf).await.unwrap();
+            assert_eq!(&sbuf[..n], b"still works");
+            assert_eq!(server.state, ConnectionState::Connected);
+            server.write(b"confirmed").await.unwrap();
+        };
+        tokio::join!(client_side, server_side);
+    }
 }
