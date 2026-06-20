@@ -5237,3 +5237,232 @@ fn test_tls12_full_handshake_state_connected() {
     assert_eq!(client_state, Tls12ClientState::Connected);
     assert_eq!(server_state, Tls12ServerState::Connected);
 }
+
+// ============================================================================
+// Connection state-machine coverage — RFC 5705 key export (success path) +
+// post-handshake read buffering. The existing suite covers the EKM *error*
+// path (before Connected) and the happy-path handshakes; these exercise the
+// EKM success path on both peers (incl. the SHA-384 PRF branch) and the
+// `read()` app-data buffering / multi-record paths over a real TCP pair.
+// ============================================================================
+
+/// ECDSA P-256 configs for an arbitrary cipher suite (mirrors
+/// `make_renego_configs` but parameterised on the suite).
+fn ekm_configs(suite: CipherSuite) -> (TlsConfig, TlsConfig) {
+    let client_config = TlsConfig::builder()
+        .cipher_suites(&[suite])
+        .supported_groups(&[NamedGroup::SECP256R1])
+        .signature_algorithms(&[SignatureScheme::ECDSA_SECP256R1_SHA256])
+        .verify_peer(false)
+        .build();
+    let server_config = TlsConfig::builder()
+        .cipher_suites(&[suite])
+        .supported_groups(&[NamedGroup::SECP256R1])
+        .signature_algorithms(&[SignatureScheme::ECDSA_SECP256R1_SHA256])
+        .certificate_chain(vec![TEST_FAKE_CERT.to_vec()])
+        .private_key(ServerPrivateKey::Ecdsa {
+            curve_id: hitls_types::EccCurveId::NistP256,
+            private_key: TEST_ECDSA_PRIVATE.to_vec(),
+        })
+        .verify_peer(false)
+        .build();
+    (client_config, server_config)
+}
+
+/// RFC 5705 `export_keying_material` success path: after a completed handshake,
+/// both peers derive the **same** keying material for a given (label, context,
+/// length), and a different label yields different output. Covers the
+/// `export_keying_material` success branch on both `Tls12ServerConnection` and
+/// `Tls12ClientConnection` (only the not-connected error path was tested).
+fn run_ekm_agreement(suite: CipherSuite) {
+    use std::net::{TcpListener, TcpStream};
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::Duration;
+
+    let (client_config, server_config) = ekm_configs(suite);
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (tx, rx) = mpsc::channel::<Vec<u8>>();
+
+    let server_handle = thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut conn = Tls12ServerConnection::new(stream, server_config);
+        conn.handshake().unwrap();
+        let ekm = conn
+            .export_keying_material(b"EXPORTER-test", Some(b"ctx"), 32)
+            .unwrap();
+        tx.send(ekm).unwrap();
+        // Keep the connection (and its keys) alive until the client is done.
+        let mut buf = [0u8; 8];
+        let _ = conn.read(&mut buf);
+    });
+
+    let stream = TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    stream
+        .set_write_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    let mut conn = Tls12ClientConnection::new(stream, client_config);
+    conn.handshake().unwrap();
+
+    let client_ekm = conn
+        .export_keying_material(b"EXPORTER-test", Some(b"ctx"), 32)
+        .unwrap();
+    let server_ekm = rx.recv().unwrap();
+
+    assert_eq!(client_ekm.len(), 32, "{suite:?} EKM length");
+    assert_eq!(
+        client_ekm, server_ekm,
+        "{suite:?}: RFC 5705 EKM must agree across peers"
+    );
+    assert!(
+        client_ekm.iter().any(|&b| b != 0),
+        "{suite:?}: EKM must not be all-zero"
+    );
+    // Different label → different keying material.
+    let other = conn
+        .export_keying_material(b"EXPORTER-other", Some(b"ctx"), 32)
+        .unwrap();
+    assert_ne!(other, client_ekm, "{suite:?}: distinct labels differ");
+    // Empty context (None) is a distinct, valid invocation.
+    let no_ctx = conn
+        .export_keying_material(b"EXPORTER-test", None, 16)
+        .unwrap();
+    assert_eq!(no_ctx.len(), 16);
+
+    conn.write(b"done").unwrap();
+    server_handle.join().unwrap();
+}
+
+/// EKM agreement on a SHA-256-PRF suite (exercises the `export_hash_len` → SHA-256 arm).
+#[test]
+fn test_tls12_export_keying_material_after_handshake_sha256() {
+    run_ekm_agreement(CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256);
+}
+
+/// EKM agreement on a SHA-384-PRF suite (exercises the `export_hash_len == 48` → SHA-384 arm).
+#[test]
+fn test_tls12_export_keying_material_after_handshake_sha384() {
+    run_ekm_agreement(CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384);
+}
+
+/// Post-handshake `read()` with a buffer smaller than the record: the first
+/// read returns a prefix and buffers the remainder; subsequent reads drain the
+/// `app_data_buf` (the buffered-data-first branch) before touching the wire.
+#[test]
+fn test_tls12_read_partial_buffer_then_drain() {
+    use std::net::{TcpListener, TcpStream};
+    use std::thread;
+    use std::time::Duration;
+
+    let (client_config, server_config) = make_renego_configs(false);
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let payload: Vec<u8> = (0..100u32).map(|i| (i % 251) as u8).collect();
+    let payload_srv = payload.clone();
+
+    let server_handle = thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut conn = Tls12ServerConnection::new(stream, server_config);
+        conn.handshake().unwrap();
+        conn.write(&payload_srv).unwrap();
+        // hold the connection open
+        let mut b = [0u8; 8];
+        let _ = conn.read(&mut b);
+    });
+
+    let stream = TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    stream
+        .set_write_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    let mut conn = Tls12ClientConnection::new(stream, client_config);
+    conn.handshake().unwrap();
+
+    // Read the 100-byte payload 7 bytes at a time, forcing the remainder to be
+    // buffered and drained across many small reads.
+    let mut got = Vec::new();
+    let mut small = [0u8; 7];
+    while got.len() < payload.len() {
+        let n = conn.read(&mut small).unwrap();
+        assert!(n > 0 && n <= 7, "partial read size {n}");
+        got.extend_from_slice(&small[..n]);
+    }
+    assert_eq!(got, payload, "small-buffer reads must reassemble intact");
+
+    conn.write(b"done").unwrap();
+    server_handle.join().unwrap();
+}
+
+/// Post-handshake `read()` of a payload larger than one TLS record: exercises
+/// the sender-side write fragmentation and the receiver-side multi-record read
+/// loop (drains record after record, no data lost across boundaries).
+#[test]
+fn test_tls12_read_large_multirecord() {
+    use std::net::{TcpListener, TcpStream};
+    use std::thread;
+    use std::time::Duration;
+
+    let (client_config, server_config) = make_renego_configs(false);
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let payload: Vec<u8> = (0..40_000u32).map(|i| (i % 251) as u8).collect();
+    let payload_srv = payload.clone();
+
+    let server_handle = thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut conn = Tls12ServerConnection::new(stream, server_config);
+        conn.handshake().unwrap();
+        conn.write(&payload_srv).unwrap();
+        let mut b = [0u8; 8];
+        let _ = conn.read(&mut b);
+    });
+
+    let stream = TcpStream::connect_timeout(&addr, Duration::from_secs(5)).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    stream
+        .set_write_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    let mut conn = Tls12ClientConnection::new(stream, client_config);
+    conn.handshake().unwrap();
+
+    let mut got = Vec::new();
+    let mut buf = [0u8; 4096];
+    while got.len() < payload.len() {
+        let n = conn.read(&mut buf).unwrap();
+        assert!(n > 0, "unexpected EOF before full payload");
+        got.extend_from_slice(&buf[..n]);
+    }
+    assert_eq!(got.len(), payload.len(), "multi-record length");
+    assert_eq!(got, payload, "multi-record payload must round-trip intact");
+
+    conn.write(b"done").unwrap();
+    server_handle.join().unwrap();
+}

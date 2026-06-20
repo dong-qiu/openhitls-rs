@@ -18229,3 +18229,15 @@ T295 —— 补齐 §3 实测出的唯一 async 覆盖 gap：`connection12_async
     - `renegotiation_disabled_rejects` —— 客户端禁用 renego 时回 `no_renegotiation` warning（RFC 5746）原连接存活（覆盖 client warning 路径 + server Renegotiating read 循环）。
   - 镜像既有 sync `make_renego_configs`/`test_full_renegotiation_roundtrip` 编排;服务端 Renegotiating read 会缓冲在途 app-data,故 join 对顺序鲁棒。
   - 验证:`connection12_async` 35/0（原 30,+5）;llvm-cov 实测 59.7%→75.71% 行（region 65.0→77.7% / function 66.3→72.0%）;fmt + `clippy --all-features --lib -D warnings` clean（窄 `tls12,async` 特性组合下的 `large_enum_variant` lint 是 main 上预存,CI 的 `--all-features` 不触发）。Test-only,零生产改动。
+
+---
+
+> 先完成TLS 1.2 状态机覆盖
+
+T296 —— T295 的 sync 版,补 `connection12/{server,client}.rs`(覆盖契约 §3 下一个最低 TLS 文件)。既有 94 测试已覆盖全部 suite/resumption/mTLS/EMS/ETM/MFL/renego + 大量状态机错误态;lib 可达的剩余 gap 是 **RFC 5705 `export_keying_material` 成功路径**(原只测 not-connected 错误路径)和**握手后 `read()` app-data 缓冲**分支。
+  - 4 个新测试,走真实 TCP pair(TcpListener+thread,镜像 renego/conn-info 套路):
+    - `export_keying_material_after_handshake_sha256` + `_sha384` —— 双端派生相同 keying material(经 mpsc 交叉核对)、不同 label 不同输出;覆盖 server+client 两侧 EKM 成功分支 + `export_hash_len` 的 SHA-256/SHA-384 PRF 派发;
+    - `read_partial_buffer_then_drain` —— 100 字节载荷每次读 7 字节,逼出 `app_data_buf` 余量缓冲 + buffered-first 分支;
+    - `read_large_multirecord` —— 40000 字节逼出发送端分片 + 接收端多记录读循环。
+  - 验证:`connection12::tests` 98/0(原 94,+4);llvm-cov lib-only `client.rs` 50.1%→**52.0%**(+14 行)、`server.rs` 55.9%→**57.1%**(+9 行);全量 `--all-features --lib` 1565/0 无回归;fmt + `clippy --all-features --lib --tests -D warnings` clean。
+  - **延后(已文档化)**:`read()` 深层错误返回分支(zero-len AppData skip / fatal-alert-during-read / unexpected-content-type)需 raw-record 注入 harness —— 连接的 keyed `RecordLayer` 是私有字段无测试访问器,外部造不出匹配的畸形记录;建此 harness 是更大的独立工作。Test-only,零生产改动。

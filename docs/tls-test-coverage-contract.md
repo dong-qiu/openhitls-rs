@@ -80,8 +80,8 @@ concentrated in **lower-risk glue / async paths**, not the core handshake:
 | File | Line% | Note |
 |---|--:|---|
 | `connection12_async.rs` | **75.7%** | _(was 59.7%; closed by T295)_ async TLS 1.2 cipher matrix + multi-record fragmentation + renegotiation roundtrip now covered. |
-| `connection12/server.rs` | 68.0% | TLS 1.2 server state-machine branches. |
-| `connection12/client.rs` | 70.6% | TLS 1.2 client state-machine branches. |
+| `connection12/server.rs` | 68.0%+ | TLS 1.2 server state-machine branches. T296 added RFC 5705 EKM success (both PRF arms) + post-handshake `read()` buffering (lib-only +9 lines). Remaining gaps = deep `read()` error returns (need a raw-record-injection harness — keyed `RecordLayer` is a private field). |
+| `connection12/client.rs` | 70.6%+ | TLS 1.2 client state-machine branches. T296 added EKM success + partial/multi-record `read()` (lib-only +14 lines). |
 | `connection/server.rs` | 75.0% | TLS 1.3 server branches. |
 | `crypt/mod.rs` | 79.9% | cipher-suite dispatch arms not all exercised. |
 
