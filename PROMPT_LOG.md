@@ -18241,3 +18241,13 @@ T296 —— T295 的 sync 版,补 `connection12/{server,client}.rs`(覆盖契约
     - `read_large_multirecord` —— 40000 字节逼出发送端分片 + 接收端多记录读循环。
   - 验证:`connection12::tests` 98/0(原 94,+4);llvm-cov lib-only `client.rs` 50.1%→**52.0%**(+14 行)、`server.rs` 55.9%→**57.1%**(+9 行);全量 `--all-features --lib` 1565/0 无回归;fmt + `clippy --all-features --lib --tests -D warnings` clean。
   - **延后(已文档化)**:`read()` 深层错误返回分支(zero-len AppData skip / fatal-alert-during-read / unexpected-content-type)需 raw-record 注入 harness —— 连接的 keyed `RecordLayer` 是私有字段无测试访问器,外部造不出匹配的畸形记录;建此 harness 是更大的独立工作。Test-only,零生产改动。
+
+---
+
+> 站在功能完备度的视角，请分析Rust版本openHiTLS, 相对C语言版本，还有哪些缺失的？请使用独立的Agent分析 / 先修 PBES2 PRF 那条
+
+4 个独立 agent 审计 crypto/TLS/PKI/基础设施 → "100% parity" 大致成立但夸大、且双向(Rust 也反超 C:DTLS1.3/ECH/OCSP/CMS-content-types/扩展)。唯一"可复现互通 bug + 低成本"项 = **PBES2 PBKDF2 PRF agility**,先修。
+
+I172 —— 两个耦合 bug:(1) decrypt 忽略 RFC 8018 §5.2 可选 `prf` 字段、永远按 HMAC-SHA-256 派生 → 解不开 OpenSSL 默认导出的密钥(HMAC-SHA1,prf 字段省略);(2) encrypt 不写 `prf` 字段(隐含默认 SHA-1)却用 SHA-256 派生 → Rust 自己的输出**非互通**。既有 roundtrip 测试因两边都写死 SHA-256 而看不见——经典"自洽但错"。
+  - 修复:新增 `hitls_crypto::pbkdf2::{Pbkdf2Prf, pbkdf2_prf}`(SHA-1/224/256/384/512 + cfg(sm3) SM3;pbkdf2 feature 现含 sha1)+ `hmac_sha224_oid/hmac_sm3_oid`;decrypt 解析可选 keyLength+prf(默认 HMAC-SHA1);encrypt 显式写 `prf=hmacWithSHA256 NULL`。
+  - 验证(独立 oracle):3 个 OpenSSL 3.6 字节级互通向量(HMAC-SHA1 省略-prf 默认 + 显式 SHA384/512)解密 == `-topk8 -nocrypt` DER,不可 false-pass;`pkcs8::encrypted` 10→15/0;全量 hitls-pki(1073 + PKCS#12/CMS/migrated)0 回归;crypto pbkdf2 14/0;fmt+clippy clean。

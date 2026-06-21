@@ -480,6 +480,14 @@ pub mod known {
     pub fn hmac_sha1_oid() -> Oid {
         Oid::new(&[1, 2, 840, 113549, 2, 7])
     }
+    /// OID for HMAC-SHA-224 PRF.
+    pub fn hmac_sha224_oid() -> Oid {
+        Oid::new(&[1, 2, 840, 113549, 2, 8])
+    }
+    /// OID for HMAC-SM3 PRF (GM/T 0006).
+    pub fn hmac_sm3_oid() -> Oid {
+        Oid::new(&[1, 2, 156, 10197, 1, 401, 2])
+    }
 
     /// OID for PKCS#7 digested-data content type.
     pub fn pkcs7_digested_data() -> Oid {
