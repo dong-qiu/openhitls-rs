@@ -10,7 +10,7 @@
 //! ```
 
 use hitls_crypto::modes::cbc;
-use hitls_crypto::pbkdf2;
+use hitls_crypto::pbkdf2::{self, Pbkdf2Prf};
 use hitls_types::CryptoError;
 use hitls_utils::asn1::{Decoder, Encoder};
 
@@ -124,11 +124,39 @@ fn decrypt_pbes2(
         return Err(CryptoError::DecodeUnknownOid);
     }
 
-    // PBKDF2 parameters
+    // PBKDF2 parameters — RFC 8018 §5.2:
+    //   PBKDF2-params ::= SEQUENCE {
+    //       salt OCTET STRING, iterationCount INTEGER,
+    //       keyLength INTEGER OPTIONAL,
+    //       prf AlgorithmIdentifier DEFAULT hmacWithSHA1 }
     let mut pbkdf2_params = kdf.read_sequence()?;
     let salt = pbkdf2_params.read_octet_string()?.to_vec();
     let iter_bytes = pbkdf2_params.read_integer()?;
     let iterations = bytes_to_u32(iter_bytes);
+
+    // The PRF defaults to HMAC-SHA-1 when the optional `prf` field is absent
+    // (this is exactly what OpenSSL emits for its legacy default). Previously
+    // this field was ignored and the key was always derived with HMAC-SHA-256
+    // — silently unable to decrypt HMAC-SHA1/384/512/SM3 keys produced by
+    // OpenSSL and other implementations.
+    let mut prf = Pbkdf2Prf::HmacSha1;
+    while !pbkdf2_params.is_empty() {
+        match pbkdf2_params.peek_tag()?.number {
+            0x02 => {
+                // keyLength INTEGER — the cipher determines the key length, so
+                // read and ignore (rarely present for AES schemes).
+                let _ = pbkdf2_params.read_integer()?;
+            }
+            0x10 => {
+                // prf AlgorithmIdentifier SEQUENCE { OID [, NULL] }
+                let mut prf_alg = pbkdf2_params.read_sequence()?;
+                let prf_oid = Oid::from_der_value(prf_alg.read_oid()?)?;
+                prf = prf_from_oid(&prf_oid)?;
+                break;
+            }
+            _ => return Err(CryptoError::DecodeAsn1Fail),
+        }
+    }
 
     // Encryption scheme
     let mut enc = params.read_sequence()?;
@@ -147,8 +175,29 @@ fn decrypt_pbes2(
 
     let iv = enc.read_octet_string()?.to_vec();
 
-    let key = pbkdf2::pbkdf2(password.as_bytes(), &salt, iterations, key_len)?;
+    let key = pbkdf2::pbkdf2_prf(prf, password.as_bytes(), &salt, iterations, key_len)?;
     cbc::cbc_decrypt(&key, &iv, encrypted)
+}
+
+/// Map a PBKDF2 `prf` AlgorithmIdentifier OID to the PRF selector
+/// (RFC 8018 / GM/T). Unknown OIDs are rejected rather than silently
+/// downgraded.
+fn prf_from_oid(oid: &Oid) -> Result<Pbkdf2Prf, CryptoError> {
+    Ok(if *oid == known::hmac_sha1_oid() {
+        Pbkdf2Prf::HmacSha1
+    } else if *oid == known::hmac_sha224_oid() {
+        Pbkdf2Prf::HmacSha224
+    } else if *oid == known::hmac_sha256_oid() {
+        Pbkdf2Prf::HmacSha256
+    } else if *oid == known::hmac_sha384_oid() {
+        Pbkdf2Prf::HmacSha384
+    } else if *oid == known::hmac_sha512_oid() {
+        Pbkdf2Prf::HmacSha512
+    } else if *oid == known::hmac_sm3_oid() {
+        Pbkdf2Prf::HmacSm3
+    } else {
+        return Err(CryptoError::DecodeUnknownOid);
+    })
 }
 
 /// Encode EncryptedPrivateKeyInfo ASN.1:
@@ -178,12 +227,21 @@ fn encode_encrypted_pkcs8(
     iv: &[u8],
     encrypted: &[u8],
 ) -> Result<Vec<u8>, CryptoError> {
-    // PBKDF2 params: SEQUENCE { salt, iterations }
+    // PBKDF2 params: SEQUENCE { salt, iterations, prf=hmacWithSHA256 }.
+    // The explicit `prf` field is required for self-consistency: we derive the
+    // key with HMAC-SHA-256 (see `encrypt_pkcs8_der_with`), so omitting `prf`
+    // (which implies the RFC 8018 default HMAC-SHA-1) would make the output
+    // undecryptable by any standards-conformant peer (e.g. OpenSSL).
     let mut pbkdf2_body = Encoder::new();
     pbkdf2_body.write_octet_string(salt);
     let iter_bytes = iterations.to_be_bytes();
     let iter_trimmed = trim_leading_zeros(&iter_bytes);
     pbkdf2_body.write_integer(iter_trimmed);
+    let mut prf_alg = Encoder::new();
+    prf_alg.write_oid(&known::hmac_sha256_oid().to_der_value());
+    prf_alg.write_null();
+    let prf_bytes = prf_alg.finish();
+    pbkdf2_body.write_sequence(&prf_bytes);
     let pbkdf2_body_bytes = pbkdf2_body.finish();
 
     // KDF: SEQUENCE { OID(PBKDF2), SEQUENCE(params) }
@@ -237,7 +295,7 @@ mod tests {
     };
     use hitls_types::EccCurveId;
 
-    use hitls_utils::hex::hex;
+    use hitls_utils::hex::{hex, to_hex};
 
     #[test]
     fn test_encrypted_pkcs8_roundtrip_ed25519() {
@@ -375,6 +433,93 @@ mod tests {
         let dec2 = decrypt_pkcs8_der(&enc2, "same").unwrap();
         assert_eq!(dec1, dec2);
         assert_eq!(dec1, pki_der);
+    }
+
+    // ── OpenSSL interop vectors (independent oracle) ──────────────────────
+    // Generated with OpenSSL 3.6.2 from one EC P-256 key:
+    //   openssl pkcs8 -topk8 -in k.pem -v2 <cipher> -v2prf <prf> -passout pass:interop-test
+    // The decrypted inner PrivateKeyInfo is byte-identical across all three
+    // (same key), and equals the `-topk8 -nocrypt` DER below. These cannot
+    // false-pass: a wrong PRF derives a wrong AES key and CBC-unpad fails.
+    const OPENSSL_PLAINTEXT_DER: &str = "308187020100301306072a8648ce3d020106082a8648ce3d030107046d306b0201010420a4429b5ea635d90701b6e8b1bf9d22f48b888389112914a05cb820161768ccaca1440342000460cdf520f8d7d4db79477a468105bd4f88d232f348264f581122e5d0d92cc556188fe9ff8119becf31fc93a19b43c152b3112307d6bddc95a82f49d026c7d71c";
+    const OPENSSL_PW: &str = "interop-test";
+
+    /// HMAC-SHA1 PRF, AES-256-CBC — OpenSSL's *omitted-prf* legacy default
+    /// (the case the old SHA-256-hardcoded decryptor could not read).
+    const OPENSSL_ENC_SHA1: &str = "-----BEGIN ENCRYPTED PRIVATE KEY-----\n\
+MIHmMFEGCSqGSIb3DQEFDTBEMCMGCSqGSIb3DQEFDDAWBBDRst8Vh/X1UwZlz3lJ\n\
+LmT/AgIIADAdBglghkgBZQMEASoEEBp0sW7+scH37DqkY8tR9dMEgZBkTsESlAST\n\
+qPXQeU2eQwaeE8y8Uv4wjuz/6xQMB0g5iWRFee7D/6DfexMHPNncVTZVujKCSPsJ\n\
+yoUwLLCZiV0nQXini8BIcuLv7tFFWoPPxuhkyANtQN3tAK10CVodIsjbMaiC9UYh\n\
+ynkHjzSKPOe+RBNHIQg73z529hvWOGu7K7bph+eztU8pRdh28njXZB8=\n\
+-----END ENCRYPTED PRIVATE KEY-----\n";
+
+    /// HMAC-SHA384 PRF (explicit), AES-256-CBC.
+    const OPENSSL_ENC_SHA384: &str = "-----BEGIN ENCRYPTED PRIVATE KEY-----\n\
+MIH0MF8GCSqGSIb3DQEFDTBSMDEGCSqGSIb3DQEFDDAkBBCm9VJOWzMVZboqY+/z\n\
+NpXDAgIIADAMBggqhkiG9w0CCgUAMB0GCWCGSAFlAwQBKgQQTdGXI7c+D8SVWfkb\n\
+UzdDZwSBkPg6rGwikq4pif/RS8G4ZD4XUIrYX8LQgWoRU2+G0pUV+8AaJaZVjMFS\n\
+QnB3hH0Wpf/xRYMMWX888M2B1RttfIwU7seOugYO/2Cz21Pl82ZvPv7filKD4R8D\n\
+hGn+7s0LkdwiTrRPTEdTFbAf2PC2WyO0rXMb+Boku7A+CCKhB+pkZjXdCulx7Rt+\n\
+MF5E/FnIfA==\n\
+-----END ENCRYPTED PRIVATE KEY-----\n";
+
+    /// HMAC-SHA512 PRF (explicit), AES-128-CBC.
+    const OPENSSL_ENC_SHA512: &str = "-----BEGIN ENCRYPTED PRIVATE KEY-----\n\
+MIH0MF8GCSqGSIb3DQEFDTBSMDEGCSqGSIb3DQEFDDAkBBBcjKPJ5rXLc3qzQDtB\n\
+wEibAgIIADAMBggqhkiG9w0CCwUAMB0GCWCGSAFlAwQBAgQQc6BrydUWoWCZYjZS\n\
+28TcxASBkGjOMZLTb/lTs1oqF1k91NhKweJFGxZWwf2d5C6vH/YzT0PfjDlu31aJ\n\
+ovuRMgoZKFkv3D4BoGDQK/ZwqxbD2qeZ/h0wV2dbUeZoUkUyGUhQo1pc8vZOihvh\n\
+T06AVX+AVADsK4KjB3chRck5Q9HIFVl8g8S1eMQqfuX1FvzTKFrzX/cSCU2sgyiZ\n\
+SHalmKkWZA==\n\
+-----END ENCRYPTED PRIVATE KEY-----\n";
+
+    fn assert_decrypts_to_openssl_plaintext(pem: &str) {
+        let got = decrypt_pkcs8_pem(pem, OPENSSL_PW).expect("decrypt OpenSSL PBES2 key");
+        assert_eq!(
+            to_hex(&got),
+            OPENSSL_PLAINTEXT_DER,
+            "decrypted inner PrivateKeyInfo must match the OpenSSL -nocrypt DER"
+        );
+        // And it must parse as the EC key it is.
+        let key = parse_pkcs8_der(&got).expect("decrypted key parses");
+        assert!(matches!(key, Pkcs8PrivateKey::Ec { .. }));
+    }
+
+    #[test]
+    fn test_pbes2_openssl_interop_hmac_sha1() {
+        // The regression target: HMAC-SHA1 with the prf field omitted.
+        assert_decrypts_to_openssl_plaintext(OPENSSL_ENC_SHA1);
+    }
+
+    #[test]
+    fn test_pbes2_openssl_interop_hmac_sha384() {
+        assert_decrypts_to_openssl_plaintext(OPENSSL_ENC_SHA384);
+    }
+
+    #[test]
+    fn test_pbes2_openssl_interop_hmac_sha512() {
+        assert_decrypts_to_openssl_plaintext(OPENSSL_ENC_SHA512);
+    }
+
+    #[test]
+    fn test_pbes2_wrong_password_on_openssl_key_rejected() {
+        assert!(decrypt_pkcs8_pem(OPENSSL_ENC_SHA1, "wrong-pw").is_err());
+    }
+
+    #[test]
+    fn test_pbes2_encrypt_emits_explicit_sha256_prf() {
+        // Our own output must carry an explicit hmacWithSHA256 prf so it is
+        // self-consistent + decryptable by standards-conformant peers. The
+        // hmacWithSHA256 OID DER value is 2a 86 48 86 f7 0d 02 09.
+        let seed = [0x42u8; 32];
+        let pki = encode_ed25519_pkcs8_der(&seed);
+        let enc = encrypt_pkcs8_der(&pki, "pw").unwrap();
+        let needle = [0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x02, 0x09];
+        assert!(
+            enc.windows(needle.len()).any(|w| w == needle),
+            "encrypted PKCS#8 must embed the hmacWithSHA256 prf OID"
+        );
     }
 
     #[test]

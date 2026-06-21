@@ -67,6 +67,66 @@ pub fn pbkdf2(
     pbkdf2_with_hmac(sha256_factory, password, salt, iterations, dk_len)
 }
 
+/// PRF (the inner HMAC hash) selector for RFC 8018 PBKDF2.
+///
+/// RFC 8018 §5.2 makes the PRF an `AlgorithmIdentifier` defaulting to
+/// `hmacWithSHA1`; PBES2-encrypted PKCS#8/PKCS#12 in the wild uses any of
+/// these (OpenSSL's legacy default is HMAC-SHA1, its modern default
+/// HMAC-SHA256). `pbkdf2_prf` lets the codec layer drive the right hash by
+/// enum without reaching into this crate's digest types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Pbkdf2Prf {
+    /// HMAC-SHA-1 (RFC 8018 default).
+    HmacSha1,
+    /// HMAC-SHA-224.
+    HmacSha224,
+    /// HMAC-SHA-256.
+    HmacSha256,
+    /// HMAC-SHA-384.
+    HmacSha384,
+    /// HMAC-SHA-512.
+    HmacSha512,
+    /// HMAC-SM3 (GM/T).
+    #[cfg(feature = "sm3")]
+    HmacSm3,
+}
+
+/// PBKDF2 with an explicit PRF (inner HMAC hash) selector.
+pub fn pbkdf2_prf(
+    prf: Pbkdf2Prf,
+    password: &[u8],
+    salt: &[u8],
+    iterations: u32,
+    dk_len: usize,
+) -> Result<Vec<u8>, CryptoError> {
+    fn f_sha1() -> Box<dyn Digest> {
+        Box::new(crate::sha1::Sha1::new())
+    }
+    fn f_sha224() -> Box<dyn Digest> {
+        Box::new(crate::sha2::Sha224::new())
+    }
+    fn f_sha384() -> Box<dyn Digest> {
+        Box::new(crate::sha2::Sha384::new())
+    }
+    fn f_sha512() -> Box<dyn Digest> {
+        Box::new(crate::sha2::Sha512::new())
+    }
+    #[cfg(feature = "sm3")]
+    fn f_sm3() -> Box<dyn Digest> {
+        Box::new(crate::sm3::Sm3::new())
+    }
+    let factory: fn() -> Box<dyn Digest> = match prf {
+        Pbkdf2Prf::HmacSha1 => f_sha1,
+        Pbkdf2Prf::HmacSha224 => f_sha224,
+        Pbkdf2Prf::HmacSha256 => sha256_factory,
+        Pbkdf2Prf::HmacSha384 => f_sha384,
+        Pbkdf2Prf::HmacSha512 => f_sha512,
+        #[cfg(feature = "sm3")]
+        Pbkdf2Prf::HmacSm3 => f_sm3,
+    };
+    pbkdf2_with_hmac(factory, password, salt, iterations, dk_len)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
