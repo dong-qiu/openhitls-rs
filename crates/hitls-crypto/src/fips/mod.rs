@@ -11,6 +11,8 @@
 pub mod boundary;
 mod integrity;
 mod kat;
+#[cfg(any(feature = "mlkem", feature = "slh-dsa"))]
+mod kat_vectors;
 mod pct;
 
 use hitls_types::CmvpError;

@@ -11,6 +11,76 @@ pub(crate) fn run_all_pct() -> Result<(), CmvpError> {
     pct_ecdsa_p256()?;
     pct_ed25519()?;
     pct_rsa_sign_verify()?;
+    // PQC keygen PCTs — exercise the (randomised) key-generation path that the
+    // verify/decaps KATs cannot, by round-tripping a freshly generated key.
+    #[cfg(feature = "mlkem")]
+    pct_mlkem()?;
+    #[cfg(feature = "mldsa")]
+    pct_mldsa()?;
+    #[cfg(feature = "slh-dsa")]
+    pct_slhdsa()?;
+    Ok(())
+}
+
+/// PCT for ML-KEM-768: generate, encapsulate, decapsulate — the recovered
+/// shared secret must equal the one produced by encapsulation.
+#[cfg(feature = "mlkem")]
+fn pct_mlkem() -> Result<(), CmvpError> {
+    use crate::mlkem::MlKemKeyPair;
+    let kp = MlKemKeyPair::generate(768)
+        .map_err(|e| CmvpError::PairwiseTestError(format!("ML-KEM keygen: {e}")))?;
+    let (ss_enc, ct) = kp
+        .encapsulate()
+        .map_err(|e| CmvpError::PairwiseTestError(format!("ML-KEM encaps: {e}")))?;
+    let ss_dec = kp
+        .decapsulate(&ct)
+        .map_err(|e| CmvpError::PairwiseTestError(format!("ML-KEM decaps: {e}")))?;
+    if ss_enc != ss_dec {
+        return Err(CmvpError::PairwiseTestError(
+            "ML-KEM-768 PCT shared-secret mismatch".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// PCT for ML-DSA-65: generate, sign, verify.
+#[cfg(feature = "mldsa")]
+fn pct_mldsa() -> Result<(), CmvpError> {
+    use crate::mldsa::MlDsaKeyPair;
+    let msg = b"\x01\x02\x03\x04";
+    let kp = MlDsaKeyPair::generate(65)
+        .map_err(|e| CmvpError::PairwiseTestError(format!("ML-DSA keygen: {e}")))?;
+    let sig = kp
+        .sign(msg)
+        .map_err(|e| CmvpError::PairwiseTestError(format!("ML-DSA sign: {e}")))?;
+    let valid = kp
+        .verify(msg, &sig)
+        .map_err(|e| CmvpError::PairwiseTestError(format!("ML-DSA verify: {e}")))?;
+    if !valid {
+        return Err(CmvpError::PairwiseTestError("ML-DSA-65 PCT failed".into()));
+    }
+    Ok(())
+}
+
+/// PCT for SLH-DSA (SHA2-128s): generate, sign, verify.
+#[cfg(feature = "slh-dsa")]
+fn pct_slhdsa() -> Result<(), CmvpError> {
+    use crate::slh_dsa::SlhDsaKeyPair;
+    use hitls_types::SlhDsaParamId;
+    let msg = b"\x01\x02\x03\x04";
+    let kp = SlhDsaKeyPair::generate(SlhDsaParamId::Sha2128s)
+        .map_err(|e| CmvpError::PairwiseTestError(format!("SLH-DSA keygen: {e}")))?;
+    let sig = kp
+        .sign(msg)
+        .map_err(|e| CmvpError::PairwiseTestError(format!("SLH-DSA sign: {e}")))?;
+    let valid = kp
+        .verify(msg, &sig)
+        .map_err(|e| CmvpError::PairwiseTestError(format!("SLH-DSA verify: {e}")))?;
+    if !valid {
+        return Err(CmvpError::PairwiseTestError(
+            "SLH-DSA-128s PCT failed".into(),
+        ));
+    }
     Ok(())
 }
 

@@ -5,6 +5,9 @@ extend-exclude = [
     "*.json",
     "*.lock",
     "supply-chain/",
+    # Pure continuous-hex FIPS KAT vectors (NIST FIPS 203/205); hex strings
+    # like "4ded…" spuriously match dictionary words ("ded" -> "dead").
+    "crates/hitls-crypto/src/fips/kat_vectors.rs",
 ]
 
 [default.extend-words]
