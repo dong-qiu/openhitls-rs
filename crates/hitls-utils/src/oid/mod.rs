@@ -192,6 +192,10 @@ pub mod known {
     pub fn sm2_with_sm3() -> Oid {
         Oid::new(&[1, 2, 156, 10197, 1, 501])
     }
+    /// OID for SM4-CBC (GM/T 0006; PBES2 encryption scheme).
+    pub fn sm4_cbc() -> Oid {
+        Oid::new(&[1, 2, 156, 10197, 1, 104, 2])
+    }
     /// OID for SM3 hash algorithm.
     pub fn sm3() -> Oid {
         Oid::new(&[1, 2, 156, 10197, 1, 401])
