@@ -31,6 +31,8 @@ pub enum CmsDigestAlg {
     Sha256,
     Sha384,
     Sha512,
+    /// SM3 (GM/T) — used with SM2-with-SM3 CMS signing.
+    Sm3,
 }
 
 /// Algorithm identifier (OID + optional params).
@@ -286,8 +288,13 @@ impl CmsMessage {
 
         // Determine signature algorithm and sign
         let sig_alg_oid = &cert.signature_algorithm;
-        let (signature, sig_alg_id) =
-            sign_digest(&attrs_digest, private_key_der, sig_alg_oid, &cert)?;
+        let (signature, sig_alg_id) = sign_digest(
+            &attrs_digest,
+            &signed_attrs_for_signing,
+            private_key_der,
+            sig_alg_oid,
+            &cert,
+        )?;
 
         // Build SignerInfo
         let si = SignerInfo {
@@ -353,8 +360,13 @@ impl CmsMessage {
 
         // Determine signature algorithm and sign
         let sig_alg_oid = &cert.signature_algorithm;
-        let (signature, sig_alg_id) =
-            sign_digest(&attrs_digest, private_key_der, sig_alg_oid, &cert)?;
+        let (signature, sig_alg_id) = sign_digest(
+            &attrs_digest,
+            &signed_attrs_for_signing,
+            private_key_der,
+            sig_alg_oid,
+            &cert,
+        )?;
 
         // Build SignerInfo
         let si = SignerInfo {
@@ -681,11 +693,8 @@ fn verify_signature_with_cert(
 ) -> Result<(), PkiError> {
     let sig_oid = Oid::from_der_value(&sig_alg.oid).map_err(|e| cerr(&format!("sig OID: {e}")))?;
 
-    // `signed_message` is only consumed by the ML-DSA path (hash-then-sign
-    // algorithms verify over `digest`); avoid an unused-variable warning when
-    // the `mldsa` feature is disabled.
-    #[cfg(not(feature = "mldsa"))]
-    let _ = signed_message;
+    // `signed_message` is consumed by the SM2 (and ML-DSA) paths, which verify
+    // over the raw message; the hash-then-sign paths verify over `digest`.
 
     if sig_oid == known::sha256_with_rsa_encryption()
         || sig_oid == known::sha384_with_rsa_encryption()
@@ -825,6 +834,20 @@ fn verify_signature_with_cert(
         }
         #[cfg(not(feature = "mldsa"))]
         Err(cerr("ML-DSA not enabled"))
+    } else if sig_oid == known::sm2_with_sm3() {
+        // GB/T 35275: SM2 verifies over the signedAttrs *message*
+        // (e = SM3(ZA ‖ M) with the GM default user-id, both applied inside
+        // `Sm2KeyPair::verify`). The public key is the cert's uncompressed point.
+        let kp = hitls_crypto::sm2::Sm2KeyPair::from_public_key(&cert.public_key.public_key)
+            .map_err(|e| cerr(&format!("SM2 key: {e}")))?;
+        let ok = kp
+            .verify(signed_message, signature)
+            .map_err(|e| cerr(&format!("SM2 verify: {e}")))?;
+        if ok {
+            Ok(())
+        } else {
+            Err(cerr("SM2 signature verification failed"))
+        }
     } else {
         Err(cerr(&format!("unsupported sig alg: {sig_oid}")))
     }
@@ -834,6 +857,7 @@ fn verify_signature_with_cert(
 
 fn sign_digest(
     digest: &[u8],
+    message: &[u8],
     private_key_der: &[u8],
     cert_sig_alg_oid: &[u8],
     cert: &crate::x509::Certificate,
@@ -902,6 +926,23 @@ fn sign_digest(
             .sign(digest)
             .map_err(|e| cerr(&format!("Ed448 sign: {e}")))?
             .to_vec();
+        Ok((
+            signature,
+            AlgorithmIdentifier {
+                oid: cert_sig_alg_oid.to_vec(),
+                params: None,
+            },
+        ))
+    } else if sig_oid == known::sm2_with_sm3() {
+        // GB/T 35275: SM2 signs the signedAttrs *message* (not a pre-hash) —
+        // `Sm2KeyPair::sign` applies the GM default user-id and the e=SM3(ZA‖M)
+        // pre-image internally. The private key is a standard EC scalar.
+        let ec_scalar = parse_ec_private_key(private_key_der)?;
+        let kp =
+            hitls_crypto::sm2::Sm2KeyPair::from_private_key(&ec_scalar).map_err(PkiError::from)?;
+        let signature = kp
+            .sign(message)
+            .map_err(|e| cerr(&format!("SM2 sign: {e}")))?;
         Ok((
             signature,
             AlgorithmIdentifier {
@@ -1465,6 +1506,8 @@ fn oid_to_digest_alg(oid_bytes: &[u8]) -> Result<CmsDigestAlg, PkiError> {
         Ok(CmsDigestAlg::Sha384)
     } else if oid == known::sha512() {
         Ok(CmsDigestAlg::Sha512)
+    } else if oid == known::sm3() {
+        Ok(CmsDigestAlg::Sm3)
     } else {
         Err(cerr(&format!("unsupported digest alg: {oid}")))
     }
@@ -1475,6 +1518,7 @@ fn digest_alg_identifier(alg: CmsDigestAlg) -> AlgorithmIdentifier {
         CmsDigestAlg::Sha256 => known::sha256().to_der_value(),
         CmsDigestAlg::Sha384 => known::sha384().to_der_value(),
         CmsDigestAlg::Sha512 => known::sha512().to_der_value(),
+        CmsDigestAlg::Sm3 => known::sm3().to_der_value(),
     };
     AlgorithmIdentifier {
         oid,
@@ -1499,6 +1543,11 @@ fn compute_digest(data: &[u8], alg: CmsDigestAlg) -> Result<Vec<u8>, PkiError> {
             h.update(data).map_err(PkiError::from)?;
             Ok(h.finish().map_err(PkiError::from)?.to_vec())
         }
+        CmsDigestAlg::Sm3 => {
+            let mut h = hitls_crypto::sm3::Sm3::new();
+            h.update(data).map_err(PkiError::from)?;
+            Ok(h.finish().map_err(PkiError::from)?.to_vec())
+        }
     }
 }
 
@@ -1510,6 +1559,7 @@ fn compute_hmac(data: &[u8], key: &[u8], alg: CmsDigestAlg) -> Result<Vec<u8>, P
             CmsDigestAlg::Sha256 => (Box::new(|| Box::new(hitls_crypto::sha2::Sha256::new())), 32),
             CmsDigestAlg::Sha384 => (Box::new(|| Box::new(hitls_crypto::sha2::Sha384::new())), 48),
             CmsDigestAlg::Sha512 => (Box::new(|| Box::new(hitls_crypto::sha2::Sha512::new())), 64),
+            CmsDigestAlg::Sm3 => (Box::new(|| Box::new(hitls_crypto::sm3::Sm3::new())), 32),
         };
 
     let mut hmac = Hmac::new(factory, key).map_err(PkiError::from)?;
@@ -1524,6 +1574,7 @@ fn hmac_alg_identifier(alg: CmsDigestAlg) -> AlgorithmIdentifier {
         CmsDigestAlg::Sha256 => known::hmac_sha256_oid().to_der_value(),
         CmsDigestAlg::Sha384 => known::hmac_sha384_oid().to_der_value(),
         CmsDigestAlg::Sha512 => known::hmac_sha512_oid().to_der_value(),
+        CmsDigestAlg::Sm3 => known::hmac_sm3_oid().to_der_value(),
     };
     AlgorithmIdentifier {
         oid,
@@ -2597,5 +2648,41 @@ mod tests {
         // Verification should fail
         let ok = kp.verify(message, &signature).unwrap();
         assert!(!ok);
+    }
+
+    // ── SM2 CMS SignedData (GB/T 35275) ───────────────────────────────────
+    const SM2_CMS_DER: &[u8] = include_bytes!("../../../../tests/vectors/cms/sm2/sm2_cms.der");
+    const SM2_CERT_DER: &[u8] = include_bytes!("../../../../tests/vectors/cms/sm2/sm2_cert.der");
+    const SM2_KEY_PKCS8: &[u8] =
+        include_bytes!("../../../../tests/vectors/cms/sm2/sm2_key_pkcs8.der");
+
+    /// Independent oracle: verify an SM2 SignedData produced by OpenSSL 3.6
+    /// (`cms -sign -md sm3`). Cannot false-pass — a wrong SM2 verify path
+    /// rejects the genuine signature.
+    #[test]
+    fn test_cms_sm2_verify_openssl() {
+        let msg = CmsMessage::from_der(SM2_CMS_DER).expect("parse SM2 CMS");
+        // Content + signer cert are embedded; verify the SM2-with-SM3 signature.
+        assert!(msg
+            .verify_signatures(None, &[])
+            .expect("verify OpenSSL SM2 CMS"));
+    }
+
+    /// Rust SM2 CMS sign → verify round-trip (attached + detached).
+    #[test]
+    fn test_cms_sm2_sign_verify_roundtrip() {
+        let data = b"openHiTLS-rs SM2 CMS round-trip";
+
+        let signed = CmsMessage::sign(data, SM2_CERT_DER, SM2_KEY_PKCS8, CmsDigestAlg::Sm3)
+            .expect("SM2 CMS sign");
+        assert!(signed
+            .verify_signatures(None, &[])
+            .expect("verify Rust SM2 CMS"));
+
+        // Tampering with the content must make verification fail.
+        let det = CmsMessage::sign_detached(data, SM2_CERT_DER, SM2_KEY_PKCS8, CmsDigestAlg::Sm3)
+            .expect("SM2 CMS detached sign");
+        assert!(det.verify_signatures(Some(data), &[]).unwrap());
+        assert!(det.verify_signatures(Some(b"tampered"), &[]).is_err());
     }
 }

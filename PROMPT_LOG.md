@@ -18271,3 +18271,13 @@ I173 —— 每家族一条 CAST + keygen PCT:
 I174 —— PBES2 SM4-CBC(国密私钥互通)。审计"卖点 vs 能力"缺口之一:库主打 SM2/SM4/国密,但 PBES2 只支持 AES-CBC,读不了也写不出 SM4 加密的 EncryptedPrivateKeyInfo(GM 工具 + OpenSSL `-v2 sm4-cbc` 产的)。
   - 新 `known::sm4_cbc()`(GM/T 0006 1.2.156.10197.1.104.2);新 `Pbes2Cipher` 枚举 + `encrypt_pkcs8_der_with_cipher`;decrypt 识别 SM4-CBC OID(key_len 16)→ `sm4_cbc_{encrypt,decrypt}`;hitls-pki 启用 hitls-crypto/sm4。承接 I172 PRF 修复(同文件)。
   - 验证(独立 oracle):OpenSSL 3.6 `-v2 sm4-cbc` 字节级互通向量解密 == `-nocrypt` DER;SM4 加解密往返(断言 DER 带 sm4-cbc OID)+ 错密码拒绝。`pkcs8::encrypted` 15→17/0;全量 hitls-pki 0 回归;fmt+clippy clean。
+
+---
+
+> （续）后做 CMS SM2 签名
+
+I175 —— CMS SignedData SM2 签名+验签(GB/T 35275),审计第二个"卖点 vs 能力"缺口:库主打 SM2/国密,但 CMS 不能用 SM2 签/验(原仅 RSA/ECDSA/Ed25519/Ed448 + ML-DSA-verify)。
+  - 新 `CmsDigestAlg::Sm3`(贯穿 compute_digest/identifier/parse + HMAC 分支);`sign_digest` 加 `message` 参数,SM2 分支签**原始 signedAttrs**(GB/T 35275 / GM/T 0003.2:SM2 内部算 e=SM3(ZA‖M),非预哈希)经 `Sm2KeyPair::sign`(内置 GM 默认 id 1234567812345678);verify 加 sm2_with_sm3 分支。
+  - 验证(独立 oracle):OpenSSL 3.6 SM2 CMS 互通向量(`cms -sign -md sm3 -keyopt distid:1234567812345678`)`verify_signatures` 通过 + Rust SM2 CMS 签→验→detached→篡改往返。
+  - **发现**:OpenSSL 的 SM2 **默认 distid 是空**,非 GM 标准的 1234567812345678——默认 `openssl cms -sign` 产的签名非 GM 合规(OpenSSL 自己都验不过 GM-distid 变体);向量固定 GM distid,证明本库 SM2 是 GM-correct(且与迁移的 SM2-verify C-SDV KAT 一致)。
+  - full hitls-pki 0 回归,fmt+clippy clean。
