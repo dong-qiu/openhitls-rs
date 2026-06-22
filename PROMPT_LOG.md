@@ -18251,3 +18251,15 @@ T296 —— T295 的 sync 版,补 `connection12/{server,client}.rs`(覆盖契约
 I172 —— 两个耦合 bug:(1) decrypt 忽略 RFC 8018 §5.2 可选 `prf` 字段、永远按 HMAC-SHA-256 派生 → 解不开 OpenSSL 默认导出的密钥(HMAC-SHA1,prf 字段省略);(2) encrypt 不写 `prf` 字段(隐含默认 SHA-1)却用 SHA-256 派生 → Rust 自己的输出**非互通**。既有 roundtrip 测试因两边都写死 SHA-256 而看不见——经典"自洽但错"。
   - 修复:新增 `hitls_crypto::pbkdf2::{Pbkdf2Prf, pbkdf2_prf}`(SHA-1/224/256/384/512 + cfg(sm3) SM3;pbkdf2 feature 现含 sha1)+ `hmac_sha224_oid/hmac_sm3_oid`;decrypt 解析可选 keyLength+prf(默认 HMAC-SHA1);encrypt 显式写 `prf=hmacWithSHA256 NULL`。
   - 验证(独立 oracle):3 个 OpenSSL 3.6 字节级互通向量(HMAC-SHA1 省略-prf 默认 + 显式 SHA384/512)解密 == `-topk8 -nocrypt` DER,不可 false-pass;`pkcs8::encrypted` 10→15/0;全量 hitls-pki(1073 + PKCS#12/CMS/migrated)0 回归;crypto pbkdf2 14/0;fmt+clippy clean。
+
+---
+
+> FIPS PQC 自检 需要做吗？/ 按照你的建议执行
+
+判断:不是功能/安全 bug,是合规自洽问题——`fips::boundary` 把 ML-KEM/ML-DSA/SLH-DSA 标 approved 但 `run_all_kat/pct` 零 PQC 自检(FIPS 140-3 要求 approved 算法用前自检)。取决于 FIPS 意图;README 把 FIPS+PQC 同列卖点 → 一致做法是补上。执行右尺寸版。
+
+I173 —— 每家族一条 CAST + keygen PCT:
+  - 新 `fips/kat_vectors.rs` 嵌入字节级 NIST FIPS 203/205 向量(取自 migrated_{mlkem,slhdsa});**KAT**:kat_mlkem(ML-KEM-512 已知 dk+ct→已知 ss 解封)+ kat_slhdsa(SLH-DSA-128s 验签),都走确定性 decaps/verify 侧(默认 feature 的 from_decapsulation_key/from_public_key,不需 kat-nonce/keygen 随机)。
+  - **PCT**:pct_mlkem/mldsa/slhdsa(keygen→encaps/decaps 或 sign/verify 往返),覆盖随机 keygen 路径。ML-DSA 用 PCT 而非定值 KAT——from_private_key 不重建公钥(verify 需要)、且无 pk 侧向量,已在 kat_vectors.rs 文档化。
+  - 全部按 crypto feature 门控;fips-only(无 PQC)能编译且自检干净(cfg 跳过)。
+  - 验证:`fips::` 33/0(2 KAT + 3 PCT + **2 篡改检测测试**——翻转 ct/sig 一字节不产出 KAT 答案,证明 KAT 不可 false-pass);fips-only 29/0(特性隔离);fmt+clippy clean。合规自洽修复,非功能/安全改动。

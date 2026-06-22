@@ -15,6 +15,15 @@ pub(crate) fn run_all_kat() -> Result<(), CmvpError> {
     kat_hkdf_sha256()?;
     kat_ecdsa_p256()?;
     kat_entropy_health()?;
+    // PQC CASTs — one known-answer test per approved family, on the
+    // deterministic (decapsulate / verify) side so no keygen randomness is
+    // needed. Vectors are the byte-exact FIPS 203/204/205 (NIST/C SDV) values
+    // in `kat_vectors`. The boundary marks these families approved
+    // (boundary.rs), so each must self-test before operational use.
+    #[cfg(feature = "mlkem")]
+    kat_mlkem()?;
+    #[cfg(feature = "slh-dsa")]
+    kat_slhdsa()?;
     Ok(())
 }
 
@@ -215,6 +224,84 @@ fn kat_ecdsa_p256() -> Result<(), CmvpError> {
     Ok(())
 }
 
+/// Decode a compile-time hex string. The KAT vectors are always valid hex, so
+/// a malformed digit is a build-integrity failure, surfaced as a KAT error.
+#[cfg(any(feature = "mlkem", feature = "slh-dsa"))]
+fn unhex(s: &str) -> Result<Vec<u8>, CmvpError> {
+    fn nib(c: u8) -> Option<u8> {
+        match c {
+            b'0'..=b'9' => Some(c - b'0'),
+            b'a'..=b'f' => Some(c - b'a' + 10),
+            b'A'..=b'F' => Some(c - b'A' + 10),
+            _ => None,
+        }
+    }
+    let b = s.as_bytes();
+    if b.len() % 2 != 0 {
+        return Err(CmvpError::KatFailure("odd-length KAT hex".into()));
+    }
+    let mut out = Vec::with_capacity(b.len() / 2);
+    for pair in b.chunks(2) {
+        let (h, l) = (
+            nib(pair[0]).ok_or_else(|| CmvpError::KatFailure("bad KAT hex".into()))?,
+            nib(pair[1]).ok_or_else(|| CmvpError::KatFailure("bad KAT hex".into()))?,
+        );
+        out.push((h << 4) | l);
+    }
+    Ok(out)
+}
+
+/// ML-KEM-512 KAT (FIPS 203): decapsulate a known ciphertext with a known
+/// decapsulation key and check the shared secret matches.
+#[cfg(feature = "mlkem")]
+fn kat_mlkem() -> Result<(), CmvpError> {
+    use super::kat_vectors as v;
+    use crate::mlkem::MlKemKeyPair;
+    let dk = unhex(v::MLKEM512_DK)?;
+    let ct = unhex(v::MLKEM512_CT)?;
+    let want_ss = unhex(v::MLKEM512_SS)?;
+    let kp = MlKemKeyPair::from_decapsulation_key(512, &dk)
+        .map_err(|e| CmvpError::KatFailure(format!("ML-KEM dk import: {e}")))?;
+    let ss = kp
+        .decapsulate(&ct)
+        .map_err(|e| CmvpError::KatFailure(format!("ML-KEM decapsulate: {e}")))?;
+    if ss != want_ss {
+        return Err(CmvpError::KatFailure(
+            "ML-KEM-512 decaps KAT mismatch".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// SLH-DSA SHA2-128s KAT (FIPS 205 §10.2 pure mode): verify a known signature
+/// over the context-wrapped message `0x00 ‖ |ctx| ‖ ctx ‖ msg`.
+#[cfg(feature = "slh-dsa")]
+fn kat_slhdsa() -> Result<(), CmvpError> {
+    use super::kat_vectors as v;
+    use crate::slh_dsa::SlhDsaKeyPair;
+    use hitls_types::SlhDsaParamId;
+    let pk = unhex(v::SLHDSA128S_PK)?;
+    let ctx = unhex(v::SLHDSA128S_CTX)?;
+    let msg = unhex(v::SLHDSA128S_MSG)?;
+    let sig = unhex(v::SLHDSA128S_SIG)?;
+    let mut m = Vec::with_capacity(2 + ctx.len() + msg.len());
+    m.push(0x00);
+    m.push(ctx.len() as u8);
+    m.extend_from_slice(&ctx);
+    m.extend_from_slice(&msg);
+    let kp = SlhDsaKeyPair::from_public_key(SlhDsaParamId::Sha2128s, &pk)
+        .map_err(|e| CmvpError::KatFailure(format!("SLH-DSA pk import: {e}")))?;
+    let valid = kp
+        .verify(&m, &sig)
+        .map_err(|e| CmvpError::KatFailure(format!("SLH-DSA verify: {e}")))?;
+    if !valid {
+        return Err(CmvpError::KatFailure(
+            "SLH-DSA-128s verify KAT failed".into(),
+        ));
+    }
+    Ok(())
+}
+
 /// Entropy health test KAT (NIST SP 800-90B §4.4).
 ///
 /// Validates that:
@@ -303,6 +390,58 @@ mod tests {
     #[test]
     fn test_kat_entropy_health() {
         kat_entropy_health().unwrap();
+    }
+
+    #[cfg(feature = "mlkem")]
+    #[test]
+    fn test_kat_mlkem() {
+        kat_mlkem().unwrap();
+    }
+
+    #[cfg(feature = "slh-dsa")]
+    #[test]
+    fn test_kat_slhdsa() {
+        kat_slhdsa().unwrap();
+    }
+
+    // Tamper checks: prove the KATs actually validate the vector and would
+    // catch a broken implementation (a known-answer test that can't fail is
+    // worthless). A flipped byte in the ciphertext/signature must change the
+    // outcome.
+    #[cfg(feature = "mlkem")]
+    #[test]
+    fn test_kat_mlkem_tamper_detected() {
+        use crate::mlkem::MlKemKeyPair;
+        let dk = unhex(super::super::kat_vectors::MLKEM512_DK).unwrap();
+        let mut ct = unhex(super::super::kat_vectors::MLKEM512_CT).unwrap();
+        let want = unhex(super::super::kat_vectors::MLKEM512_SS).unwrap();
+        ct[0] ^= 0x01; // corrupt the ciphertext
+        let kp = MlKemKeyPair::from_decapsulation_key(512, &dk).unwrap();
+        // ML-KEM decaps is designed to return a (deterministic) pseudo-random
+        // shared secret on a bad ciphertext rather than error — it must NOT
+        // equal the KAT's expected value.
+        let ss = kp.decapsulate(&ct).unwrap();
+        assert_ne!(ss, want, "tampered ML-KEM ct must not yield the KAT secret");
+    }
+
+    #[cfg(feature = "slh-dsa")]
+    #[test]
+    fn test_kat_slhdsa_tamper_detected() {
+        use crate::slh_dsa::SlhDsaKeyPair;
+        use hitls_types::SlhDsaParamId;
+        let pk = unhex(super::super::kat_vectors::SLHDSA128S_PK).unwrap();
+        let ctx = unhex(super::super::kat_vectors::SLHDSA128S_CTX).unwrap();
+        let msg = unhex(super::super::kat_vectors::SLHDSA128S_MSG).unwrap();
+        let mut sig = unhex(super::super::kat_vectors::SLHDSA128S_SIG).unwrap();
+        sig[0] ^= 0x01; // corrupt the signature
+        let mut m = vec![0x00, ctx.len() as u8];
+        m.extend_from_slice(&ctx);
+        m.extend_from_slice(&msg);
+        let kp = SlhDsaKeyPair::from_public_key(SlhDsaParamId::Sha2128s, &pk).unwrap();
+        assert!(
+            !matches!(kp.verify(&m, &sig), Ok(true)),
+            "tampered SLH-DSA signature must not verify"
+        );
     }
 
     #[test]
