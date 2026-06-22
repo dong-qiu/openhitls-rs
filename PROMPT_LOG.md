@@ -18263,3 +18263,11 @@ I173 —— 每家族一条 CAST + keygen PCT:
   - **PCT**:pct_mlkem/mldsa/slhdsa(keygen→encaps/decaps 或 sign/verify 往返),覆盖随机 keygen 路径。ML-DSA 用 PCT 而非定值 KAT——from_private_key 不重建公钥(verify 需要)、且无 pk 侧向量,已在 kat_vectors.rs 文档化。
   - 全部按 crypto feature 门控;fips-only(无 PQC)能编译且自检干净(cfg 跳过)。
   - 验证:`fips::` 33/0(2 KAT + 3 PCT + **2 篡改检测测试**——翻转 ct/sig 一字节不产出 KAT 答案,证明 KAT 不可 false-pass);fips-only 29/0(特性隔离);fmt+clippy clean。合规自洽修复,非功能/安全改动。
+
+---
+
+> 按照顺序搞定2和1（先 PBES2 SM4-CBC，后 CMS SM2 签名）
+
+I174 —— PBES2 SM4-CBC(国密私钥互通)。审计"卖点 vs 能力"缺口之一:库主打 SM2/SM4/国密,但 PBES2 只支持 AES-CBC,读不了也写不出 SM4 加密的 EncryptedPrivateKeyInfo(GM 工具 + OpenSSL `-v2 sm4-cbc` 产的)。
+  - 新 `known::sm4_cbc()`(GM/T 0006 1.2.156.10197.1.104.2);新 `Pbes2Cipher` 枚举 + `encrypt_pkcs8_der_with_cipher`;decrypt 识别 SM4-CBC OID(key_len 16)→ `sm4_cbc_{encrypt,decrypt}`;hitls-pki 启用 hitls-crypto/sm4。承接 I172 PRF 修复(同文件)。
+  - 验证(独立 oracle):OpenSSL 3.6 `-v2 sm4-cbc` 字节级互通向量解密 == `-nocrypt` DER;SM4 加解密往返(断言 DER 带 sm4-cbc OID)+ 错密码拒绝。`pkcs8::encrypted` 15→17/0;全量 hitls-pki 0 回归;fmt+clippy clean。

@@ -70,6 +70,43 @@ pub fn encrypt_pkcs8_der(private_key_info: &[u8], password: &str) -> Result<Vec<
     encrypt_pkcs8_der_with(private_key_info, password, 32, DEFAULT_ITERATIONS)
 }
 
+/// The PBES2 encryption scheme (block cipher in CBC mode).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Pbes2Cipher {
+    /// AES-128-CBC.
+    Aes128Cbc,
+    /// AES-256-CBC (default).
+    Aes256Cbc,
+    /// SM4-CBC (GM/T) — for GM-compliant / 国密 encrypted private keys.
+    Sm4Cbc,
+}
+
+impl Pbes2Cipher {
+    /// Derived-key length in bytes (all three are 128-bit-block ciphers; only
+    /// AES-256 uses a 32-byte key).
+    fn key_len(self) -> usize {
+        match self {
+            Pbes2Cipher::Aes256Cbc => 32,
+            Pbes2Cipher::Aes128Cbc | Pbes2Cipher::Sm4Cbc => 16,
+        }
+    }
+
+    fn oid(self) -> Oid {
+        match self {
+            Pbes2Cipher::Aes128Cbc => known::aes128_cbc(),
+            Pbes2Cipher::Aes256Cbc => known::aes256_cbc(),
+            Pbes2Cipher::Sm4Cbc => known::sm4_cbc(),
+        }
+    }
+
+    fn encrypt(self, key: &[u8], iv: &[u8], pt: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        match self {
+            Pbes2Cipher::Sm4Cbc => cbc::sm4_cbc_encrypt(key, iv, pt),
+            _ => cbc::cbc_encrypt(key, iv, pt),
+        }
+    }
+}
+
 /// Encrypt a PrivateKeyInfo DER with specified key length (16=AES-128, 32=AES-256).
 pub fn encrypt_pkcs8_der_with(
     private_key_info: &[u8],
@@ -77,27 +114,32 @@ pub fn encrypt_pkcs8_der_with(
     key_len: usize,
     iterations: u32,
 ) -> Result<Vec<u8>, CryptoError> {
-    // Generate random salt and IV
+    let cipher = match key_len {
+        16 => Pbes2Cipher::Aes128Cbc,
+        32 => Pbes2Cipher::Aes256Cbc,
+        _ => return Err(CryptoError::InvalidArg("")),
+    };
+    encrypt_pkcs8_der_with_cipher(private_key_info, password, cipher, iterations)
+}
+
+/// Encrypt a PrivateKeyInfo DER under an explicit PBES2 cipher (incl. SM4-CBC
+/// for 国密 keys). Always derives the key with PBKDF2-HMAC-SHA256 and emits an
+/// explicit `prf = hmacWithSHA256`.
+pub fn encrypt_pkcs8_der_with_cipher(
+    private_key_info: &[u8],
+    password: &str,
+    cipher: Pbes2Cipher,
+    iterations: u32,
+) -> Result<Vec<u8>, CryptoError> {
     let mut salt = vec![0u8; 16];
     getrandom::fill(&mut salt).map_err(|_| CryptoError::DrbgEntropyFail)?;
     let mut iv = vec![0u8; 16];
     getrandom::fill(&mut iv).map_err(|_| CryptoError::DrbgEntropyFail)?;
 
-    // Derive key using PBKDF2-HMAC-SHA256
-    let key = pbkdf2::pbkdf2(password.as_bytes(), &salt, iterations, key_len)?;
+    let key = pbkdf2::pbkdf2(password.as_bytes(), &salt, iterations, cipher.key_len())?;
+    let encrypted = cipher.encrypt(&key, &iv, private_key_info)?;
 
-    // Encrypt with AES-CBC
-    let encrypted = cbc::cbc_encrypt(&key, &iv, private_key_info)?;
-
-    // Select cipher OID based on key length
-    let cipher_oid = match key_len {
-        16 => known::aes128_cbc(),
-        32 => known::aes256_cbc(),
-        _ => return Err(CryptoError::InvalidArg("")),
-    };
-
-    // Build the EncryptedPrivateKeyInfo ASN.1 structure
-    encode_encrypted_pkcs8(&salt, iterations, &cipher_oid, &iv, &encrypted)
+    encode_encrypted_pkcs8(&salt, iterations, &cipher.oid(), &iv, &encrypted)
 }
 
 /// Encrypt and encode as PEM with "ENCRYPTED PRIVATE KEY" label.
@@ -163,12 +205,15 @@ fn decrypt_pbes2(
     let enc_oid_bytes = enc.read_oid()?;
     let enc_oid = Oid::from_der_value(enc_oid_bytes)?;
 
-    let key_len = if enc_oid == known::aes256_cbc() {
-        32
+    // (key length, is-SM4). AES-192 is decrypt-only; SM4-CBC enables GM keys.
+    let (key_len, is_sm4) = if enc_oid == known::aes256_cbc() {
+        (32, false)
     } else if enc_oid == known::aes128_cbc() {
-        16
+        (16, false)
     } else if enc_oid == known::aes192_cbc() {
-        24
+        (24, false)
+    } else if enc_oid == known::sm4_cbc() {
+        (16, true)
     } else {
         return Err(CryptoError::DecodeUnknownOid);
     };
@@ -176,7 +221,11 @@ fn decrypt_pbes2(
     let iv = enc.read_octet_string()?.to_vec();
 
     let key = pbkdf2::pbkdf2_prf(prf, password.as_bytes(), &salt, iterations, key_len)?;
-    cbc::cbc_decrypt(&key, &iv, encrypted)
+    if is_sm4 {
+        cbc::sm4_cbc_decrypt(&key, &iv, encrypted)
+    } else {
+        cbc::cbc_decrypt(&key, &iv, encrypted)
+    }
 }
 
 /// Map a PBKDF2 `prf` AlgorithmIdentifier OID to the PRF selector
@@ -373,25 +422,18 @@ mod tests {
     fn test_encrypted_pkcs8_invalid_key_len() {
         let seed = [0x42u8; 32];
         let pki_der = encode_ed25519_pkcs8_der(&seed);
-        // key_len = 24 (AES-192) is not supported for PKCS#8 encryption
-        // — PBKDF2 derives a 24-byte key OK; AES-192 CBC then accepts
-        // it; only the `match key_len` cipher-OID lookup at the bottom
-        // of `encrypt_pkcs8_der_with` rejects it with
-        // `CryptoError::InvalidArg("")`.
-        assert!(matches!(
-            encrypt_pkcs8_der_with(&pki_der, "pass", 24, 2048).unwrap_err(),
-            CryptoError::InvalidArg(_)
-        ));
-        // key_len = 8 fails earlier — PBKDF2 derives 8 bytes, but the
-        // AES key constructor inside `cbc_encrypt` rejects a
-        // non-{16,24,32} key with `CryptoError::InvalidKey` (the
-        // unit-discriminant variant, not the `InvalidKeyLength`
-        // struct-variant — AES rejects the size class outright rather
-        // than reporting expected/got).
-        assert!(matches!(
-            encrypt_pkcs8_der_with(&pki_der, "pass", 8, 2048).unwrap_err(),
-            CryptoError::InvalidKey
-        ));
+        // `encrypt_pkcs8_der_with` now maps key_len → Pbes2Cipher up front
+        // (16 → AES-128, 32 → AES-256); any other length — incl. 24 (AES-192)
+        // and 8 — is rejected uniformly and early with `CryptoError::InvalidArg`
+        // before key derivation, rather than the previous deeper AES-key-ctor
+        // error. (AES-256-CBC / SM4-CBC are the recommended schemes; callers
+        // wanting SM4 use `encrypt_pkcs8_der_with_cipher`.)
+        for bad in [24usize, 8] {
+            assert!(matches!(
+                encrypt_pkcs8_der_with(&pki_der, "pass", bad, 2048).unwrap_err(),
+                CryptoError::InvalidArg(_)
+            ));
+        }
     }
 
     #[test]
@@ -505,6 +547,48 @@ SHalmKkWZA==\n\
     #[test]
     fn test_pbes2_wrong_password_on_openssl_key_rejected() {
         assert!(decrypt_pkcs8_pem(OPENSSL_ENC_SHA1, "wrong-pw").is_err());
+    }
+
+    /// SM4-CBC PBES2, AES-style PBKDF2-HMAC-SHA256 — generated by OpenSSL 3.6
+    /// `openssl pkcs8 -topk8 -v2 sm4-cbc` over the same EC P-256 key. Byte-exact
+    /// independent oracle for the GM cipher path.
+    const OPENSSL_ENC_SM4: &str = "-----BEGIN ENCRYPTED PRIVATE KEY-----\n\
+MIHzMF4GCSqGSIb3DQEFDTBRMDEGCSqGSIb3DQEFDDAkBBAN6jIhyxULGYqsqw2w\n\
+hBZXAgIIADAMBggqhkiG9w0CCQUAMBwGCCqBHM9VAWgCBBCfY3i5lBF5Ne4gKXc+\n\
+nt1aBIGQ5CQB7aXD3qvO6qSLveeyF3l/gFOFxLpHjeC+l1qLUKDfDw6RrrIWRWI+\n\
+Wkp6Bzgm+EgIEPKoIrRyO/f6BeVZzunft7s7j+3O0oK4UPunKTeFBK210Vpu7EGl\n\
+35JJksFxNEcy59Spaq3qehmlxqothFcQdfE5+60qmLAqoTjV31V/zMX96IYjMWNk\n\
+zkWsP4+1\n\
+-----END ENCRYPTED PRIVATE KEY-----\n";
+
+    /// Decrypt an SM4-CBC PBES2 key produced by OpenSSL — proves GM-key interop.
+    #[test]
+    fn test_pbes2_openssl_interop_sm4_cbc() {
+        let got = decrypt_pkcs8_pem(OPENSSL_ENC_SM4, OPENSSL_PW).expect("decrypt OpenSSL SM4 key");
+        assert_eq!(to_hex(&got), OPENSSL_PLAINTEXT_DER);
+        assert!(matches!(
+            parse_pkcs8_der(&got).unwrap(),
+            Pkcs8PrivateKey::Ec { .. }
+        ));
+    }
+
+    /// SM4-CBC encrypt → decrypt round-trip via the new cipher API.
+    #[test]
+    fn test_pbes2_sm4_cbc_roundtrip() {
+        let seed = [0x42u8; 32];
+        let pki = encode_ed25519_pkcs8_der(&seed);
+        let enc = encrypt_pkcs8_der_with_cipher(&pki, "sm4-pw", Pbes2Cipher::Sm4Cbc, 2048).unwrap();
+        // The emitted structure must carry the SM4-CBC OID (1.2.156.10197.1.104.2
+        // → DER value 2a 81 1c cf 55 01 68 02).
+        let needle = [0x2a, 0x81, 0x1c, 0xcf, 0x55, 0x01, 0x68, 0x02];
+        assert!(
+            enc.windows(needle.len()).any(|w| w == needle),
+            "SM4-CBC PBES2 must embed the sm4-cbc OID"
+        );
+        let dec = decrypt_pkcs8_der(&enc, "sm4-pw").unwrap();
+        assert_eq!(dec, pki);
+        // Wrong password is still rejected on the SM4 path.
+        assert!(decrypt_pkcs8_der(&enc, "wrong").is_err());
     }
 
     #[test]
