@@ -835,8 +835,13 @@ impl ServerHandshake {
             })?;
         let versions = parse_supported_versions_ch(&versions_ext.data)?;
         if !versions.contains(&0x0304) {
+            // RFC 8446 §4.2.1 / §D.1 — a ClientHello whose supported_versions
+            // offers no version this (TLS 1.3) listener supports MUST be
+            // refused with `protocol_version` (70), not the generic
+            // `handshake_failure` (40). The "protocol version" substring routes
+            // `tls_error_to_alert` to the correct alert.
             return Err(TlsError::HandshakeFailed(
-                "client does not support TLS 1.3".into(),
+                "client does not support TLS 1.3 — no acceptable protocol version".into(),
             ));
         }
 

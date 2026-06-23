@@ -16,6 +16,12 @@
 # ones tlsfuzzer codifies. XFAIL the lot — none represents a real
 # bug or security gap in our implementation.
 #
+# (263 → 261: `SSL 3.0 in supported version` and `tls 1.8 only` were
+# CLOSED when the no-TLS-1.3 ClientHello alert was corrected from
+# handshake_failure (40) to protocol_version (70) per RFC 8446 §4.2.1 —
+# those two CHs offer only a non-1.3 supported_versions and now draw the
+# alert tlsfuzzer expects.)
+#
 # Regenerate with:
 #   PYTHONPATH=. ./scripts/test-tls13-version-negotiation.py -h <h> -p <p> -n 9999 \
 #       2>&1 | sed -n '/FAILED:/,/^=/p' | grep "^\s\+'" \
@@ -279,7 +285,5 @@ fallback from TLS 1.3-draft255 to 1.2
 fallback from TLS 1.8 to 1.1
 fallback from TLS 1.8 to 1.2
 SSL 2.0 ClientHello with TLS 1.3 version and TLS 1.3 only ciphersuites
-SSL 3.0 in supported version
 TLS 1.3 in client hello legacy field
 TLS 1.8 in client hello legacy field
-tls 1.8 only
