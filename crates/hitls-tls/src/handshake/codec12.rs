@@ -167,6 +167,14 @@ pub fn decode_client_key_exchange(body: &[u8]) -> Result<ClientKeyExchange, TlsE
             "ClientKeyExchange: invalid length — body is not exactly the ECDH point".into(),
         ));
     }
+    // RFC 8422 §5.4 / RFC 4492 — the ECDHE public value is `opaque point<1..>`;
+    // a zero-length point is malformed and MUST be rejected with decode_error
+    // (rather than accepted and failed later as an out-of-range key).
+    if point_len == 0 {
+        return Err(TlsError::HandshakeFailed(
+            "ClientKeyExchange: malformed (empty ECDHE point) — decode_error".into(),
+        ));
+    }
     Ok(ClientKeyExchange {
         public_key: body[1..1 + point_len].to_vec(),
     })
@@ -1426,6 +1434,15 @@ mod tests {
         let mut body = vec![65u8];
         body.extend_from_slice(&[0x04; 10]);
         assert!(decode_client_key_exchange(&body).is_err());
+    }
+
+    #[test]
+    fn test_decode_client_key_exchange_rejects_empty_point() {
+        // RFC 8422 §5.4 — ECDHE public is `opaque point<1..>`; a zero-length
+        // point (body = [0x00]) is malformed → decode_error (closes tlsfuzzer
+        // test-x25519 `empty x25519/x448 key share` XFAILs).
+        let e = decode_client_key_exchange(&[0x00]).unwrap_err().to_string();
+        assert!(e.contains("decode_error"), "empty ECDHE point: {e}");
     }
 
     #[test]

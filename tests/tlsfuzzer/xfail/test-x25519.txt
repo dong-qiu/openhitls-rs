@@ -16,13 +16,10 @@
 #
 # 2. `empty x25519 key share` / `empty x448 key share`: a malformed
 #    (zero-length) ECDHE key-exchange public value; tlsfuzzer expects
-#    a fatal `decode_error` (50). Our TLS 1.2 server is lenient on the
-#    malformed point and aborts with a different code / close. A
-#    strictness improvement (reject malformed ECDHE public with
-#    `decode_error`) is a candidate follow-up; the leniency is not a
-#    security issue (the handshake still fails).
+#    a fatal `decode_error` (50). CLOSED by the tlsfuzzer-strictness pass:
+#    `decode_client_key_exchange` now rejects a zero-length ECDHE point with
+#    decode_error (RFC 8422 §5.4 `opaque point<1..>`), so `empty x25519 key
+#    share` / `empty x448 key share` are no longer XFAILs.
 
 only secp163k1 group - fallback to DHE
 only unknown group - fallback to DHE
-empty x25519 key share
-empty x448 key share
