@@ -1215,6 +1215,104 @@ mod tests {
         assert_eq!(&buf[..n], b"post-0rtt");
     }
 
+    /// End-to-end proof that `ticket_key_cb` is wired into both the
+    /// NewSessionTicket emission (encrypt) and the resumption path (decrypt):
+    /// a server configured with only a rotating-key callback (no static
+    /// `ticket_key`) issues a ticket, and a second server using the same
+    /// callback decrypts it and accepts 0-RTT early data — which is only
+    /// possible if the ticket round-tripped through the callback on both ends.
+    /// (The TLS 1.3 `is_session_resumed()` flag is itself not wired, so 0-RTT
+    /// acceptance + early-data delivery is used as the resumption signal,
+    /// mirroring `test_async_tls13_early_data_accepted`.)
+    #[tokio::test]
+    async fn test_async_tls13_ticket_key_cb_resumption() {
+        use crate::config::{ServerPrivateKey, TicketKeyCallback, TicketKeyResult};
+        use std::sync::Arc;
+
+        // A rotating-key callback that serves one named key and rejects any
+        // other key name on decrypt.
+        let make_cb = || -> TicketKeyCallback {
+            Arc::new(|name: &[u8], is_encrypt: bool| {
+                let key_name = [0x7Au8; 16];
+                if !is_encrypt && name != key_name {
+                    return None;
+                }
+                Some(TicketKeyResult {
+                    key_name,
+                    key: vec![0xC3; 32],
+                    iv: vec![0x3C; 16],
+                })
+            })
+        };
+
+        let fake_cert = TEST_FAKE_CERT.to_vec();
+        let seed = [0x42u8; 32];
+
+        // Step 1: initial handshake — server uses ticket_key_cb, no static key.
+        let server_config = TlsConfig::builder()
+            .certificate_chain(vec![fake_cert.clone()])
+            .private_key(ServerPrivateKey::Ed25519(seed.to_vec()))
+            .verify_peer(false)
+            .ticket_key_cb(make_cb())
+            .max_early_data_size(16384)
+            .build();
+        let client_config = TlsConfig::builder().verify_peer(false).build();
+
+        let (cs, ss) = tokio::io::duplex(64 * 1024);
+        let mut client = AsyncTlsClientConnection::new(cs, client_config);
+        let mut server = AsyncTlsServerConnection::new(ss, server_config);
+        let (c, s) = tokio::join!(client.handshake(), server.handshake());
+        c.unwrap();
+        s.unwrap();
+
+        // Exchange data to trigger NST delivery.
+        client.write(b"trigger nst").await.unwrap();
+        let mut buf = [0u8; 256];
+        let _ = server.read(&mut buf).await.unwrap();
+        server.write(b"ack").await.unwrap();
+        let _ = client.read(&mut buf).await.unwrap();
+
+        let session = client
+            .take_session()
+            .expect("client should receive a ticket_key_cb-protected ticket");
+        assert!(
+            session.max_early_data > 0,
+            "session should allow early data"
+        );
+
+        // Step 2: resume + 0-RTT against a second server using the SAME key.
+        let client_config2 = TlsConfig::builder()
+            .verify_peer(false)
+            .resumption_session(session)
+            .max_early_data_size(16384)
+            .build();
+        let server_config2 = TlsConfig::builder()
+            .certificate_chain(vec![fake_cert])
+            .private_key(ServerPrivateKey::Ed25519(seed.to_vec()))
+            .verify_peer(false)
+            .ticket_key_cb(make_cb())
+            .max_early_data_size(16384)
+            .build();
+
+        let (cs2, ss2) = tokio::io::duplex(64 * 1024);
+        let mut client2 = AsyncTlsClientConnection::new(cs2, client_config2);
+        let mut server2 = AsyncTlsServerConnection::new(ss2, server_config2);
+        client2.queue_early_data(b"0-RTT via ticket_key_cb");
+
+        let (c2, s2) = tokio::join!(client2.handshake(), server2.handshake());
+        c2.unwrap();
+        s2.unwrap();
+
+        // 0-RTT acceptance proves server2 decrypted the ticket via the callback
+        // and recovered the resumption PSK.
+        assert!(
+            client2.early_data_accepted(),
+            "server should accept 0-RTT from a ticket_key_cb-protected ticket"
+        );
+        let n = server2.read(&mut buf).await.unwrap();
+        assert_eq!(&buf[..n], b"0-RTT via ticket_key_cb");
+    }
+
     /// Async 0-RTT: server rejects early data, handshake still completes.
     #[tokio::test]
     async fn test_async_tls13_early_data_rejected() {
