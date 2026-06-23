@@ -15,7 +15,7 @@ hitls-bignum = { path = "../hitls-bignum", optional = true }
 hitls-utils = { path = "../hitls-utils", optional = true }
 zeroize = { version = "1.8", features = ["derive"] }
 subtle = "2.6"
-getrandom = "0.3"
+getrandom = "0.4"
 
 # wasm32-unknown-unknown has no OS RNG; pair the `wasm_js` backend cfg
 # (set in `.cargo/config.toml`) with the matching Cargo feature so the
