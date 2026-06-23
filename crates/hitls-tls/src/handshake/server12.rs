@@ -17,9 +17,10 @@ use crate::handshake::codec12::{
     decode_certificate12, decode_certificate_verify12, decode_client_key_exchange,
     decode_client_key_exchange_dhe, decode_client_key_exchange_dhe_psk,
     decode_client_key_exchange_ecdhe_psk, decode_client_key_exchange_psk,
-    decode_client_key_exchange_rsa, decode_client_key_exchange_rsa_psk, encode_certificate12,
-    encode_certificate_request12, encode_finished12, encode_new_session_ticket12,
-    encode_server_hello_done, encode_server_key_exchange, encode_server_key_exchange_dhe,
+    decode_client_key_exchange_rsa, decode_client_key_exchange_rsa_psk,
+    dhe_premaster_strip_leading_zeros, encode_certificate12, encode_certificate_request12,
+    encode_finished12, encode_new_session_ticket12, encode_server_hello_done,
+    encode_server_key_exchange, encode_server_key_exchange_dhe,
     encode_server_key_exchange_dhe_anon, encode_server_key_exchange_dhe_psk,
     encode_server_key_exchange_ecdhe_anon, encode_server_key_exchange_ecdhe_psk,
     encode_server_key_exchange_psk_hint, Certificate12, CertificateRequest12, ServerKeyExchange,
@@ -1477,9 +1478,11 @@ impl Tls12ServerHandshake {
                     .dhe_params
                     .take()
                     .ok_or_else(|| TlsError::HandshakeFailed("no DHE params".into()))?;
-                dh_kp
-                    .compute_shared_secret(&dh_params, &cke.dh_yc)
-                    .map_err(TlsError::CryptoError)?
+                dhe_premaster_strip_leading_zeros(
+                    dh_kp
+                        .compute_shared_secret(&dh_params, &cke.dh_yc)
+                        .map_err(TlsError::CryptoError)?,
+                )
             }
             KeyExchangeAlg::Psk => {
                 let cke = decode_client_key_exchange_psk(body)?;
@@ -1497,9 +1500,11 @@ impl Tls12ServerHandshake {
                     .dhe_params
                     .take()
                     .ok_or_else(|| TlsError::HandshakeFailed("no DHE params for DHE_PSK".into()))?;
-                let dh_shared = dh_kp
-                    .compute_shared_secret(&dh_params, &cke.dh_yc)
-                    .map_err(TlsError::CryptoError)?;
+                let dh_shared = dhe_premaster_strip_leading_zeros(
+                    dh_kp
+                        .compute_shared_secret(&dh_params, &cke.dh_yc)
+                        .map_err(TlsError::CryptoError)?,
+                );
                 build_psk_pms(&dh_shared, &psk)
             }
             KeyExchangeAlg::EcdhePsk => {
@@ -1554,9 +1559,11 @@ impl Tls12ServerHandshake {
                     .dhe_params
                     .take()
                     .ok_or_else(|| TlsError::HandshakeFailed("no DHE params for DH_anon".into()))?;
-                dh_kp
-                    .compute_shared_secret(&dh_params, &cke.dh_yc)
-                    .map_err(TlsError::CryptoError)?
+                dhe_premaster_strip_leading_zeros(
+                    dh_kp
+                        .compute_shared_secret(&dh_params, &cke.dh_yc)
+                        .map_err(TlsError::CryptoError)?,
+                )
             }
             KeyExchangeAlg::EcdheAnon => {
                 let cke = decode_client_key_exchange(body)?;

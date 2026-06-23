@@ -17,15 +17,16 @@ use crate::extensions::ExtensionType;
 use crate::handshake::codec::{encode_client_hello, ClientHello, ServerHello};
 use crate::handshake::codec12::{
     build_dhe_ske_params, build_psk_pms, build_ske_params, build_ske_signed_data,
-    decode_new_session_ticket12, encode_certificate12, encode_certificate_verify12,
-    encode_client_key_exchange, encode_client_key_exchange_dhe, encode_client_key_exchange_dhe_psk,
-    encode_client_key_exchange_ecdhe_psk, encode_client_key_exchange_psk,
-    encode_client_key_exchange_rsa, encode_client_key_exchange_rsa_psk, encode_finished12,
-    Certificate12, CertificateRequest12, CertificateVerify12, ClientKeyExchange,
-    ClientKeyExchangeDhe, ClientKeyExchangeDhePsk, ClientKeyExchangeEcdhePsk, ClientKeyExchangePsk,
-    ClientKeyExchangeRsa, ClientKeyExchangeRsaPsk, ServerKeyExchange, ServerKeyExchangeDhe,
-    ServerKeyExchangeDheAnon, ServerKeyExchangeDhePsk as SkeDhePsk, ServerKeyExchangeEcdheAnon,
-    ServerKeyExchangeEcdhePsk, ServerKeyExchangePskHint,
+    decode_new_session_ticket12, dhe_premaster_strip_leading_zeros, encode_certificate12,
+    encode_certificate_verify12, encode_client_key_exchange, encode_client_key_exchange_dhe,
+    encode_client_key_exchange_dhe_psk, encode_client_key_exchange_ecdhe_psk,
+    encode_client_key_exchange_psk, encode_client_key_exchange_rsa,
+    encode_client_key_exchange_rsa_psk, encode_finished12, Certificate12, CertificateRequest12,
+    CertificateVerify12, ClientKeyExchange, ClientKeyExchangeDhe, ClientKeyExchangeDhePsk,
+    ClientKeyExchangeEcdhePsk, ClientKeyExchangePsk, ClientKeyExchangeRsa, ClientKeyExchangeRsaPsk,
+    ServerKeyExchange, ServerKeyExchangeDhe, ServerKeyExchangeDheAnon,
+    ServerKeyExchangeDhePsk as SkeDhePsk, ServerKeyExchangeEcdheAnon, ServerKeyExchangeEcdhePsk,
+    ServerKeyExchangePskHint,
 };
 use crate::handshake::key_exchange::KeyExchange;
 use crate::handshake::server12::select_signature_scheme_tls12;
@@ -1178,9 +1179,10 @@ impl Tls12ClientHandshake {
                 let yc = kp
                     .public_key_bytes(&dh_params)
                     .map_err(TlsError::CryptoError)?;
-                let pms = kp
-                    .compute_shared_secret(&dh_params, &self.server_dhe_ys)
-                    .map_err(TlsError::CryptoError)?;
+                let pms = dhe_premaster_strip_leading_zeros(
+                    kp.compute_shared_secret(&dh_params, &self.server_dhe_ys)
+                        .map_err(TlsError::CryptoError)?,
+                );
                 let cke = ClientKeyExchangeDhe { dh_yc: yc };
                 let cke_msg = encode_client_key_exchange_dhe(&cke);
                 (pms, cke_msg)
@@ -1217,9 +1219,11 @@ impl Tls12ClientHandshake {
                 let dh_yc = dh_kp
                     .public_key_bytes(&dh_params)
                     .map_err(TlsError::CryptoError)?;
-                let dh_shared = dh_kp
-                    .compute_shared_secret(&dh_params, &self.server_dhe_ys)
-                    .map_err(TlsError::CryptoError)?;
+                let dh_shared = dhe_premaster_strip_leading_zeros(
+                    dh_kp
+                        .compute_shared_secret(&dh_params, &self.server_dhe_ys)
+                        .map_err(TlsError::CryptoError)?,
+                );
                 let pms = build_psk_pms(&dh_shared, psk);
                 let cke = ClientKeyExchangeDhePsk {
                     identity: identity.clone(),
@@ -1293,9 +1297,10 @@ impl Tls12ClientHandshake {
                 let yc = kp
                     .public_key_bytes(&dh_params)
                     .map_err(TlsError::CryptoError)?;
-                let pms = kp
-                    .compute_shared_secret(&dh_params, &self.server_dhe_ys)
-                    .map_err(TlsError::CryptoError)?;
+                let pms = dhe_premaster_strip_leading_zeros(
+                    kp.compute_shared_secret(&dh_params, &self.server_dhe_ys)
+                        .map_err(TlsError::CryptoError)?,
+                );
                 let cke = ClientKeyExchangeDhe { dh_yc: yc };
                 let cke_msg = encode_client_key_exchange_dhe(&cke);
                 (pms, cke_msg)
