@@ -264,6 +264,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_no_supported_version_maps_to_protocol_version() {
+        // RFC 8446 §4.2.1 — a ClientHello offering no supported version draws
+        // protocol_version (70), not handshake_failure (40). The server raises
+        // this exact message; `tls_error_to_alert` routes it via the
+        // "protocol version" substring.
+        let err = hitls_types::TlsError::HandshakeFailed(
+            "client does not support TLS 1.3 — no acceptable protocol version".into(),
+        );
+        assert_eq!(tls_error_to_alert(&err), AlertDescription::ProtocolVersion);
+    }
+
+    #[test]
     fn test_alert_level_values() {
         assert_eq!(AlertLevel::Warning as u8, 1);
         assert_eq!(AlertLevel::Fatal as u8, 2);

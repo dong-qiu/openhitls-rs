@@ -18337,3 +18337,12 @@ I182 —— tlsfuzzer 严格性:收掉 5 条 Category-D XFAIL。先用独立 age
   - 告警码由 `tls_error_to_alert` 的消息子串映射驱动(decode/malformed/truncated→decode_error;illegal_parameter→illegal_parameter)。
   - **验证流程**:每条先跑实际脚本 `-n 9999` 看 former-XFAIL 翻 **XPASS**(证明修对),再从 xfail 文件删该条、重跑全清(point-ext 9/0、EMS 10/8、x25519 22/2,全 0 FAIL/0 XPASS)+ 3 个严格性单测;hitls-tls + 集成 0 回归;fmt+clippy clean。
   - **D-4 不做(deferred)**:`test-tls13-zero-content-type` 的 2 条 app-data 期——核实记录层**已正确**拒零 content-type(T126),残留纯是 `s-server` echo-loop 发送时序(测试看到回显的 ApplicationData 而非告警),是 CLI/harness 耦合非协议缺口,改 echo loop 会牵连其它 app-data 脚本、收益边际 → 文档化为按设计延后。净:XFAIL −5。
+
+> 对 D-3做深度调查 / 先做1
+
+I183 —— D-3 深度调查 + 落地零风险那半。深度调查 `test-tls13-0rtt-garbage.py` 3 条 XFAIL(用独立 agent 追代码路径 + 实测服务端日志):
+  - **#1/#2**(HRR-后塞 early-data / 握手中夹不可解密记录):服务端 Step 6 的 0-RTT-拒-skip 循环读到 AEAD 失败记录后 drain+continue → 再 `read_record` 阻塞 `fill_buf`,而客户端已发完正等 NST → **双向死锁** → 客户端超时关闭 → 服务端 `unexpected EOF`。真实健壮性缺口但**中风险**(与 4 条通过的 invalid-0-RTT 共用 skip 路径),留专门 phase。
+  - **#3**(unknown version 降级 1.2):测试要真降级到 1.2 + 静态 RSA 套件(我们 FS-only 不提供)→ XFAIL 保留;**但发现 alert 误映射真 bug**:无 TLS 1.3 的 CH 我们发 `handshake_failure(40)`,RFC 8446 §4.2.1 应为 `protocol_version(70)`。
+  - **用户选"先做 1"=落地 #3 的零风险 alert 修复**:`server.rs` 的 "client does not support TLS 1.3" 改为带 "…no acceptable protocol version",经现有 `"protocol version"` 子串规则映射到 70(一行,不改错误类型/控制流)。
+  - **意外净赚**:改对告警后 `test-tls13-version-negotiation.py` 有 **2 条**(`SSL 3.0 in supported version`、`tls 1.8 only`)从 XFAIL 翻 PASS(它们 offer 非-1.3-only supported_versions,现在拿到期望的告警)→ 该脚本 6/263 → **8/261**。
+  - **验证**:新 alert 映射单测 + version-negotiation 8/261/0 + 0rtt-garbage 8/3/0(#3 现发 protocol_version)+ hitls-tls + 集成 0 回归;fmt+clippy clean。净:XFAIL −2。#1/#2 的健壮性修复留待后续专门 phase。

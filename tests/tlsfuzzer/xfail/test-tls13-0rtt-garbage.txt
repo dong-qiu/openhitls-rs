@@ -45,9 +45,16 @@
 #   nice-to-have (be more tolerant of cross-flight ordering).
 #
 # * `handshake with invalid 0-RTT and unknown version (downgrade to
-#   TLS 1.2)`: legitimate downgrade scenario. We refuse with the
-#   correct alert (`protocol_version`); tlsfuzzer's state machine
-#   expects different sequencing.
+#   TLS 1.2)`: the CH offers supported_versions = [unknown-high, TLS 1.2]
+#   (no TLS 1.3) and expects the server to DOWNGRADE and drive a full
+#   TLS 1.2 ServerHello flight. Two reasons this stays XFAIL: (a) the CH's
+#   only 1.2-usable cipher is static-RSA `TLS_RSA_WITH_AES_128_CBC_SHA`,
+#   which our forward-secrecy-only server never offers; (b) genuine in-
+#   handshake 1.3→1.2 downgrade across our two per-version connection
+#   handlers is a feature we don't implement. The ALERT, however, is now
+#   correct: a no-TLS-1.3 ClientHello draws `protocol_version` (70) per
+#   RFC 8446 §4.2.1 (it previously mismapped to `handshake_failure` (40)
+#   — fixed alongside this note). Only the downgrade feature remains.
 #
 # * `undecryptable record later in handshake together with early_data`:
 #   tlsfuzzer splices a fake early-data record INTO the encrypted
