@@ -18346,3 +18346,13 @@ I183 —— D-3 深度调查 + 落地零风险那半。深度调查 `test-tls13-
   - **用户选"先做 1"=落地 #3 的零风险 alert 修复**:`server.rs` 的 "client does not support TLS 1.3" 改为带 "…no acceptable protocol version",经现有 `"protocol version"` 子串规则映射到 70(一行,不改错误类型/控制流)。
   - **意外净赚**:改对告警后 `test-tls13-version-negotiation.py` 有 **2 条**(`SSL 3.0 in supported version`、`tls 1.8 only`)从 XFAIL 翻 PASS(它们 offer 非-1.3-only supported_versions,现在拿到期望的告警)→ 该脚本 6/263 → **8/261**。
   - **验证**:新 alert 映射单测 + version-negotiation 8/261/0 + 0rtt-garbage 8/3/0(#3 现发 protocol_version)+ hitls-tls + 集成 0 回归;fmt+clippy clean。净:XFAIL −2。#1/#2 的健壮性修复留待后续专门 phase。
+
+> 把D做了吧
+
+I184 —— 收掉最后 2 条可落地 D:TLS 1.3 Step-6 0-RTT-拒-skip 死锁。用户拍板做这中风险的最后一步。CH 带 early_data 且服务端拒 0-RTT 时,Step-6 读 client Finished 的循环容忍 16 条垃圾记录(T106/§4.2.10);两个对抗序列下服务端 skip 完垃圾后**阻塞等一个不(完整)来的 Finished → 死锁 → unexpected EOF**(测试期望完成 OR bad_record_mac+关闭)。
+  - **插桩 root-cause**:给循环加临时 eprintln,逐记录看清两种模式。
+  - **两个对症、有 RFC 依据的 guard**(都不动合法的"先垃圾后真 Finished"路径——它始终在 hs_buffer 空 + HRR 前发生):
+    - **(1)** 新 `did_hrr` 标志在 HRR 路径关掉 skip——HRR 后 0-RTT 必然被拒、禁止 early data(§4.1.4/§4.2.10),垃圾记录立即发 `bad_record_mac`(关 `…HRR and early data after 2nd CH`)。
+    - **(2)** skip 两个分支加 `hs_buffer.is_empty()`——Finished 已开始到达后,夹进部分握手消息的记录是 §5.1 致命帧违规、非可容忍垃圾(关 `undecryptable record later…`)。
+  - **验证**:插桩确认两种模式;修后 0rtt-garbage 8→**10 PASS** / 1 XFAIL(只剩 won't-fix 降级)/ 0 FAIL;**回归关键脚本全清**——`test-tls13-finished` **714/0/0**(最高风险邻居:Finished 重组路径)、keyupdate 268/2、empty-alert 10/0、zero-length-data 8/3、hrr 3/0,4 条合法 invalid-0-RTT skip 仍 PASS;hitls-tls + 集成 0 回归 + **完整 tlsfuzzer 套件重跑 0 FAIL**;fmt+clippy clean。
+  - **D-3 彻底收口**:所有可落地 D 类 XFAIL 全关,只剩 #3 的握手内 1.3→1.2 降级(won't-fix,FS-only)。可落地-D 面 = 0。

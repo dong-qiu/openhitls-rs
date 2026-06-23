@@ -1203,9 +1203,17 @@ macro_rules! tls13_server_do_handshake_body {
         // two CCS records, which tlsfuzzer / OpenSSL flag as a protocol
         // violation).
         let mut sent_fake_ccs = false;
+        // Whether this handshake went through a HelloRetryRequest. After an
+        // HRR, 0-RTT is *definitively* rejected and the client MUST NOT send
+        // early data (RFC 8446 §4.1.4 / §4.2.10), so the Step-6 rejected-0-RTT
+        // skip tolerance must be disabled — otherwise post-HRR garbage is
+        // skipped and the read deadlocks (`test-tls13-0rtt-garbage.py`
+        // `…HRR and early data after 2nd Client Hello`).
+        let mut did_hrr = false;
         let actions = match hs.process_client_hello(ch_msg)? {
             ClientHelloResult::Actions(actions) => *actions,
             ClientHelloResult::HelloRetryRequest(hrr_actions) => {
+                did_hrr = true;
                 let hrr_record = $self
                     .record_layer
                     .seal_record(ContentType::Handshake, &hrr_actions.hrr_msg)?;
@@ -1507,7 +1515,12 @@ macro_rules! tls13_server_do_handshake_body {
         // bounded count, then expect the real Finished. The cap
         // mirrors a typical `max_early_data_size` envelope at the
         // record granularity.
-        let early_data_skip_fin = hs.client_offered_early_data && !actions.early_data_accepted;
+        // Post-HRR there is never legitimate rejected-0-RTT garbage to skip
+        // (RFC 8446 §4.2.10 — early data is forbidden after HRR), so disable
+        // the skip on that path; an undecryptable record then draws
+        // `bad_record_mac` immediately instead of deadlocking.
+        let early_data_skip_fin =
+            hs.client_offered_early_data && !actions.early_data_accepted && !did_hrr;
         let mut fin_skip_remaining: u32 = if early_data_skip_fin { 16 } else { 0 };
         let fin_msg = loop {
             if hs_buffer.len() >= 4 {
@@ -1524,6 +1537,16 @@ macro_rules! tls13_server_do_handshake_body {
                 Ok(v) => v,
                 Err(TlsError::RecordError(ref msg))
                     if fin_skip_remaining > 0
+                        // RFC 8446 §5.1 — a record interleaved into a
+                        // partially-received handshake message is a fatal
+                        // framing violation, not tolerable 0-RTT garbage. Once
+                        // the client Finished has begun arriving (`hs_buffer`
+                        // non-empty) an undecryptable record must draw
+                        // `bad_record_mac` rather than be skipped (otherwise the
+                        // read deadlocks waiting for a Finished that the spliced
+                        // garbage already broke — `test-tls13-0rtt-garbage.py`
+                        // `undecryptable record later in handshake…`).
+                        && hs_buffer.is_empty()
                         && (msg.contains("MAC")
                             || msg.contains("decrypt")
                             || msg.contains("BadRecordMac")) =>
@@ -1558,7 +1581,7 @@ macro_rules! tls13_server_do_handshake_body {
                 )));
             }
             if ct != ContentType::Handshake {
-                if fin_skip_remaining > 0 {
+                if fin_skip_remaining > 0 && hs_buffer.is_empty() {
                     fin_skip_remaining -= 1;
                     continue;
                 }
