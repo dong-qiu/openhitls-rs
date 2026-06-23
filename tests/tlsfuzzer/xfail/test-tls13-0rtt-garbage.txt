@@ -34,15 +34,22 @@
 # machine no longer trips over the spurious second CCS during the
 # HRR+0-RTT-garbage sequence. Post-T131: 8 PASS / 3 XFAIL / 0 FAIL.
 #
-# The 3 remaining XFAILs all need work beyond the skip-bytes path:
+# CLOSED by the Step-6 skip-deadlock fix (2 of the former 3 XFAILs):
 #
 # * `handshake with 0-RTT, HRR and early data after 2nd Client Hello`:
-#   client sends fake early data AFTER CH2 (after our HRR). Our
-#   server-flight emit doesn't expect to see records before its own
-#   write; tlsfuzzer's runner-side state machine flags our middlebox-
-#   compat fake CCS as `ChangeCipherSpec()` when it expected EE.
-#   This is a tlsfuzzer state-machine quirk + a server-side
-#   nice-to-have (be more tolerant of cross-flight ordering).
+#   the fake early-data record arrives AFTER an HRR. Post-HRR, 0-RTT is
+#   definitively rejected and early data is forbidden (RFC 8446 §4.1.4 /
+#   §4.2.10), so the Step-6 rejected-0-RTT skip is now disabled on the HRR
+#   path — the undecryptable record draws `bad_record_mac` immediately
+#   instead of being skipped (which deadlocked the read).
+# * `undecryptable record later in handshake together with early_data`:
+#   a fake record is spliced into a PARTIALLY-received client Finished.
+#   Step-6 now stops skipping once `hs_buffer` is non-empty (RFC 8446 §5.1
+#   — a record interleaved into a partial handshake message is a fatal
+#   framing violation) → `bad_record_mac` instead of a deadlock.
+# Both accepted alternates of the test (`bad_record_mac` + close).
+#
+# The 1 remaining XFAIL:
 #
 # * `handshake with invalid 0-RTT and unknown version (downgrade to
 #   TLS 1.2)`: the CH offers supported_versions = [unknown-high, TLS 1.2]
@@ -54,17 +61,6 @@
 #   handlers is a feature we don't implement. The ALERT, however, is now
 #   correct: a no-TLS-1.3 ClientHello draws `protocol_version` (70) per
 #   RFC 8446 §4.2.1 (it previously mismapped to `handshake_failure` (40)
-#   — fixed alongside this note). Only the downgrade feature remains.
-#
-# * `undecryptable record later in handshake together with early_data`:
-#   tlsfuzzer splices a fake early-data record INTO the encrypted
-#   server-flight phase, after our server starts sending. Our
-#   AEAD-skip in Step 6 catches the record we read for client
-#   Finished, but the test expects an NST after the handshake
-#   completes — we either don't send NST in this code path, or the
-#   test's state machine gets confused by the timing. Real
-#   investigation needed; queued.
+#   — fixed in I183). Only the downgrade feature remains.
 
-handshake with 0-RTT, HRR and early data after 2nd Client Hello
 handshake with invalid 0-RTT and unknown version (downgrade to TLS 1.2)
-undecryptable record later in handshake together with early_data
