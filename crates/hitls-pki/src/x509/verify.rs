@@ -19,6 +19,7 @@ pub struct CertificateVerifier {
     require_crl: bool,
     revocation_leaf_only: bool,
     required_eku: Option<Oid>,
+    min_security_bits: Option<u32>,
 }
 
 impl Default for CertificateVerifier {
@@ -39,6 +40,7 @@ impl CertificateVerifier {
             require_crl: false,
             revocation_leaf_only: false,
             required_eku: None,
+            min_security_bits: None,
         }
     }
 
@@ -141,6 +143,28 @@ impl CertificateVerifier {
     /// it passes per RFC 5280 §4.2.1.12.
     pub fn set_required_eku(&mut self, eku: Oid) -> &mut Self {
         self.required_eku = Some(eku);
+        self
+    }
+
+    /// Require every certificate in the chain to provide at least `bits` of
+    /// security strength (default: disabled — no minimum enforced).
+    ///
+    /// When set, `validate_chain` rejects the path if any certificate's public
+    /// key falls below the floor, mirroring openhitls-C `HITLS_X509_SecBitsCheck`
+    /// (`HITLS_X509_VFY_FLAG_SECBITS`) and OpenSSL's
+    /// `X509_VERIFY_PARAM_set_auth_level`. Strength is estimated per
+    /// NIST SP 800-57 Part 1 Rev 5 §5.6.1: RSA by modulus size
+    /// (2048→112, 3072→128, 7680→192, 15360→256), named EC curves by field
+    /// size / 2 (P-256/SM2/bp256→128, P-384/bp384→192, P-521/bp512→256),
+    /// Ed25519→128, Ed448→224. Certificates whose key type/curve is
+    /// unrecognised are treated as "no opinion" and pass (the verifier does not
+    /// fail closed on an unknown key — matching the C behaviour where
+    /// `GetSecurityBits` returning 0/unsupported skips the check).
+    ///
+    /// Typical floors: 112 bits (NIST minimum through 2030), 128 bits
+    /// (OpenSSL auth_level 3).
+    pub fn set_min_security_bits(&mut self, bits: u32) -> &mut Self {
+        self.min_security_bits = Some(bits);
         self
     }
 
@@ -277,6 +301,21 @@ impl CertificateVerifier {
                         i,
                         hitls_utils::hex::to_hex(&ext.oid)
                     )));
+                }
+            }
+
+            // Minimum security-strength enforcement (RFC 5280 doesn't mandate
+            // this, but openhitls-C SecBitsCheck / OpenSSL auth_level do). A
+            // recognised key below the floor aborts the path; an unrecognised
+            // key type is "no opinion" and is not penalised.
+            if let Some(floor) = self.min_security_bits {
+                if let Some(bits) = pubkey_security_bits(cert) {
+                    if bits < floor {
+                        return Err(PkiError::ChainVerifyFailed(format!(
+                            "certificate at depth {} provides {} bits of security, below the required {}",
+                            i, bits, floor
+                        )));
+                    }
                 }
             }
 
@@ -569,6 +608,79 @@ fn strip_leading_zeros(bytes: &[u8]) -> &[u8] {
 /// processing, so a *critical* policy extension MUST be rejected),
 /// and any private / unknown OID. Non-critical extensions are never
 /// gated by this — only the `critical` ones reach here.
+/// Estimate the security strength (in bits) of a certificate's public key,
+/// per NIST SP 800-57 Part 1 Rev 5 §5.6.1. Returns `None` when the key type or
+/// curve is unrecognised (the caller treats unknown as "no opinion").
+fn pubkey_security_bits(cert: &Certificate) -> Option<u32> {
+    let spki = &cert.public_key;
+    let alg = Oid::from_der_value(&spki.algorithm_oid).ok()?;
+
+    if alg == known::rsa_encryption() || alg == known::rsassa_pss() {
+        // RSAPublicKey ::= SEQUENCE { modulus INTEGER, publicExponent INTEGER }
+        let mut dec = hitls_utils::asn1::Decoder::new(&spki.public_key);
+        let mut seq = dec.read_sequence().ok()?;
+        let modulus = seq.read_integer().ok()?;
+        Some(rsa_security_bits(integer_bit_length(modulus)))
+    } else if alg == known::ec_public_key() {
+        // The named curve is carried in the algorithm parameters (the OID value
+        // bytes, as stored by parse_algorithm_identifier).
+        let params = spki.algorithm_params.as_ref()?;
+        let curve = Oid::from_der_value(params).ok()?;
+        ec_curve_security_bits(&curve)
+    } else if alg == known::ed25519() {
+        Some(128)
+    } else if alg == known::ed448() {
+        Some(224)
+    } else {
+        None
+    }
+}
+
+/// Bit length of a DER INTEGER's content bytes (sign byte / leading zeros
+/// stripped). Returns 0 for an all-zero / empty value.
+fn integer_bit_length(content: &[u8]) -> u32 {
+    let first_nonzero = content.iter().position(|&b| b != 0);
+    match first_nonzero {
+        None => 0,
+        Some(idx) => {
+            let significant = &content[idx..];
+            let top = significant[0];
+            let top_bits = 8 - top.leading_zeros();
+            ((significant.len() as u32 - 1) * 8) + top_bits
+        }
+    }
+}
+
+/// Map an RSA modulus bit length to NIST SP 800-57 security strength. The
+/// thresholds match OpenSSL's `BN_security_bits` step points at the standard
+/// key sizes (matters for cross-checking against `-auth_level`).
+fn rsa_security_bits(modulus_bits: u32) -> u32 {
+    match modulus_bits {
+        b if b >= 15360 => 256,
+        b if b >= 7680 => 192,
+        b if b >= 3072 => 128,
+        b if b >= 2048 => 112,
+        b if b >= 1024 => 80,
+        _ => 0,
+    }
+}
+
+/// Map a named EC curve OID to its security strength (field size / 2).
+fn ec_curve_security_bits(curve: &Oid) -> Option<u32> {
+    if *curve == known::prime256v1()
+        || *curve == known::sm2_curve()
+        || *curve == known::brainpool_p256r1()
+    {
+        Some(128)
+    } else if *curve == known::secp384r1() || *curve == known::brainpool_p384r1() {
+        Some(192)
+    } else if *curve == known::secp521r1() || *curve == known::brainpool_p512r1() {
+        Some(256)
+    } else {
+        None
+    }
+}
+
 fn is_recognised_critical_extension(oid: &[u8]) -> bool {
     [
         known::basic_constraints(),
@@ -2445,5 +2557,91 @@ UKl9bCAgj+tNwbRWhv1gkGzhRS0git4O4Z9wsAse9A==
         let result = leaf.verify_signature(&root);
         // Should fail — wrong key
         assert!(matches!(result, Ok(false) | Err(_)));
+    }
+
+    // --- Minimum security-bits enforcement (set_min_security_bits) ---
+    //
+    // Vectors reuse the cms/chain trust hierarchy (root_ca → mid_ca, both
+    // RSA-2048). `device1` is an RSA-2048 leaf (112-bit strength); `weak1024`
+    // is an RSA-1024 leaf (80-bit strength) signed by mid_ca. The pass/reject
+    // boundaries below were cross-checked against the OpenSSL 3.6 oracle:
+    //   openssl verify -auth_level 1 ... weak1024.crt  → OK   (80-bit floor)
+    //   openssl verify -auth_level 2 ... weak1024.crt  → FAIL (112-bit floor)
+    //   openssl verify -auth_level 2 ... device1.crt   → OK
+    const SB_ROOT_CA: &str = include_str!("../../../../tests/vectors/cms/chain/root_ca.crt");
+    const SB_MID_CA: &str = include_str!("../../../../tests/vectors/cms/chain/mid_ca.crt");
+    const SB_DEVICE1: &str = include_str!("../../../../tests/vectors/cms/chain/device1.crt");
+    const SB_WEAK1024: &str = include_str!("../../../../tests/vectors/cms/chain/weak1024.crt");
+
+    #[test]
+    fn test_min_security_bits_rejects_weak_rsa1024() {
+        let root = Certificate::from_pem(SB_ROOT_CA).unwrap();
+        let mid = Certificate::from_pem(SB_MID_CA).unwrap();
+        let weak = Certificate::from_pem(SB_WEAK1024).unwrap();
+
+        // Baseline: with no floor, the 1024-bit leaf chain validates fine — so
+        // the only variable in the assertions below is the security-bits gate.
+        let mut base = CertificateVerifier::new();
+        base.add_trusted_cert(root.clone());
+        assert!(
+            base.verify_cert(&weak, std::slice::from_ref(&mid)).is_ok(),
+            "baseline (no floor) chain must validate"
+        );
+
+        // Floor 80: RSA-1024 == 80 bits → still passes (auth_level 1 parity).
+        let mut v80 = CertificateVerifier::new();
+        v80.add_trusted_cert(root.clone());
+        v80.set_min_security_bits(80);
+        assert!(
+            v80.verify_cert(&weak, std::slice::from_ref(&mid)).is_ok(),
+            "80-bit floor must accept RSA-1024"
+        );
+
+        // Floor 112: RSA-1024 (80 bits) is rejected (auth_level 2 parity).
+        let mut v112 = CertificateVerifier::new();
+        v112.add_trusted_cert(root);
+        v112.set_min_security_bits(112);
+        let res = v112.verify_cert(&weak, &[mid]);
+        assert!(
+            res.is_err(),
+            "112-bit floor must reject RSA-1024 leaf, got {res:?}"
+        );
+    }
+
+    #[test]
+    fn test_min_security_bits_accepts_rsa2048_chain() {
+        let root = Certificate::from_pem(SB_ROOT_CA).unwrap();
+        let mid = Certificate::from_pem(SB_MID_CA).unwrap();
+        let device1 = Certificate::from_pem(SB_DEVICE1).unwrap();
+
+        // Whole chain is RSA-2048 (112 bits) → clears a 112-bit floor at every
+        // depth (leaf, intermediate, root).
+        let mut v = CertificateVerifier::new();
+        v.add_trusted_cert(root);
+        v.set_min_security_bits(112);
+        let res = v.verify_cert(&device1, &[mid]);
+        assert!(
+            res.is_ok(),
+            "112-bit floor must accept RSA-2048 chain, got {res:?}"
+        );
+    }
+
+    #[test]
+    fn test_pubkey_security_bits_rsa() {
+        let weak = Certificate::from_pem(SB_WEAK1024).unwrap();
+        let device1 = Certificate::from_pem(SB_DEVICE1).unwrap();
+        assert_eq!(pubkey_security_bits(&weak), Some(80));
+        assert_eq!(pubkey_security_bits(&device1), Some(112));
+    }
+
+    #[test]
+    fn test_integer_bit_length() {
+        assert_eq!(integer_bit_length(&[]), 0);
+        assert_eq!(integer_bit_length(&[0x00]), 0);
+        assert_eq!(integer_bit_length(&[0x01]), 1);
+        assert_eq!(integer_bit_length(&[0xff]), 8);
+        // Leading sign byte stripped: 0x00 0x80 == 8 significant bits.
+        assert_eq!(integer_bit_length(&[0x00, 0x80]), 8);
+        assert_eq!(integer_bit_length(&[0x01, 0x00]), 9);
     }
 }

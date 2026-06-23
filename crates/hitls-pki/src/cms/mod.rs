@@ -265,6 +265,54 @@ impl CmsMessage {
         Ok(true)
     }
 
+    /// Verify the signature(s) **and** validate each signer's certificate chain
+    /// against a trust store.
+    ///
+    /// `verify_signatures` only proves the signature is cryptographically valid
+    /// for whichever cert is embedded/supplied — it does not establish that the
+    /// signer is trusted. This method additionally builds the signer cert's
+    /// chain (using the embedded SignedData certificates plus `extra_certs` as
+    /// intermediates) and runs it through `verifier`, so trust-anchor,
+    /// validity-time, path-length, EKU/KeyUsage, security-bits and (if enabled)
+    /// revocation checks all apply. Mirrors openhitls-C `HITLS_CMS_DataVerify`,
+    /// which couples signature verification with `HITLS_X509_CertVerify`.
+    ///
+    /// Returns `Ok(true)` only when every signer's signature verifies *and*
+    /// every signer's chain validates to a configured trust anchor.
+    pub fn verify_signatures_with_trust(
+        &self,
+        detached_data: Option<&[u8]>,
+        extra_certs: &[crate::x509::Certificate],
+        verifier: &crate::x509::verify::CertificateVerifier,
+    ) -> Result<bool, PkiError> {
+        // Step 1: cryptographic signature verification (reuses the existing
+        // path, including messageDigest-attribute binding).
+        self.verify_signatures(detached_data, extra_certs)?;
+
+        // Step 2: chain validation for every signer certificate.
+        let sd = self
+            .signed_data
+            .as_ref()
+            .ok_or_else(|| cerr("not SignedData"))?;
+
+        let mut all_certs: Vec<crate::x509::Certificate> = Vec::new();
+        for cert_der in &sd.certificates {
+            if let Ok(c) = crate::x509::Certificate::from_der(cert_der) {
+                all_certs.push(c);
+            }
+        }
+        all_certs.extend_from_slice(extra_certs);
+
+        for si in &sd.signer_infos {
+            let signer_cert = find_signer_cert(&si.sid, &all_certs)?;
+            // `verify_cert` searches `all_certs` (and the trust store) for
+            // issuers; including the leaf in that set is harmless.
+            verifier.verify_cert(signer_cert, &all_certs)?;
+        }
+
+        Ok(true)
+    }
+
     /// Create a CMS SignedData message (attached mode).
     pub fn sign(
         data: &[u8],
@@ -2050,6 +2098,78 @@ mod tests {
         let result = msg.verify_signatures(Some(CMS_MSG), &[ca]);
         assert!(result.is_ok(), "P-384 detached verify failed: {result:?}");
         assert!(result.unwrap());
+    }
+
+    // --- Signer-chain trust validation (verify_signatures_with_trust) ---
+    //
+    // `device1_signed_attached.cms` is an attached SignedData over `chain_msg.txt`
+    // signed by `device1` (RSA-2048), embedding device1 + mid_ca. The signer
+    // chain is device1 → mid_ca → root_ca. Oracle cross-check (OpenSSL 3.6):
+    //   openssl cms -verify -CAfile root_ca.crt  → OK
+    //   openssl cms -verify -CAfile device1.crt  → REJECTED (no path to a root)
+    const CMS_CHAIN_CMS: &[u8] =
+        include_bytes!("../../../../tests/vectors/cms/chain/device1_signed_attached.cms");
+    const CMS_CHAIN_ROOT_CA: &str = include_str!("../../../../tests/vectors/cms/chain/root_ca.crt");
+    const CMS_CHAIN_DEVICE1: &str = include_str!("../../../../tests/vectors/cms/chain/device1.crt");
+
+    #[test]
+    fn test_cms_verify_with_trust_valid_chain() {
+        let msg = CmsMessage::from_der(CMS_CHAIN_CMS).unwrap();
+        // Plain (crypto-only) verification passes regardless of trust.
+        assert!(msg.verify_signatures(None, &[]).is_ok());
+
+        // With root_ca as the trust anchor, the embedded device1 → mid_ca →
+        // root_ca chain validates end-to-end.
+        let root = crate::x509::Certificate::from_pem(CMS_CHAIN_ROOT_CA).unwrap();
+        let mut verifier = crate::x509::verify::CertificateVerifier::new();
+        verifier.add_trusted_cert(root);
+        let res = msg.verify_signatures_with_trust(None, &[], &verifier);
+        assert!(
+            matches!(res, Ok(true)),
+            "trusted-chain CMS verify must succeed, got {res:?}"
+        );
+    }
+
+    #[test]
+    fn test_cms_verify_with_trust_untrusted_rejected() {
+        let msg = CmsMessage::from_der(CMS_CHAIN_CMS).unwrap();
+        // The cryptographic signature is valid...
+        assert!(msg.verify_signatures(None, &[]).is_ok());
+
+        // ...but with the wrong trust anchor (the signer's own leaf cert, which
+        // is not a self-signed root), the chain cannot terminate at a trusted
+        // root → rejected. Mirrors `openssl cms -verify -CAfile device1.crt`.
+        let device1 = crate::x509::Certificate::from_pem(CMS_CHAIN_DEVICE1).unwrap();
+        let mut verifier = crate::x509::verify::CertificateVerifier::new();
+        verifier.add_trusted_cert(device1);
+        let res = msg.verify_signatures_with_trust(None, &[], &verifier);
+        assert!(
+            res.is_err(),
+            "untrusted CMS signer chain must be rejected, got {res:?}"
+        );
+    }
+
+    #[test]
+    fn test_cms_verify_with_trust_secbits_floor() {
+        // The signer chain is RSA-2048 throughout, so a 112-bit floor passes
+        // but a 128-bit floor rejects it (every cert is exactly 112 bits).
+        let msg = CmsMessage::from_der(CMS_CHAIN_CMS).unwrap();
+        let root = crate::x509::Certificate::from_pem(CMS_CHAIN_ROOT_CA).unwrap();
+
+        let mut ok = crate::x509::verify::CertificateVerifier::new();
+        ok.add_trusted_cert(root.clone());
+        ok.set_min_security_bits(112);
+        assert!(matches!(
+            msg.verify_signatures_with_trust(None, &[], &ok),
+            Ok(true)
+        ));
+
+        let mut too_strict = crate::x509::verify::CertificateVerifier::new();
+        too_strict.add_trusted_cert(root);
+        too_strict.set_min_security_bits(128);
+        assert!(msg
+            .verify_signatures_with_trust(None, &[], &too_strict)
+            .is_err());
     }
 
     #[test]
