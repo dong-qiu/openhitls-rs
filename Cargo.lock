@@ -366,7 +366,7 @@ checksum = "fc0fef456e4baa96da950455cd02c081ca953b141298e41db3fc7e36b1da849c"
 
 [[package]]
 name = "hitls-auth"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "getrandom",
  "hitls-bignum",
@@ -380,7 +380,7 @@ dependencies = [
 
 [[package]]
 name = "hitls-bignum"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "getrandom",
  "hitls-types",
@@ -391,7 +391,7 @@ dependencies = [
 
 [[package]]
 name = "hitls-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "getrandom",
@@ -407,7 +407,7 @@ dependencies = [
 
 [[package]]
 name = "hitls-crypto"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "criterion",
  "getrandom",
@@ -436,7 +436,7 @@ dependencies = [
 
 [[package]]
 name = "hitls-pki"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "getrandom",
  "hitls-bignum",
@@ -450,7 +450,7 @@ dependencies = [
 
 [[package]]
 name = "hitls-tls"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "flate2",
  "getrandom",
@@ -466,14 +466,14 @@ dependencies = [
 
 [[package]]
 name = "hitls-types"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "thiserror",
 ]
 
 [[package]]
 name = "hitls-utils"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "hitls-types",
  "proptest",
@@ -1121,7 +1121,7 @@ checksum = "d7249219f66ced02969388cf2bb044a09756a083d0fab1e566056b04d9fbcaa5"
 
 [[package]]
 name = "xtask"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
 ]

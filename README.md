@@ -287,7 +287,7 @@ Select only the algorithms you need:
 
 ```toml
 [dependencies]
-hitls-crypto = { version = "0.1", default-features = false, features = ["aes", "sha2", "gcm"] }
+hitls-crypto = { version = "0.2", default-features = false, features = ["aes", "sha2", "gcm"] }
 ```
 
 | Feature | Includes |
