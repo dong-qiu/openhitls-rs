@@ -4,7 +4,7 @@
 //! ClientHello → ServerHello + {EE} + {Certificate} + {CertificateVerify} + {Finished}
 //! → client {Finished}
 
-use crate::config::{SniAction, TlsConfig};
+use crate::config::{SniAction, TicketKeyCallback, TlsConfig};
 use crate::crypt::hkdf::{hkdf_expand, hmac_hash};
 use crate::crypt::key_schedule::KeySchedule;
 use crate::crypt::traffic_keys::TrafficKeys;
@@ -15,7 +15,7 @@ use crate::CipherSuite;
 use hitls_crypto::provider::Digest;
 use hitls_types::TlsError;
 use subtle::ConstantTimeEq;
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
 
 #[cfg(feature = "cert-compression")]
 use super::codec::{
@@ -116,20 +116,70 @@ pub struct ClientFinishedActions {
 // Ticket encryption helpers
 // ---------------------------------------------------------------------------
 
+/// Resolved ticket protection keying: `(optional 16-byte key_name prefix,
+/// protection key, iv)`. The key_name is `Some` only on the callback path. The
+/// key and iv are secret material, so they are held in `Zeroizing` and wiped
+/// when the tuple is dropped (the static-key path's `to_vec()` copy and the
+/// callback's moved-out `key`/`iv` would otherwise linger un-zeroed in heap).
+type TicketKeying = (Option<[u8; 16]>, Zeroizing<Vec<u8>>, Zeroizing<Vec<u8>>);
+
+/// Resolve the ticket protection keying material for an operation.
+///
+/// When `cb` is set (RFC 5077 / OpenSSL `tlsext_ticket_key_cb`-style key
+/// rotation), the callback supplies a 16-byte `key_name` (prepended to the
+/// ticket so the decrypt side can look up the right key), the protection
+/// `key`, and an `iv` that is folded into the keystream derivation. On encrypt
+/// the `name` argument is ignored; on decrypt it is the key name read from the
+/// ticket. When `cb` is `None`, the static `ticket_key` is used and no key-name
+/// is emitted — the legacy ticket format is preserved byte-for-byte.
+fn resolve_ticket_keying(
+    cb: Option<&TicketKeyCallback>,
+    static_key: &[u8],
+    name: &[u8],
+    is_encrypt: bool,
+) -> Result<TicketKeying, TlsError> {
+    match cb {
+        Some(cb) => {
+            let r = cb(name, is_encrypt).ok_or_else(|| {
+                TlsError::HandshakeFailed(if is_encrypt {
+                    "ticket_key_cb returned None on encrypt".into()
+                } else {
+                    "ticket_key_cb rejected ticket key (unknown/expired key name)".into()
+                })
+            })?;
+            Ok((
+                Some(r.key_name),
+                Zeroizing::new(r.key),
+                Zeroizing::new(r.iv),
+            ))
+        }
+        None => Ok((
+            None,
+            Zeroizing::new(static_key.to_vec()),
+            Zeroizing::new(Vec::new()),
+        )),
+    }
+}
+
 /// Encrypt session data into a ticket.
 ///
-/// Format: nonce(12) || ciphertext(XOR-encrypted) || hmac(hash_len).
+/// Legacy format (no `ticket_key_cb`): nonce(12) || ciphertext(XOR) || hmac.
+/// Rotation format (`ticket_key_cb` set): key_name(16) || nonce(12) ||
+/// ciphertext || hmac, where the protection key + iv come from the callback.
 /// Plaintext: psk_len(2) || psk || suite(2) || created_at(8) || age_add(4).
 pub(crate) fn encrypt_ticket(
     alg: HashAlgId,
     ticket_key: &[u8],
+    ticket_key_cb: Option<&TicketKeyCallback>,
     psk: &[u8],
     suite: CipherSuite,
     created_at: u64,
     age_add: u32,
 ) -> Result<Vec<u8>, TlsError> {
-    // Build plaintext
-    let mut plaintext = Vec::with_capacity(2 + psk.len() + 14);
+    let (key_name, prot_key, iv) = resolve_ticket_keying(ticket_key_cb, ticket_key, &[], true)?;
+
+    // Build plaintext (holds the cleartext PSK → zeroized on drop)
+    let mut plaintext = Zeroizing::new(Vec::with_capacity(2 + psk.len() + 14));
     plaintext.extend_from_slice(&(psk.len() as u16).to_be_bytes());
     plaintext.extend_from_slice(psk);
     plaintext.extend_from_slice(&suite.0.to_be_bytes());
@@ -141,8 +191,13 @@ pub(crate) fn encrypt_ticket(
     getrandom::fill(&mut nonce)
         .map_err(|_| TlsError::HandshakeFailed("ticket nonce gen failed".into()))?;
 
-    // Derive key stream
-    let key_stream = hkdf_expand(alg, ticket_key, &nonce, plaintext.len())?;
+    // Derive key stream. The keystream context is the per-ticket random nonce,
+    // plus the callback-supplied iv (empty on the static-key path, so the
+    // legacy keystream is unchanged). `info` carries the secret iv and
+    // `key_stream` protects the PSK, so both are zeroized on drop.
+    let mut info = Zeroizing::new(nonce.to_vec());
+    info.extend_from_slice(&iv);
+    let key_stream = Zeroizing::new(hkdf_expand(alg, &prot_key, &info, plaintext.len())?);
 
     // XOR encrypt
     let ciphertext: Vec<u8> = plaintext
@@ -151,13 +206,20 @@ pub(crate) fn encrypt_ticket(
         .map(|(p, k)| p ^ k)
         .collect();
 
-    // HMAC for authentication
-    let mut mac_input = Vec::with_capacity(12 + ciphertext.len());
+    // HMAC for authentication (covers the key_name when present, so a tampered
+    // key-name prefix is rejected before the keystream is even derived).
+    let mut mac_input = Vec::with_capacity(16 + 12 + ciphertext.len());
+    if let Some(ref kn) = key_name {
+        mac_input.extend_from_slice(kn);
+    }
     mac_input.extend_from_slice(&nonce);
     mac_input.extend_from_slice(&ciphertext);
-    let (mac, mac_len) = hmac_hash(alg, ticket_key, &mac_input)?;
+    let (mac, mac_len) = hmac_hash(alg, &prot_key, &mac_input)?;
 
-    let mut ticket = Vec::with_capacity(12 + ciphertext.len() + mac_len);
+    let mut ticket = Vec::with_capacity(16 + 12 + ciphertext.len() + mac_len);
+    if let Some(ref kn) = key_name {
+        ticket.extend_from_slice(kn);
+    }
     ticket.extend_from_slice(&nonce);
     ticket.extend_from_slice(&ciphertext);
     ticket.extend_from_slice(&mac[..mac_len]);
@@ -168,22 +230,31 @@ pub(crate) fn encrypt_ticket(
 pub(crate) fn decrypt_ticket(
     alg: HashAlgId,
     ticket_key: &[u8],
+    ticket_key_cb: Option<&TicketKeyCallback>,
     ticket: &[u8],
 ) -> Result<(Vec<u8>, CipherSuite, u64, u32), TlsError> {
     let mac_len = crate::crypt::DigestVariant::output_size_for(alg);
-    if ticket.len() < 12 + mac_len {
+
+    // A rotation-format ticket carries a 16-byte key_name prefix that selects
+    // the protection key via the callback; the legacy format has none.
+    let name_len = if ticket_key_cb.is_some() { 16 } else { 0 };
+    if ticket.len() < name_len + 12 + mac_len {
         return Err(TlsError::HandshakeFailed("ticket too short".into()));
     }
+    let key_name = &ticket[..name_len];
+    let (_, prot_key, iv) = resolve_ticket_keying(ticket_key_cb, ticket_key, key_name, false)?;
 
-    let nonce = &ticket[..12];
-    let ciphertext = &ticket[12..ticket.len() - mac_len];
-    let mac = &ticket[ticket.len() - mac_len..];
+    let body = &ticket[name_len..];
+    let nonce = &body[..12];
+    let ciphertext = &body[12..body.len() - mac_len];
+    let mac = &body[body.len() - mac_len..];
 
-    // Verify MAC
-    let mut mac_input = Vec::with_capacity(12 + ciphertext.len());
+    // Verify MAC (over key_name || nonce || ciphertext, matching encrypt)
+    let mut mac_input = Vec::with_capacity(name_len + 12 + ciphertext.len());
+    mac_input.extend_from_slice(key_name);
     mac_input.extend_from_slice(nonce);
     mac_input.extend_from_slice(ciphertext);
-    let (expected_mac, expected_mac_len) = hmac_hash(alg, ticket_key, &mac_input)?;
+    let (expected_mac, expected_mac_len) = hmac_hash(alg, &prot_key, &mac_input)?;
 
     if !bool::from(mac.ct_eq(&expected_mac[..expected_mac_len])) {
         return Err(TlsError::HandshakeFailed(
@@ -191,13 +262,18 @@ pub(crate) fn decrypt_ticket(
         ));
     }
 
-    // Derive key stream and decrypt
-    let key_stream = hkdf_expand(alg, ticket_key, nonce, ciphertext.len())?;
-    let plaintext: Vec<u8> = ciphertext
-        .iter()
-        .zip(key_stream.iter())
-        .map(|(c, k)| c ^ k)
-        .collect();
+    // Derive key stream and decrypt. `info` (secret iv), `key_stream`, and the
+    // recovered `plaintext` (cleartext PSK) are all zeroized on drop.
+    let mut info = Zeroizing::new(nonce.to_vec());
+    info.extend_from_slice(&iv);
+    let key_stream = Zeroizing::new(hkdf_expand(alg, &prot_key, &info, ciphertext.len())?);
+    let plaintext: Zeroizing<Vec<u8>> = Zeroizing::new(
+        ciphertext
+            .iter()
+            .zip(key_stream.iter())
+            .map(|(c, k)| c ^ k)
+            .collect(),
+    );
 
     // Parse plaintext: psk_len(2) || psk || suite(2) || created_at(8) || age_add(4)
     if plaintext.len() < 16 {
@@ -944,10 +1020,13 @@ impl ServerHandshake {
                 let (identities, binders) = parse_pre_shared_key_ch(&psk_e.data)?;
                 if let Some(((identity, _age), binder)) = identities.first().zip(binders.first()) {
                     // Path 1 — resumption: decrypt the ticket from
-                    // `identity` using the configured ticket_key.
-                    if let Some(ref ticket_key) = self.config.ticket_key {
+                    // `identity` using the configured ticket_key, or the
+                    // ticket_key_cb (RFC 5077 key rotation) when one is set.
+                    let tk_cb = self.config.ticket_key_cb.as_ref();
+                    if self.config.ticket_key.is_some() || tk_cb.is_some() {
+                        let static_key = self.config.ticket_key.as_deref().unwrap_or(&[]);
                         if let Ok((psk, ticket_suite, _created_at, _age_add)) =
-                            decrypt_ticket(params.hash_alg_id(), ticket_key, identity)
+                            decrypt_ticket(params.hash_alg_id(), static_key, tk_cb, identity)
                         {
                             // RFC 8446 §4.2.11: the ticket binds the
                             // PSK to a cipher suite; reject mismatches.
@@ -1529,9 +1608,12 @@ impl ServerHandshake {
         let transcript_hash_cf = self.transcript.current_hash()?;
         let resumption_master_secret = ks.derive_resumption_master_secret(&transcript_hash_cf)?;
 
-        // Generate NewSessionTicket(s) if ticket_key is configured
+        // Generate NewSessionTicket(s) if a ticket key (static or rotating via
+        // ticket_key_cb) is configured.
         let mut new_session_ticket_msgs = Vec::new();
-        if let Some(ref ticket_key) = self.config.ticket_key {
+        let tk_cb = self.config.ticket_key_cb.as_ref();
+        if self.config.ticket_key.is_some() || tk_cb.is_some() {
+            let ticket_key = self.config.ticket_key.as_deref().unwrap_or(&[]);
             // Generate ticket nonce and age_add
             let mut nonce_bytes = [0u8; 8];
             getrandom::fill(&mut nonce_bytes)
@@ -1554,6 +1636,7 @@ impl ServerHandshake {
             let ticket_data = encrypt_ticket(
                 params.hash_alg_id(),
                 ticket_key,
+                tk_cb,
                 &psk,
                 suite,
                 created_at,

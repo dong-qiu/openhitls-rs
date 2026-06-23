@@ -1771,11 +1771,12 @@ fn test_ticket_encrypt_decrypt() {
     let created_at = 1700000000u64;
     let age_add = 12345u32;
 
-    let encrypted = encrypt_ticket(alg, &ticket_key, &psk, suite, created_at, age_add).unwrap();
+    let encrypted =
+        encrypt_ticket(alg, &ticket_key, None, &psk, suite, created_at, age_add).unwrap();
     assert!(!encrypted.is_empty());
 
     let (dec_psk, dec_suite, dec_created, dec_age) =
-        decrypt_ticket(alg, &ticket_key, &encrypted).unwrap();
+        decrypt_ticket(alg, &ticket_key, None, &encrypted).unwrap();
     assert_eq!(dec_psk, psk);
     assert_eq!(dec_suite, suite);
     assert_eq!(dec_created, created_at);
@@ -1797,6 +1798,7 @@ fn test_ticket_decrypt_wrong_key() {
     let encrypted = encrypt_ticket(
         alg,
         &ticket_key,
+        None,
         &psk,
         CipherSuite::TLS_AES_128_GCM_SHA256,
         1700000000,
@@ -1804,8 +1806,114 @@ fn test_ticket_decrypt_wrong_key() {
     )
     .unwrap();
 
-    let result = decrypt_ticket(alg, &wrong_key, &encrypted);
+    let result = decrypt_ticket(alg, &wrong_key, None, &encrypted);
     assert!(result.is_err(), "decryption with wrong key should fail");
+}
+
+/// A `ticket_key_cb` (RFC 5077 / OpenSSL `tlsext_ticket_key_cb`-style rotation)
+/// round-trips a ticket: the callback supplies the key by name on encrypt, and
+/// the decrypt side looks the key up by the name prefixed to the ticket.
+#[test]
+fn test_ticket_key_cb_rotation_roundtrip() {
+    use crate::config::{TicketKeyCallback, TicketKeyResult};
+    use crate::handshake::server::{decrypt_ticket, encrypt_ticket};
+    use std::sync::Arc;
+
+    let params =
+        crate::crypt::CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+    let alg = params.hash_alg_id();
+    let psk = vec![0xDE; 32];
+    let suite = CipherSuite::TLS_AES_128_GCM_SHA256;
+
+    let cb: TicketKeyCallback = Arc::new(|name: &[u8], is_encrypt: bool| {
+        let key_name = [0x11u8; 16];
+        // On decrypt, only serve the key when the name matches.
+        if !is_encrypt && name != key_name {
+            return None;
+        }
+        Some(TicketKeyResult {
+            key_name,
+            key: vec![0xA5; 32],
+            iv: vec![0x5A; 16],
+        })
+    });
+
+    let encrypted = encrypt_ticket(alg, &[], Some(&cb), &psk, suite, 1_700_000_000, 7).unwrap();
+    // Rotation format prefixes the 16-byte key name.
+    assert_eq!(&encrypted[..16], &[0x11u8; 16]);
+
+    let (dp, ds, dc, da) = decrypt_ticket(alg, &[], Some(&cb), &encrypted).unwrap();
+    assert_eq!(dp, psk);
+    assert_eq!(ds, suite);
+    assert_eq!(dc, 1_700_000_000);
+    assert_eq!(da, 7);
+}
+
+/// When the decrypt-side `ticket_key_cb` cannot resolve the ticket's key name
+/// (rotated-out / expired key), decryption is rejected.
+#[test]
+fn test_ticket_key_cb_unknown_key_rejected() {
+    use crate::config::{TicketKeyCallback, TicketKeyResult};
+    use crate::handshake::server::{decrypt_ticket, encrypt_ticket};
+    use std::sync::Arc;
+
+    let params =
+        crate::crypt::CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+    let alg = params.hash_alg_id();
+    let psk = vec![0xDE; 32];
+
+    // Encrypt under key name 0xAA…
+    let enc_cb: TicketKeyCallback = Arc::new(|_name: &[u8], _enc: bool| {
+        Some(TicketKeyResult {
+            key_name: [0xAA; 16],
+            key: vec![0x01; 32],
+            iv: vec![0x02; 16],
+        })
+    });
+    let encrypted = encrypt_ticket(
+        alg,
+        &[],
+        Some(&enc_cb),
+        &psk,
+        CipherSuite::TLS_AES_128_GCM_SHA256,
+        1_700_000_000,
+        7,
+    )
+    .unwrap();
+
+    // Decrypt-side callback rejects every name (key rotated out) → None.
+    let rej_cb: TicketKeyCallback = Arc::new(|_name: &[u8], _enc: bool| None);
+    let result = decrypt_ticket(alg, &[], Some(&rej_cb), &encrypted);
+    assert!(
+        result.is_err(),
+        "unknown/expired ticket key name must be rejected"
+    );
+}
+
+/// The rotation-format ticket is exactly the 16-byte key-name prefix longer
+/// than the legacy static-key ticket (the legacy format is unchanged).
+#[test]
+fn test_ticket_key_cb_format_adds_key_name_prefix() {
+    use crate::config::{TicketKeyCallback, TicketKeyResult};
+    use crate::handshake::server::encrypt_ticket;
+    use std::sync::Arc;
+
+    let params =
+        crate::crypt::CipherSuiteParams::from_suite(CipherSuite::TLS_AES_128_GCM_SHA256).unwrap();
+    let alg = params.hash_alg_id();
+    let psk = vec![0xDE; 32];
+    let suite = CipherSuite::TLS_AES_128_GCM_SHA256;
+
+    let static_ticket = encrypt_ticket(alg, &[0x42; 32], None, &psk, suite, 1, 2).unwrap();
+    let cb: TicketKeyCallback = Arc::new(|_n: &[u8], _e: bool| {
+        Some(TicketKeyResult {
+            key_name: [0x33; 16],
+            key: vec![0x44; 32],
+            iv: vec![0x55; 16],
+        })
+    });
+    let cb_ticket = encrypt_ticket(alg, &[], Some(&cb), &psk, suite, 1, 2).unwrap();
+    assert_eq!(cb_ticket.len(), static_ticket.len() + 16);
 }
 
 /// Test that PSK binder verification works correctly.
