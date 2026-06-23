@@ -128,6 +128,11 @@ pub struct RecordLayer {
     encryptor: Option<RecordEncryptorVariant>,
     /// Active decryptor for incoming records (TLS 1.3, 1.2, or TLCP).
     decryptor: Option<RecordDecryptorVariant>,
+    /// Optional protocol-message observation callback (OpenSSL
+    /// `SSL_set_msg_callback` parity). Invoked for every record sealed
+    /// (outgoing) or opened (incoming) with `(is_outgoing, wire_version,
+    /// content_type, message_bytes)`. `None` by default — no overhead.
+    msg_callback: Option<crate::config::MsgCallback>,
 }
 
 impl RecordLayer {
@@ -138,6 +143,16 @@ impl RecordLayer {
             empty_records_limit: DEFAULT_EMPTY_RECORDS_LIMIT,
             encryptor: None,
             decryptor: None,
+            msg_callback: None,
+        }
+    }
+
+    /// Construct a record layer pre-wired with a protocol-message callback
+    /// (taken from `TlsConfig::msg_callback` at connection construction).
+    pub fn with_msg_callback(msg_callback: Option<crate::config::MsgCallback>) -> Self {
+        Self {
+            msg_callback,
+            ..Self::new()
         }
     }
 
@@ -322,6 +337,12 @@ impl RecordLayer {
                 "plaintext exceeds max fragment size".into(),
             ));
         }
+        // Protocol-message observation (OpenSSL SSL_set_msg_callback parity):
+        // report the outgoing message (inner content type + plaintext payload,
+        // pre-encryption). The wire version is the record's legacy version.
+        if let Some(ref cb) = self.msg_callback {
+            cb(true, TLS13_LEGACY_VERSION, content_type as u8, plaintext);
+        }
         // RFC 5246 §7.1: ChangeCipherSpec is sent as cleartext (the
         // record-layer encryption only switches AFTER the CCS is on
         // the wire). The symmetric `open_record` path already skips
@@ -361,7 +382,11 @@ impl RecordLayer {
     /// the actual inner content type and plaintext.
     pub fn open_record(&mut self, data: &[u8]) -> Result<(ContentType, Vec<u8>, usize), TlsError> {
         let (record, consumed) = self.parse_record(data)?;
-        if let Some(dec) = &mut self.decryptor {
+        let wire_version = record.version;
+        // Resolve the inner (content_type, plaintext), decrypting when a read
+        // decryptor is active. The result is computed once so the
+        // protocol-message callback below sees the final message exactly once.
+        let (ct, pt) = if let Some(dec) = &mut self.decryptor {
             if dec.is_tls13() {
                 // RFC 8446 §5.1 + §5.2: once read decryption is active,
                 // handshake and application_data records MUST be carried
@@ -379,12 +404,10 @@ impl RecordLayer {
                 // permitted in plaintext at any time (§D.4 middlebox-
                 // compat CCS, peer's pre-encryption alert).
                 match record.content_type {
-                    ContentType::ApplicationData => {
-                        let (ct, pt) = dec.decrypt_record(&record)?;
-                        return Ok((ct, pt, consumed));
-                    }
+                    ContentType::ApplicationData => dec.decrypt_record(&record)?,
                     ContentType::Alert | ContentType::ChangeCipherSpec => {
-                        // Fall through — return as plaintext.
+                        // Permitted in plaintext — return as-is.
+                        (record.content_type, record.fragment)
                     }
                     _ => {
                         return Err(TlsError::RecordError(format!(
@@ -396,15 +419,21 @@ impl RecordLayer {
                         )));
                     }
                 }
-            } else {
+            } else if record.content_type != ContentType::ChangeCipherSpec {
                 // TLS 1.2/TLCP: decrypt everything except ChangeCipherSpec.
-                if record.content_type != ContentType::ChangeCipherSpec {
-                    let (ct, pt) = dec.decrypt_record(&record)?;
-                    return Ok((ct, pt, consumed));
-                }
+                dec.decrypt_record(&record)?
+            } else {
+                (record.content_type, record.fragment)
             }
+        } else {
+            (record.content_type, record.fragment)
+        };
+
+        // Protocol-message observation (OpenSSL SSL_set_msg_callback parity).
+        if let Some(ref cb) = self.msg_callback {
+            cb(false, wire_version, ct as u8, &pt);
         }
-        Ok((record.content_type, record.fragment, consumed))
+        Ok((ct, pt, consumed))
     }
 
     /// Parse a TLS record from the given bytes.

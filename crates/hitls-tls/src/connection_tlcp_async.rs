@@ -48,8 +48,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlcpClientConnection<S> {
     pub fn new(stream: S, config: TlsConfig) -> Self {
         Self {
             stream,
+            record_layer: RecordLayer::with_msg_callback(config.msg_callback.clone()),
             config,
-            record_layer: RecordLayer::new(),
             state: TlcpConnectionState::Handshaking,
             negotiated_suite: None,
             read_buf: Vec::with_capacity(16 * 1024),
@@ -359,8 +359,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlcpServerConnection<S> {
     pub fn new(stream: S, config: TlsConfig) -> Self {
         Self {
             stream,
+            record_layer: RecordLayer::with_msg_callback(config.msg_callback.clone()),
             config,
-            record_layer: RecordLayer::new(),
             state: TlcpConnectionState::Handshaking,
             negotiated_suite: None,
             read_buf: Vec::with_capacity(16 * 1024),
