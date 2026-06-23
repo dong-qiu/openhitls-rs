@@ -18281,3 +18281,12 @@ I175 —— CMS SignedData SM2 签名+验签(GB/T 35275),审计第二个"卖点 
   - 验证(独立 oracle):OpenSSL 3.6 SM2 CMS 互通向量(`cms -sign -md sm3 -keyopt distid:1234567812345678`)`verify_signatures` 通过 + Rust SM2 CMS 签→验→detached→篡改往返。
   - **发现**:OpenSSL 的 SM2 **默认 distid 是空**,非 GM 标准的 1234567812345678——默认 `openssl cms -sign` 产的签名非 GM 合规(OpenSSL 自己都验不过 GM-distid 变体);向量固定 GM distid,证明本库 SM2 是 GM-correct(且与迁移的 SM2-verify C-SDV KAT 一致)。
   - full hitls-pki 0 回归,fmt+clippy clean。
+
+---
+
+> 继续 CMS PQC/RSA-PSS 签名
+
+I176 —— CMS RSASSA-PSS 签名(补完 CMS 签名矩阵的 RSA 半边;之前能验 PSS、只能签 PKCS#1 v1.5)。
+  - `sign_digest` 加 rsassa_pss 分支:`RsaPrivateKey::sign(Pss, digest)`(SHA-256,对齐 SHA-256-only 的 verify)+ signerInfo 带 RFC 4055 PSS 参数(SHA-256/MGF1-SHA256/salt 32,固定 const,与 OpenSSL 编码字节一致,asn1parse 交叉核对)。分发按签名者证书的 sig-alg → RSA-PSS 签的证书路由到这。
+  - 验证(独立 oracle):OpenSSL 3.6 RSA-PSS CMS 向量 Rust 验通过 + Rust PSS CMS 签→验→detached→篡改往返(断言带 PSS 参数)。full hitls-pki 0 回归,fmt+clippy clean。
+  - **未完成说明**:CMS ML-DSA/SLH-DSA 签名分支本身 trivial,但**测不了**——需先给 x509 SigningKey/builder 加 PQC 证书签名能力(现无 PQC 变体、OpenSSL 也产不出 PQC 证书),是独立前置;SLH-DSA 还需把 from_private_key 从 kat-nonce 解禁。已作为后续。

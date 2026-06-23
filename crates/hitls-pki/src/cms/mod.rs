@@ -855,6 +855,16 @@ fn verify_signature_with_cert(
 
 // ── Signing ──────────────────────────────────────────────────────────
 
+/// RFC 4055 `RSASSA-PSS-params` for SHA-256: hashAlgorithm SHA-256,
+/// maskGenAlgorithm MGF1-SHA-256, saltLength 32. Emitted verbatim in the
+/// signerInfo `signatureAlgorithm` (byte-identical to OpenSSL's encoding).
+const RSASSA_PSS_SHA256_PARAMS: &[u8] = &[
+    0x30, 0x34, 0xa0, 0x0f, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02,
+    0x01, 0x05, 0x00, 0xa1, 0x1c, 0x30, 0x1a, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01,
+    0x01, 0x08, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01, 0x05,
+    0x00, 0xa2, 0x03, 0x02, 0x01, 0x20,
+];
+
 fn sign_digest(
     digest: &[u8],
     message: &[u8],
@@ -879,6 +889,21 @@ fn sign_digest(
             AlgorithmIdentifier {
                 oid: cert_sig_alg_oid.to_vec(),
                 params: Some(vec![0x05, 0x00]), // NULL
+            },
+        ))
+    } else if sig_oid == known::rsassa_pss() {
+        // RSASSA-PSS over the signedAttrs digest (SHA-256, matching the verify
+        // path, which is SHA-256-only). The signatureAlgorithm carries the
+        // RFC 4055 PSS parameters (SHA-256 / MGF1-SHA-256 / saltLength 32).
+        let rsa_key = parse_rsa_private_key(private_key_der)?;
+        let signature = rsa_key
+            .sign(hitls_crypto::rsa::RsaPadding::Pss, digest)
+            .map_err(PkiError::from)?;
+        Ok((
+            signature,
+            AlgorithmIdentifier {
+                oid: known::rsassa_pss().to_der_value(),
+                params: Some(RSASSA_PSS_SHA256_PARAMS.to_vec()),
             },
         ))
     } else if sig_oid == known::ecdsa_with_sha256() || sig_oid == known::ecdsa_with_sha384() {
@@ -2648,6 +2673,59 @@ mod tests {
         // Verification should fail
         let ok = kp.verify(message, &signature).unwrap();
         assert!(!ok);
+    }
+
+    // ── RSASSA-PSS CMS SignedData ─────────────────────────────────────────
+    const RSAPSS_CMS_DER: &[u8] =
+        include_bytes!("../../../../tests/vectors/cms/rsapss/rsapss_cms.der");
+    const RSAPSS_CERT_DER: &[u8] =
+        include_bytes!("../../../../tests/vectors/cms/rsapss/rsapss_cert.der");
+    const RSAPSS_KEY_PKCS8: &[u8] =
+        include_bytes!("../../../../tests/vectors/cms/rsapss/rsapss_key_pkcs8.der");
+
+    /// Independent oracle: verify an RSASSA-PSS SignedData produced by OpenSSL
+    /// 3.6 (`cms -sign -keyopt rsa_padding_mode:pss -md sha256`).
+    #[test]
+    fn test_cms_rsapss_verify_openssl() {
+        let msg = CmsMessage::from_der(RSAPSS_CMS_DER).expect("parse RSA-PSS CMS");
+        assert!(msg
+            .verify_signatures(None, &[])
+            .expect("verify OpenSSL RSA-PSS CMS"));
+    }
+
+    /// Rust RSASSA-PSS CMS sign → verify round-trip (the new sign path; the
+    /// signer cert is itself RSA-PSS-signed, which drives the dispatch).
+    #[test]
+    fn test_cms_rsapss_sign_verify_roundtrip() {
+        let data = b"openHiTLS-rs RSA-PSS CMS round-trip";
+        let signed = CmsMessage::sign(
+            data,
+            RSAPSS_CERT_DER,
+            RSAPSS_KEY_PKCS8,
+            CmsDigestAlg::Sha256,
+        )
+        .expect("RSA-PSS CMS sign");
+        // The emitted signerInfo must carry the RSASSA-PSS parameters.
+        assert!(
+            signed
+                .raw
+                .windows(RSASSA_PSS_SHA256_PARAMS.len())
+                .any(|w| w == RSASSA_PSS_SHA256_PARAMS),
+            "signed CMS must embed the RSASSA-PSS-params"
+        );
+        assert!(signed
+            .verify_signatures(None, &[])
+            .expect("verify Rust RSA-PSS CMS"));
+
+        let det = CmsMessage::sign_detached(
+            data,
+            RSAPSS_CERT_DER,
+            RSAPSS_KEY_PKCS8,
+            CmsDigestAlg::Sha256,
+        )
+        .unwrap();
+        assert!(det.verify_signatures(Some(data), &[]).unwrap());
+        assert!(det.verify_signatures(Some(b"tampered"), &[]).is_err());
     }
 
     // ── SM2 CMS SignedData (GB/T 35275) ───────────────────────────────────
