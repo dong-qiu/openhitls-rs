@@ -705,16 +705,32 @@ pub fn build_ec_point_formats() -> Extension {
 /// Parse `ec_point_formats` extension.
 /// Returns the list of supported EC point format codes.
 pub fn parse_ec_point_formats(data: &[u8]) -> Result<Vec<u8>, TlsError> {
+    // RFC 8422 §5.1.2: extension_data is `ECPointFormatList` = a 1-byte length
+    // prefix followed by ≥1 format. A zero-length body (or a list whose length
+    // overruns the buffer) is malformed → decode_error.
     if data.is_empty() {
-        return Err(TlsError::HandshakeFailed("ec_point_formats: empty".into()));
-    }
-    let list_len = data[0] as usize;
-    if data.len() < 1 + list_len {
         return Err(TlsError::HandshakeFailed(
-            "ec_point_formats: truncated".into(),
+            "ec_point_formats: malformed (empty extension body) — decode_error".into(),
         ));
     }
-    Ok(data[1..1 + list_len].to_vec())
+    let list_len = data[0] as usize;
+    // RFC 8422 §5.1.2: `ec_point_format_list<1..2^8-1>` — the list MUST carry
+    // at least one format; a zero-length list (or one that overruns the
+    // buffer) is malformed → decode_error.
+    if list_len == 0 || data.len() < 1 + list_len {
+        return Err(TlsError::HandshakeFailed(
+            "ec_point_formats: malformed (empty or truncated list) — decode_error".into(),
+        ));
+    }
+    let formats = data[1..1 + list_len].to_vec();
+    // RFC 8422 §5.1.2: the uncompressed format (0) MUST be supported, so a
+    // present `ec_point_formats` extension that omits it is illegal_parameter.
+    if !formats.contains(&0) {
+        return Err(TlsError::HandshakeFailed(
+            "ec_point_formats: uncompressed (0) format missing — illegal_parameter".into(),
+        ));
+    }
+    Ok(formats)
 }
 
 /// Build the `renegotiation_info` extension (RFC 5746) for initial handshake.
@@ -759,9 +775,11 @@ pub fn build_extended_master_secret() -> Extension {
 
 /// Parse `extended_master_secret` extension (must be empty).
 pub fn parse_extended_master_secret(data: &[u8]) -> Result<(), TlsError> {
+    // RFC 7627 §5.1: the extension_data MUST be empty; a non-empty body is
+    // malformed → decode_error.
     if !data.is_empty() {
         return Err(TlsError::HandshakeFailed(
-            "extended_master_secret: expected empty".into(),
+            "extended_master_secret: malformed (non-empty body) — decode_error".into(),
         ));
     }
     Ok(())
@@ -1864,6 +1882,30 @@ mod tests {
     }
 
     #[test]
+    fn test_ec_point_formats_strictness() {
+        // RFC 8422 §5.1.2 strictness (closes tlsfuzzer test-point-extension XFAILs).
+        // Valid: list with the mandatory uncompressed (0) format.
+        assert_eq!(parse_ec_point_formats(&[0x01, 0x00]).unwrap(), vec![0x00]);
+        assert!(parse_ec_point_formats(&[0x02, 0x00, 0x01]).is_ok());
+        // Empty extension body → decode_error (malformed).
+        let e = parse_ec_point_formats(&[]).unwrap_err().to_string();
+        assert!(e.contains("decode_error"), "empty body: {e}");
+        // Zero-length list (`<1..>` violated) → decode_error.
+        let e = parse_ec_point_formats(&[0x00]).unwrap_err().to_string();
+        assert!(e.contains("decode_error"), "empty list: {e}");
+        // Truncated list → decode_error.
+        let e = parse_ec_point_formats(&[0x03, 0x00])
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("decode_error"), "truncated: {e}");
+        // Non-empty list missing uncompressed (0) → illegal_parameter.
+        let e = parse_ec_point_formats(&[0x01, 0x01])
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("illegal_parameter"), "missing uncompressed: {e}");
+    }
+
+    #[test]
     fn test_build_parse_renegotiation_info() {
         let ext = build_renegotiation_info_initial();
         assert_eq!(ext.extension_type, ExtensionType::RENEGOTIATION_INFO);
@@ -1881,7 +1923,12 @@ mod tests {
 
     #[test]
     fn test_extended_master_secret_non_empty_fails() {
-        assert!(parse_extended_master_secret(&[0x01]).is_err());
+        // RFC 7627 §5.1 — non-empty EMS body is malformed → decode_error
+        // (closes tlsfuzzer `malformed extended master secret ext` XFAIL).
+        let e = parse_extended_master_secret(&[0x01])
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("decode_error"), "non-empty EMS: {e}");
     }
 
     #[test]

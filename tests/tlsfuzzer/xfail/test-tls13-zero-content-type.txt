@@ -16,12 +16,16 @@
 #   - zero content type during application data
 #   - zero content type and padding during application data
 #
-# Here the server emits an ApplicationData record where the script's
-# state machine expects the alert / NewSessionTicket sequence — the
-# zero-content-type record is fed in mid-echo-loop rather than on the
-# handshake read path, so the failure mode is different from the 4
-# that T126 closed. Root cause is in the `s-server` echo loop vs the
-# record-layer reject ordering — a separate investigation, deferred.
+# Confirmed (tlsfuzzer-strictness pass): the TLS record layer ALREADY
+# rejects a zero-content-type record correctly (`parse_inner_plaintext`
+# → "inner plaintext has no content type" → unexpected_message — that is
+# what T126 used to close the 4 handshake-phase cases). These 2 remaining
+# cases fail purely on `s-server` echo-loop send ordering: the test
+# observes an echoed `ApplicationData(len=5)` where its state machine
+# expects the alert/NST sequence. That is a CLI echo-server / harness
+# interaction, NOT a protocol-conformance gap — closing it means
+# re-ordering the echo loop's read-vs-write, which risks the other
+# app-data scripts for marginal value. Deferred by design.
 
 zero content type during application data
 zero content type and padding during application data
