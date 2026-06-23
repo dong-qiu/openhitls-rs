@@ -72,8 +72,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTls12ClientConnection<S> {
     pub fn new(stream: S, config: TlsConfig) -> Self {
         Self {
             stream,
+            record_layer: RecordLayer::with_msg_callback(config.msg_callback.clone()),
             config,
-            record_layer: RecordLayer::new(),
             state: ConnectionState::Handshaking,
             negotiated_suite: None,
             read_buf: Vec::with_capacity(16 * 1024),
@@ -1034,8 +1034,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTls12ServerConnection<S> {
     pub fn new(stream: S, config: TlsConfig) -> Self {
         Self {
             stream,
+            record_layer: RecordLayer::with_msg_callback(config.msg_callback.clone()),
             config,
-            record_layer: RecordLayer::new(),
             state: ConnectionState::Handshaking,
             negotiated_suite: None,
             read_buf: Vec::with_capacity(16 * 1024),

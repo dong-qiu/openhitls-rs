@@ -82,8 +82,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsClientConnection<S> {
     pub fn new(stream: S, config: TlsConfig) -> Self {
         Self {
             stream,
+            record_layer: RecordLayer::with_msg_callback(config.msg_callback.clone()),
             config,
-            record_layer: RecordLayer::new(),
             state: ConnectionState::Handshaking,
             negotiated_suite: None,
             negotiated_version: None,
@@ -251,8 +251,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsServerConnection<S> {
     pub fn new(stream: S, config: TlsConfig) -> Self {
         Self {
             stream,
+            record_layer: RecordLayer::with_msg_callback(config.msg_callback.clone()),
             config,
-            record_layer: RecordLayer::new(),
             state: ConnectionState::Handshaking,
             negotiated_suite: None,
             negotiated_version: None,
@@ -1311,6 +1311,58 @@ mod tests {
         );
         let n = server2.read(&mut buf).await.unwrap();
         assert_eq!(&buf[..n], b"0-RTT via ticket_key_cb");
+    }
+
+    /// `msg_callback` (OpenSSL SSL_set_msg_callback parity) fires for every
+    /// record the connection seals (outgoing) and opens (incoming) — proving
+    /// the RecordLayer chokepoint is wired in both directions. A single
+    /// client's callback observes its own outgoing ClientHello (Handshake) and
+    /// the server's incoming flight (Handshake, surfaced post-decrypt as the
+    /// inner content type), plus ApplicationData once data flows.
+    #[tokio::test]
+    async fn test_async_tls13_msg_callback_observes_both_directions() {
+        use std::sync::{Arc, Mutex};
+
+        let log: Arc<Mutex<Vec<(bool, u8)>>> = Arc::new(Mutex::new(Vec::new()));
+        let log_cb = log.clone();
+        let msg_cb: crate::config::MsgCallback = Arc::new(move |outgoing, _ver, ct, _bytes| {
+            log_cb.lock().unwrap().push((outgoing, ct));
+        });
+
+        let (_, server_config) = make_tls13_configs();
+        let client_config = TlsConfig::builder()
+            .verify_peer(false)
+            .msg_callback(msg_cb)
+            .build();
+
+        let (cs, ss) = tokio::io::duplex(64 * 1024);
+        let mut client = AsyncTlsClientConnection::new(cs, client_config);
+        let mut server = AsyncTlsServerConnection::new(ss, server_config);
+        let (c, s) = tokio::join!(client.handshake(), server.handshake());
+        c.unwrap();
+        s.unwrap();
+
+        // Exchange application data so ApplicationData records are observed too.
+        client.write(b"hello").await.unwrap();
+        let mut buf = [0u8; 64];
+        let _ = server.read(&mut buf).await.unwrap();
+
+        let observed = log.lock().unwrap().clone();
+        // Outgoing handshake (ClientHello / Finished): (true, 22)
+        assert!(
+            observed.iter().any(|&(o, ct)| o && ct == 22),
+            "no outgoing handshake record observed: {observed:?}"
+        );
+        // Incoming handshake (ServerHello + decrypted flight): (false, 22)
+        assert!(
+            observed.iter().any(|&(o, ct)| !o && ct == 22),
+            "no incoming handshake record observed: {observed:?}"
+        );
+        // Outgoing application data: (true, 23)
+        assert!(
+            observed.iter().any(|&(o, ct)| o && ct == 23),
+            "no outgoing application_data record observed: {observed:?}"
+        );
     }
 
     /// Async 0-RTT: server rejects early data, handshake still completes.

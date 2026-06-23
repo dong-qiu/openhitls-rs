@@ -92,8 +92,8 @@ impl<S: Read + Write> TlsClientConnection<S> {
     pub fn new(stream: S, config: TlsConfig) -> Self {
         Self {
             stream,
+            record_layer: RecordLayer::with_msg_callback(config.msg_callback.clone()),
             config,
-            record_layer: RecordLayer::new(),
             state: ConnectionState::Handshaking,
             negotiated_suite: None,
             negotiated_version: None,
