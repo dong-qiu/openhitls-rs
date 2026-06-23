@@ -18318,3 +18318,12 @@ I180 —— TLS 死回调修复收尾:收在价值子集 + 诚实文档化其余
   - **文档改动**:info_callback(无单一收口点——握手状态/alert 事件散在 ~10 个 per-connection 握手路径)、dh_tmp_callback(FFDHE legacy)、security_cb(协商用静态安全级路径强制准入,工作正常,只是不咨询逐算法 cb)——各自在 `TlsConfigBuilder` setter + 回调类型别名上加 **"Not yet wired / Not yet consulted — stored but never invoked (backlog)"** 注释,两处 intra-doc 互链。无行为变化,setter 仍接受回调(前向兼容)。
   - cargo doc -D warnings(intra-doc 链解析)+ clippy + fmt clean;docs-only 无测试增减。
   - **净结果**:5 个原本死的 TLS 回调,2 个已接线+测试,3 个文档化为 unwired backlog——"静默成功但无效果"的陷阱对 5 个全部消除。
+
+> 我想使用tlsfuzzer完整的测试下当前的Rust版本 / 现在修
+
+I181 —— 完整 tlsfuzzer 测试 + 修一个发现的 bug。本地完整复刻 CI 工作流(13 监听器、~60 脚本、pinned tlsfuzzer/tlslite-ng、py3.14 venv),跑出 **5193 PASS / 315 XFAIL / 1 FAIL / 0 XPASS**(86 个 script-run,85 干净)。
+  - **唯一 FAIL**:`test-ffdhe-negotiation.py`(TLS 1.2)的 `unassigned tolerance, ffdhe4096 negotiation` 偶发 `bad_record_mac`(单独重跑 5 次全过 → 间歇)。
+  - **根因**:TLS 1.2 有限域 DHE 预主密钥须用共享值 Z **剥前导零**(RFC 5246 §8.1.2)——与 TLS 1.3(§7.4.1 补齐到素数长)和 ECDHE(定长 X 坐标)相反。crypto 层 `compute_shared_secret` 返回补齐的 Z,TLS 1.2 直接用了 → Z 偶有前导零字节(高字节 ~1/256)时我们的预主密钥比合规对端长 → master/密钥不一致 → bad_record_mac。间歇,所以抽样 CI 一直绿。
+  - **oracle**:字节级对照参考实现 tlslite-ng `FFDHKeyExchange.calc_shared_key`——`version < (3,4)` 走 `numberToByteArray(S)`(最小大端,剥零),TLS 1.3 才补齐。**非回归**(早于本 session,record/PKI 改动不碰 DH)。
+  - **修复**:新 `codec12::dhe_premaster_strip_leading_zeros`(原地剥,无额外秘密拷贝),应用到全部 **6** 个 TLS 1.2 有限域 DHE 预主密钥点(客户端 + 服务端 × DHE_RSA/DHE_PSK/DHE_anon;DHE_PSK 的 other_secret 在 build_psk_pms 前剥)。ECDHE 定长路径 + TLS 1.3 补齐不动。
+  - **验证**:确定性 helper 单测 + **20× 全 `-n 9999` ffdhe 全过**(每次 39/2/0,修前约 4%/sweep 会中)+ hitls-tls + hitls-integration-tests 0 回归;fmt+clippy clean。

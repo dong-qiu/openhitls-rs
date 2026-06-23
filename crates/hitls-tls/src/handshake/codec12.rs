@@ -909,6 +909,28 @@ pub fn build_psk_pms(other_secret: &[u8], psk: &[u8]) -> Vec<u8> {
     pms
 }
 
+/// Strip leading zero bytes from a TLS 1.2 finite-field Diffie-Hellman shared
+/// secret `Z` to form the premaster secret.
+///
+/// RFC 5246 §8.1.2: "leading bytes of Z that contain all zero bits are stripped
+/// before it is used as the pre_master_secret." This is the **opposite** of
+/// TLS 1.3 (RFC 8446 §7.4.1, which keeps `Z` left-padded to the prime length)
+/// and ECDHE (RFC 4492 — the fixed-length X coordinate, never stripped). The
+/// crypto-layer `DhKeyPair::compute_shared_secret` returns `Z` padded to the
+/// prime size, so the TLS 1.2 DHE paths must strip here.
+///
+/// Without this, a `Z` that happens to begin with a zero byte (~1/256 of
+/// handshakes for the high byte) yields a premaster one or more bytes longer
+/// than a spec-compliant peer's, producing a different master secret, different
+/// record keys, and an intermittent `bad_record_mac` — surfaced by tlsfuzzer's
+/// `test-ffdhe-negotiation.py` (`unassigned tolerance, ffdhe4096 negotiation`).
+/// Stripping is done in place (no extra copy of the secret).
+pub fn dhe_premaster_strip_leading_zeros(mut z: Vec<u8>) -> Vec<u8> {
+    let first_nonzero = z.iter().position(|&b| b != 0).unwrap_or(z.len());
+    z.drain(..first_nonzero);
+    z
+}
+
 /// Encode a PSK ClientKeyExchange message.
 pub fn encode_client_key_exchange_psk(cke: &ClientKeyExchangePsk) -> Vec<u8> {
     let mut body = Vec::with_capacity(2 + cke.identity.len());
@@ -1307,6 +1329,38 @@ pub fn decode_server_key_exchange_ecdhe_anon(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_dhe_premaster_strip_leading_zeros() {
+        // RFC 5246 §8.1.2 — leading zero bytes are stripped for the TLS 1.2
+        // finite-field DH premaster secret. Mirrors tlslite-ng's
+        // `numberToByteArray(S)` (minimal big-endian) for version < (3, 4).
+        assert_eq!(
+            dhe_premaster_strip_leading_zeros(vec![0x00, 0x12, 0x34]),
+            vec![0x12, 0x34]
+        );
+        assert_eq!(
+            dhe_premaster_strip_leading_zeros(vec![0x00, 0x00, 0xAB]),
+            vec![0xAB]
+        );
+        // No leading zero → unchanged (the common case).
+        assert_eq!(
+            dhe_premaster_strip_leading_zeros(vec![0x80, 0x00, 0x01]),
+            vec![0x80, 0x00, 0x01]
+        );
+        // Interior zeros are preserved; only the leading run is removed.
+        assert_eq!(
+            dhe_premaster_strip_leading_zeros(vec![0x00, 0x01, 0x00, 0x02]),
+            vec![0x01, 0x00, 0x02]
+        );
+        // Degenerate inputs (never produced by a valid DH exchange, but must
+        // not panic): all-zero → empty, empty → empty.
+        assert_eq!(
+            dhe_premaster_strip_leading_zeros(vec![0x00, 0x00]),
+            Vec::<u8>::new()
+        );
+        assert_eq!(dhe_premaster_strip_leading_zeros(vec![]), Vec::<u8>::new());
+    }
 
     #[test]
     fn test_encode_decode_server_key_exchange_roundtrip() {
