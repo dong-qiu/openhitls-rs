@@ -24,6 +24,9 @@ pub type MsgCallback = Arc<dyn Fn(bool, u16, u8, &[u8]) + Send + Sync>;
 /// Called on handshake state transitions and alert events.
 /// Parameters: `(event_type, value)`.
 /// Event types: handshake state changes, alert notifications, etc.
+///
+/// **Not yet wired** — stored but never invoked (backlog). See
+/// [`TlsConfigBuilder::info_callback`](super::TlsConfigBuilder::info_callback).
 pub type InfoCallback = Arc<dyn Fn(i32, i32) + Send + Sync>;
 
 /// TLS 1.3 record padding callback.
@@ -38,6 +41,9 @@ pub type RecordPaddingCallback = Arc<dyn Fn(u8, usize) -> usize + Send + Sync>;
 /// Called on server to generate ephemeral DH parameters.
 /// Parameters: `(is_export, key_bits)`.
 /// Returns: DH parameters as DER bytes, or None to use defaults.
+///
+/// **Not yet wired** — stored but never invoked (FFDHE is legacy; backlog).
+/// See [`TlsConfigBuilder::dh_tmp_callback`](super::TlsConfigBuilder::dh_tmp_callback).
 pub type DhTmpCallback = Arc<dyn Fn(bool, u32) -> Option<Vec<u8>> + Send + Sync>;
 
 /// DTLS cookie generation callback.
@@ -138,4 +144,8 @@ pub type TicketKeyCallback = Arc<dyn Fn(&[u8], bool) -> Option<TicketKeyResult> 
 /// - `id`: algorithm identifier (cipher suite u16, group u16, sigalg u16, version u16)
 ///
 /// Returns true to allow, false to reject.
+///
+/// **Not yet consulted** — stored but negotiation enforces admissibility via
+/// the static security-level path instead (backlog). See
+/// [`TlsConfigBuilder::security_cb`](super::TlsConfigBuilder::security_cb).
 pub type SecurityCallback = Arc<dyn Fn(u32, u32, u16) -> bool + Send + Sync>;
