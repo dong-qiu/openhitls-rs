@@ -896,6 +896,13 @@ impl TlsConfigBuilder {
         self
     }
 
+    /// Set a handshake-state / alert notification callback.
+    ///
+    /// **Not yet wired** — the callback is stored but currently *never invoked*
+    /// (no handshake-state or alert events are dispatched yet). Setting it has
+    /// no effect today; it is tracked as backlog (the events live across ~10
+    /// per-connection handshake paths with no single chokepoint). The wired
+    /// `msg_callback` covers per-record observation in the meantime.
     pub fn info_callback(mut self, cb: InfoCallback) -> Self {
         self.info_callback = Some(cb);
         self
@@ -906,6 +913,11 @@ impl TlsConfigBuilder {
         self
     }
 
+    /// Set a temporary (ephemeral) DH parameter-generation callback.
+    ///
+    /// **Not yet wired** — the callback is stored but currently *never invoked*.
+    /// Setting it has no effect today; it is tracked as backlog. Finite-field
+    /// DHE is legacy (ECDHE is used in practice), so this is low priority.
     pub fn dh_tmp_callback(mut self, cb: DhTmpCallback) -> Self {
         self.dh_tmp_callback = Some(cb);
         self
@@ -951,6 +963,13 @@ impl TlsConfigBuilder {
         self
     }
 
+    /// Set a per-algorithm security callback (filters cipher suites, groups,
+    /// signature algorithms, versions).
+    ///
+    /// **Not yet consulted** — the callback is stored but negotiation currently
+    /// does *not* call it; algorithm admissibility is enforced by the static
+    /// security-level path ([`security_level`](Self::security_level)) instead.
+    /// Setting a custom callback has no effect today; it is tracked as backlog.
     pub fn security_cb(mut self, cb: SecurityCallback) -> Self {
         self.security_cb = Some(cb);
         self
