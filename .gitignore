@@ -19,3 +19,6 @@
 
 # Local xtask migration diagnostics snapshots.
 /diagnostics/
+
+# TLS-Anvil / TLS-Attacker run artifacts (written into CWD when run locally).
+/logs/
