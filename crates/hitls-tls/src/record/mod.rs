@@ -474,6 +474,23 @@ impl RecordLayer {
             ));
         }
 
+        // RFC 8446 §5.1 — "Implementations MUST NOT send zero-length
+        // fragments of Handshake or Alert types, even if those fragments
+        // contain padding." A received zero-length Handshake / Alert
+        // fragment MUST be treated as `unexpected_message`. Zero-length
+        // ApplicationData is explicitly permitted (and passes through —
+        // Phase T103), and ChangeCipherSpec is a fixed 1-byte record.
+        // Without this, a zero-length encrypted Handshake record at the
+        // Finished point left the cross-record reassembly loop waiting for
+        // bytes that never came → the connection hung with no alert
+        // (TLS-Anvil `zeroLengthRecord_Finished`); `check_empty_record`
+        // existed but was never wired into a read path.
+        if pt.is_empty() && matches!(ct, ContentType::Handshake | ContentType::Alert) {
+            return Err(TlsError::RecordError(
+                "zero-length handshake/alert fragment — unexpected_message (RFC 8446 §5.1)".into(),
+            ));
+        }
+
         // Protocol-message observation (OpenSSL SSL_set_msg_callback parity).
         if let Some(ref cb) = self.msg_callback {
             cb(false, wire_version, ct as u8, &pt);
@@ -1042,6 +1059,53 @@ mod tests {
         let (ct, pt, _) = receiver2.open_record(&sealed2).unwrap();
         assert_eq!(ct, ContentType::ApplicationData);
         assert_eq!(pt, exact);
+    }
+
+    #[test]
+    fn test_zero_length_handshake_fragment_rejected() {
+        use crate::alert::{tls_error_to_alert, AlertDescription};
+        let keys = TrafficKeys {
+            key: vec![0x42; 16],
+            iv: vec![0x43; 12],
+        };
+        let new_pair = || {
+            let mut tx = RecordLayer::new();
+            tx.activate_write_encryption(CipherSuite::TLS_AES_128_GCM_SHA256, &keys)
+                .unwrap();
+            let mut rx = RecordLayer::new();
+            rx.activate_read_decryption(CipherSuite::TLS_AES_128_GCM_SHA256, &keys)
+                .unwrap();
+            (tx, rx)
+        };
+
+        // RFC 8446 §5.1 — a zero-length Handshake fragment MUST draw
+        // unexpected_message (this is the `zeroLengthRecord_Finished`
+        // hang: previously the reassembly loop blocked on it forever).
+        let (mut tx, mut rx) = new_pair();
+        let sealed = tx.seal_record(ContentType::Handshake, &[]).unwrap();
+        let err = rx.open_record(&sealed).unwrap_err();
+        assert_eq!(
+            tls_error_to_alert(&err),
+            AlertDescription::UnexpectedMessage,
+            "zero-length Handshake fragment must be unexpected_message"
+        );
+
+        // A zero-length Alert fragment is likewise rejected.
+        let (mut tx, mut rx) = new_pair();
+        let sealed = tx.seal_record(ContentType::Alert, &[]).unwrap();
+        let err = rx.open_record(&sealed).unwrap_err();
+        assert_eq!(
+            tls_error_to_alert(&err),
+            AlertDescription::UnexpectedMessage
+        );
+
+        // But a zero-length ApplicationData record stays permitted (RFC
+        // 8446 §5.1 / Phase T103) — it passes through cleanly.
+        let (mut tx, mut rx) = new_pair();
+        let sealed = tx.seal_record(ContentType::ApplicationData, &[]).unwrap();
+        let (ct, pt, _) = rx.open_record(&sealed).unwrap();
+        assert_eq!(ct, ContentType::ApplicationData);
+        assert!(pt.is_empty());
     }
 
     #[test]
