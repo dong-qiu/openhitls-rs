@@ -3340,11 +3340,23 @@ fn test_tls12_record_size_limit() {
     assert_eq!(server_rl.max_fragment_size, 2048);
     assert_eq!(client_rl.max_fragment_size, 2048);
 
-    // Large plaintext should be rejected
+    // Large plaintext is fragmented across records (each ≤ the 2048 limit),
+    // not rejected (RFC 5246 §6.2.1).
     let large = vec![0x42u8; 2049];
-    assert!(server_rl
+    let sealed = server_rl
         .seal_record(ContentType::ApplicationData, &large)
-        .is_err());
+        .unwrap();
+    let mut d = sealed.as_slice();
+    let mut nrecords = 0;
+    while d.len() >= 5 {
+        let len = u16::from_be_bytes([d[3], d[4]]) as usize;
+        d = &d[5 + len..];
+        nrecords += 1;
+    }
+    assert!(
+        nrecords >= 2,
+        "an over-limit plaintext must fragment into multiple records"
+    );
 
     // Exactly 2048 should work
     let ok = vec![0x42u8; 2048];

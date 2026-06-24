@@ -332,14 +332,9 @@ impl RecordLayer {
         content_type: ContentType,
         plaintext: &[u8],
     ) -> Result<Vec<u8>, TlsError> {
-        if plaintext.len() > self.max_fragment_size {
-            return Err(TlsError::RecordError(
-                "plaintext exceeds max fragment size".into(),
-            ));
-        }
         // Protocol-message observation (OpenSSL SSL_set_msg_callback parity):
-        // report the outgoing message (inner content type + plaintext payload,
-        // pre-encryption). The wire version is the record's legacy version.
+        // report the outgoing message once, whole (inner content type +
+        // pre-encryption / pre-fragmentation plaintext payload).
         if let Some(ref cb) = self.msg_callback {
             cb(true, TLS13_LEGACY_VERSION, content_type as u8, plaintext);
         }
@@ -353,7 +348,8 @@ impl RecordLayer {
         // during renegotiation would emit an encrypted 25-byte payload
         // (TLS 1.2 AES-GCM expansion of a 1-byte plaintext), which
         // OpenSSL / NSS / the receiver-side `process_change_cipher_spec`
-        // payload-length check (Phase I112) all reject.
+        // payload-length check (Phase I112) all reject. CCS is a 1-byte
+        // record and never exceeds the fragment limit.
         if content_type == ContentType::ChangeCipherSpec {
             let record = Record {
                 content_type,
@@ -362,6 +358,35 @@ impl RecordLayer {
             };
             return Ok(self.serialize_record(&record));
         }
+        // RFC 5246 §6.2.1 / RFC 8446 §5.1 — a message larger than the current
+        // fragment limit (which an RFC 6066 `max_fragment_length` or RFC 8449
+        // `record_size_limit` negotiation may have lowered well below 2^14) is
+        // split across multiple records, each ≤ `max_fragment_size`. Each
+        // fragment is sealed independently (its own AEAD sequence number /
+        // padding); the peer reassembles by concatenating the record payloads.
+        // Previously an over-limit message (e.g. a Certificate under a small
+        // negotiated MFL) was rejected with "record overflow" instead of being
+        // fragmented — surfaced by TLS-Anvil's `max_fragment_length` tests.
+        let mfs = self.max_fragment_size.max(1);
+        if plaintext.len() <= mfs {
+            return self.seal_one_record(content_type, plaintext);
+        }
+        let mut out = Vec::with_capacity(plaintext.len() + 64);
+        for chunk in plaintext.chunks(mfs) {
+            out.extend_from_slice(&self.seal_one_record(content_type, chunk)?);
+        }
+        Ok(out)
+    }
+
+    /// Seal a single record (≤ `max_fragment_size` plaintext) — encrypt it when
+    /// a write encryptor is active, else emit it as a cleartext record — and
+    /// return the serialized bytes. Callers fragment via [`seal_record`]; this
+    /// never invokes the message callback (that fires once per whole message).
+    fn seal_one_record(
+        &mut self,
+        content_type: ContentType,
+        plaintext: &[u8],
+    ) -> Result<Vec<u8>, TlsError> {
         let record = if let Some(enc) = &mut self.encryptor {
             enc.encrypt_record(content_type, plaintext)?
         } else {
@@ -559,6 +584,47 @@ impl Default for RecordLayer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_seal_record_fragments_oversized_message() {
+        // RFC 5246 §6.2.1 / RFC 8446 §5.1 — a message larger than
+        // max_fragment_size (e.g. an RFC 6066 max_fragment_length-limited peer)
+        // must be split across records, not rejected. Cleartext path so we can
+        // reassemble via parse_record.
+        let mut rl = RecordLayer::new();
+        rl.max_fragment_size = 64;
+        let plaintext: Vec<u8> = (0..200u32).map(|i| i as u8).collect(); // 200 > 64
+
+        let sealed = rl.seal_record(ContentType::Handshake, &plaintext).unwrap();
+
+        let mut data = sealed.as_slice();
+        let mut reassembled = Vec::new();
+        let mut nrecords = 0;
+        while !data.is_empty() {
+            let (rec, consumed) = rl.parse_record(data).unwrap();
+            assert_eq!(rec.content_type, ContentType::Handshake);
+            assert!(
+                rec.fragment.len() <= 64,
+                "each fragment must honor max_fragment_size"
+            );
+            reassembled.extend_from_slice(&rec.fragment);
+            data = &data[consumed..];
+            nrecords += 1;
+        }
+        assert_eq!(reassembled, plaintext, "fragments must reassemble exactly");
+        assert_eq!(nrecords, 4, "200 bytes / 64 → 4 records (64+64+64+8)");
+
+        // A message that fits stays a single record (byte-identical to before).
+        let small = vec![0xAB; 10];
+        let one = rl.seal_record(ContentType::Handshake, &small).unwrap();
+        let (rec, consumed) = rl.parse_record(&one).unwrap();
+        assert_eq!(
+            consumed,
+            one.len(),
+            "small message must be exactly one record"
+        );
+        assert_eq!(rec.fragment, small);
+    }
 
     // -----------------------------------------------------------------------
     // RecordLayer state
@@ -814,10 +880,22 @@ mod tests {
     }
 
     #[test]
-    fn test_seal_plaintext_too_large() {
+    fn test_seal_oversized_plaintext_fragments() {
+        // A plaintext exceeding the fragment limit is now split across records
+        // (RFC 5246 §6.2.1 / RFC 8446 §5.1) rather than rejected. Each emitted
+        // record is ≤ max_fragment_size and they reassemble to the original.
         let mut rl = RecordLayer::new();
         let data = vec![0u8; MAX_PLAINTEXT_LENGTH + 1];
-        assert!(rl.seal_record(ContentType::ApplicationData, &data).is_err());
+        let sealed = rl.seal_record(ContentType::ApplicationData, &data).unwrap();
+        let mut d = sealed.as_slice();
+        let mut reassembled = Vec::new();
+        while !d.is_empty() {
+            let (rec, consumed) = rl.parse_record(d).unwrap();
+            assert!(rec.fragment.len() <= MAX_PLAINTEXT_LENGTH);
+            reassembled.extend_from_slice(&rec.fragment);
+            d = &d[consumed..];
+        }
+        assert_eq!(reassembled.len(), data.len());
     }
 
     #[test]
@@ -906,13 +984,19 @@ mod tests {
     fn test_max_fragment_size_custom() {
         let mut rl = RecordLayer::new();
         rl.max_fragment_size = 512;
-        // 512 bytes should work
+        // 512 bytes → exactly one record.
         let data = vec![0u8; 512];
         let sealed = rl.seal_record(ContentType::ApplicationData, &data).unwrap();
-        assert!(!sealed.is_empty());
-        // 513 bytes should fail
+        let (rec, consumed) = rl.parse_record(&sealed).unwrap();
+        assert_eq!(consumed, sealed.len());
+        assert_eq!(rec.fragment.len(), 512);
+        // 513 bytes → fragmented into two records (512 + 1), not rejected.
         let data = vec![0u8; 513];
-        assert!(rl.seal_record(ContentType::ApplicationData, &data).is_err());
+        let sealed = rl.seal_record(ContentType::ApplicationData, &data).unwrap();
+        let (r1, c1) = rl.parse_record(&sealed).unwrap();
+        let (r2, _) = rl.parse_record(&sealed[c1..]).unwrap();
+        assert_eq!(r1.fragment.len(), 512);
+        assert_eq!(r2.fragment.len(), 1);
     }
 
     #[test]
