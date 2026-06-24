@@ -24,9 +24,10 @@ use super::codec::{
 use super::codec::{
     decode_client_hello, decode_finished, encode_certificate, encode_certificate_request,
     encode_certificate_verify, encode_encrypted_extensions, encode_finished,
-    encode_new_session_ticket, encode_server_hello, CertCompressionAlgorithm, CertificateEntry,
-    CertificateMsg, CertificateRequestMsg, CertificateVerifyMsg, EncryptedExtensions,
-    NewSessionTicketMsg, ServerHello, HELLO_RETRY_REQUEST_RANDOM,
+    encode_new_session_ticket, encode_server_hello, validate_tls13_client_hello_legacy_fields,
+    CertCompressionAlgorithm, CertificateEntry, CertificateMsg, CertificateRequestMsg,
+    CertificateVerifyMsg, EncryptedExtensions, NewSessionTicketMsg, ServerHello,
+    HELLO_RETRY_REQUEST_RANDOM,
 };
 use super::extensions_codec::{
     build_alpn_selected, build_early_data_ee, build_early_data_nst, build_key_share_hrr,
@@ -514,6 +515,11 @@ impl ServerHandshake {
 
         let body = get_body(msg_data)?;
         let ch = decode_client_hello(body)?;
+        // RFC 8446 §4.1.2 — reject an SSL-3.0-or-lower legacy_version
+        // (protocol_version) or a non-`[0]` legacy_compression_methods
+        // (illegal_parameter). Done at the TLS 1.3 server, not the shared
+        // codec, so the 1.2 / TLCP / DTLS paths keep their laxer rules.
+        validate_tls13_client_hello_legacy_fields(body)?;
         self.client_random = ch.random;
 
         // Phase T106 — surface the offered-but-not-necessarily-accepted
@@ -749,6 +755,7 @@ impl ServerHandshake {
 
         let body = get_body(msg_data)?;
         let ch = decode_client_hello(body)?;
+        validate_tls13_client_hello_legacy_fields(body)?;
 
         // Parse extensions again
         let sig_alg_ext = ch
@@ -886,13 +893,23 @@ impl ServerHandshake {
             .ok_or_else(|| TlsError::HandshakeFailed("missing key_share in ClientHello".into()))?;
         let client_key_shares = parse_key_share_ch(&ks_ext.data)?;
 
-        // supported_groups (optional for normal path, required for HRR)
+        // supported_groups — RFC 8446 §9.2: a ClientHello that offers
+        // `key_share` (i.e. attempts an (EC)DHE handshake, which ours
+        // always does — `key_share` is required just above) MUST also
+        // carry `supported_groups`; a server receiving one without it
+        // MUST abort with `missing_extension`. (The "missing
+        // supported_groups" substring routes `tls_error_to_alert`.)
         let client_groups = ch
             .extensions
             .iter()
             .find(|e| e.extension_type == ExtensionType::SUPPORTED_GROUPS)
             .map(|e| parse_supported_groups_ch(&e.data))
             .transpose()?;
+        if client_groups.is_none() {
+            return Err(TlsError::HandshakeFailed(
+                "missing supported_groups extension in ClientHello (RFC 8446 §9.2)".into(),
+            ));
+        }
 
         // RFC 8446 §4.2.8: "Each KeyShareEntry value ... MUST correspond to a
         // group offered in the 'supported_groups' extension ... Clients MUST
@@ -2166,13 +2183,15 @@ mod tests {
     }
 
     #[test]
-    fn test_server_no_supported_groups_still_works() {
+    fn test_server_no_supported_groups_rejected() {
         use crate::handshake::extensions_codec::{
             build_key_share_ch, build_signature_algorithms, build_supported_versions_ch,
         };
         let config = make_server_config();
         let mut hs = ServerHandshake::new(config);
-        // CH without supported_groups extension but with a valid key_share
+        // CH that offers key_share (an (EC)DHE attempt) but omits
+        // supported_groups. RFC 8446 §9.2 requires both — the server MUST
+        // abort with `missing_extension` (TLS-Anvil `omitSupportedGroups`).
         let ch = super::super::codec::ClientHello {
             random: [0xFF; 32],
             legacy_session_id: vec![],
@@ -2184,11 +2203,15 @@ mod tests {
             ],
         };
         let msg = super::super::codec::encode_client_hello(&ch);
-        let result = hs.process_client_hello(&msg);
-        // Server can proceed if a usable key_share is found
-        assert!(
-            result.is_ok(),
-            "should work with key_share even without supported_groups"
+        let err = match hs.process_client_hello(&msg) {
+            Err(e) => e,
+            Ok(_) => panic!("CH without supported_groups must be rejected"),
+        };
+        let alert = crate::alert::tls_error_to_alert(&err);
+        assert_eq!(
+            alert,
+            crate::alert::AlertDescription::MissingExtension,
+            "CH without supported_groups must draw missing_extension"
         );
     }
 

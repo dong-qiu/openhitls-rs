@@ -801,7 +801,7 @@ pub fn decode_client_hello(data: &[u8]) -> Result<ClientHello, TlsError> {
     if data.len() < pos + 2 {
         return Err(err("too short for version"));
     }
-    pos += 2; // skip legacy_version
+    pos += 2; // skip legacy_version (the TLS 1.3 server validates it itself)
 
     // random (32)
     if data.len() < pos + 32 {
@@ -861,6 +861,59 @@ pub fn decode_client_hello(data: &[u8]) -> Result<ClientHello, TlsError> {
         cipher_suites,
         extensions,
     })
+}
+
+/// RFC 8446 §4.1.2 strictness checks that apply **only to a TLS 1.3
+/// server**, kept out of the shared `decode_client_hello` (which the
+/// TLS 1.2 / TLCP / DTLS paths reuse with laxer legacy-field rules):
+///
+/// * `legacy_version` MUST NOT be `0x0300` (SSL 3.0) or lower — abort
+///   with `protocol_version`.
+/// * `legacy_compression_methods` MUST be exactly the single byte `0x00`
+///   ("null") — abort with `illegal_parameter`.
+///
+/// `body` is the ClientHello handshake-message body that
+/// `decode_client_hello` has already accepted, so the field offsets are
+/// known-good; the defensive length guards therefore never fire in
+/// practice. Pure (`&[u8] -> Result`) for unit testing.
+pub fn validate_tls13_client_hello_legacy_fields(body: &[u8]) -> Result<(), TlsError> {
+    if body.len() < 2 {
+        return Ok(());
+    }
+    let legacy_version = u16::from_be_bytes([body[0], body[1]]);
+    if legacy_version <= 0x0300 {
+        return Err(TlsError::HandshakeFailed(
+            "ClientHello: protocol version — legacy_version 0x0300 or lower is forbidden \
+             (RFC 8446 §4.1.2)"
+                .into(),
+        ));
+    }
+    // Walk version(2) + random(32) + session_id(1+n) + cipher_suites(2+2m)
+    // to reach legacy_compression_methods.
+    let mut pos = 2 + 32;
+    if body.len() < pos + 1 {
+        return Ok(());
+    }
+    let sid_len = body[pos] as usize;
+    pos += 1 + sid_len;
+    if body.len() < pos + 2 {
+        return Ok(());
+    }
+    let suites_len = u16::from_be_bytes([body[pos], body[pos + 1]]) as usize;
+    pos += 2 + suites_len;
+    if body.len() < pos + 1 {
+        return Ok(());
+    }
+    let comp_len = body[pos] as usize;
+    let comp = &body[(pos + 1).min(body.len())..(pos + 1 + comp_len).min(body.len())];
+    if comp != [0x00] {
+        return Err(TlsError::HandshakeFailed(
+            "ClientHello: illegal_parameter — legacy_compression_methods must be exactly [0] \
+             (RFC 8446 §4.1.2)"
+                .into(),
+        ));
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -1475,6 +1528,59 @@ mod tests {
         data.extend_from_slice(&[0x00, 0x03]); // suites_len = 3 (odd → invalid)
         data.extend_from_slice(&[0x00, 0x00, 0x00]); // 3 bytes
         assert!(decode_client_hello(&data).is_err());
+    }
+
+    /// Build a minimal ClientHello *body* (no 4-byte handshake header)
+    /// with a chosen `legacy_version` and `legacy_compression_methods`.
+    fn ch_body(version: u16, comp: &[u8]) -> Vec<u8> {
+        let mut b = Vec::new();
+        b.extend_from_slice(&version.to_be_bytes());
+        b.extend_from_slice(&[0u8; 32]); // random
+        b.push(0); // legacy_session_id length = 0
+        b.extend_from_slice(&[0x00, 0x02, 0x13, 0x01]); // cipher_suites: TLS_AES_128_GCM_SHA256
+        b.push(comp.len() as u8);
+        b.extend_from_slice(comp);
+        b.extend_from_slice(&[0x00, 0x00]); // extensions length = 0
+        b
+    }
+
+    #[test]
+    fn test_validate_tls13_legacy_fields_accepts_valid() {
+        // legacy_version 0x0303 + compression [0] is the only conformant form.
+        assert!(validate_tls13_client_hello_legacy_fields(&ch_body(0x0303, &[0x00])).is_ok());
+        // TLS 1.0 (0x0301) / 1.1 (0x0302) legacy_version stay legal (RFC 8446
+        // §4.1.2 only forbids 0x0300 or lower).
+        assert!(validate_tls13_client_hello_legacy_fields(&ch_body(0x0301, &[0x00])).is_ok());
+        assert!(validate_tls13_client_hello_legacy_fields(&ch_body(0x0302, &[0x00])).is_ok());
+    }
+
+    #[test]
+    fn test_validate_tls13_legacy_version_ssl30_rejected() {
+        use crate::alert::{tls_error_to_alert, AlertDescription};
+        for v in [0x0300u16, 0x0200, 0x0000] {
+            let err = validate_tls13_client_hello_legacy_fields(&ch_body(v, &[0x00])).unwrap_err();
+            assert_eq!(
+                tls_error_to_alert(&err),
+                AlertDescription::ProtocolVersion,
+                "legacy_version {v:#06x} must draw protocol_version"
+            );
+        }
+    }
+
+    #[test]
+    fn test_validate_tls13_compression_non_null_rejected() {
+        use crate::alert::{tls_error_to_alert, AlertDescription};
+        // Anything other than exactly [0x00]: extra method, or a single
+        // non-null method, or an empty list — all illegal_parameter.
+        for comp in [vec![0x00, 0x01], vec![0x01], vec![]] {
+            let err =
+                validate_tls13_client_hello_legacy_fields(&ch_body(0x0303, &comp)).unwrap_err();
+            assert_eq!(
+                tls_error_to_alert(&err),
+                AlertDescription::IllegalParameter,
+                "compression {comp:?} must draw illegal_parameter"
+            );
+        }
     }
 
     #[test]
