@@ -199,6 +199,9 @@ pub fn tls_error_to_alert(err: &hitls_types::TlsError) -> AlertDescription {
                 || m.contains("unknown content type")
                 || m.contains("unknown inner content type")
                 || m.contains("inner plaintext has no content type")
+                // RFC 8446 §5.1 — a zero-length Handshake / Alert fragment
+                // (forbidden) is also `unexpected_message`.
+                || m.contains("unexpected_message")
             {
                 AlertDescription::UnexpectedMessage
             } else {
