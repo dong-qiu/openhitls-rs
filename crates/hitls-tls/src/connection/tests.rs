@@ -4263,13 +4263,7 @@ fn test_tls13_record_size_limit() {
     assert_eq!(server_rl.max_fragment_size, 4095);
     assert_eq!(client_rl.max_fragment_size, 4095);
 
-    // Server should reject a plaintext larger than 4095
-    let large = vec![0x42u8; 4096];
-    assert!(server_rl
-        .seal_record(ContentType::ApplicationData, &large)
-        .is_err());
-
-    // But 4095 bytes should work
+    // 4095 bytes fits in a single record and round-trips cleanly.
     let just_right = vec![0x42u8; 4095];
     let rec = server_rl
         .seal_record(ContentType::ApplicationData, &just_right)
@@ -4277,6 +4271,25 @@ fn test_tls13_record_size_limit() {
     let (ct, pt, _) = client_rl.open_record(&rec).unwrap();
     assert_eq!(ct, ContentType::ApplicationData);
     assert_eq!(pt, just_right);
+
+    // A plaintext larger than 4095 is fragmented across records (each ≤ the
+    // negotiated 4095 limit), not rejected (RFC 8446 §5.1). Done last so the
+    // multi-record seal does not desynchronise the round-trip above.
+    let large = vec![0x42u8; 4096];
+    let sealed = server_rl
+        .seal_record(ContentType::ApplicationData, &large)
+        .unwrap();
+    let mut d = sealed.as_slice();
+    let mut nrecords = 0;
+    while d.len() >= 5 {
+        let len = u16::from_be_bytes([d[3], d[4]]) as usize;
+        d = &d[5 + len..];
+        nrecords += 1;
+    }
+    assert!(
+        nrecords >= 2,
+        "an over-limit plaintext must fragment into multiple records"
+    );
 }
 
 #[test]
