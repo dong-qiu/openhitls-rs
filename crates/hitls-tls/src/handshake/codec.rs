@@ -755,12 +755,22 @@ pub(crate) fn parse_extensions_from(data: &[u8]) -> Result<Vec<Extension>, TlsEr
         return Ok(vec![]);
     }
     let ext_len = u16::from_be_bytes([data[0], data[1]]) as usize;
-    if data.len() < 2 + ext_len {
+    // The extensions block is the final field of the
+    // (Client|Server)Hello / EncryptedExtensions, so its declared length
+    // MUST account for exactly the remaining bytes. Rejecting a mismatch
+    // — too few (truncated) or too many (a stray trailing byte) — closes
+    // the off-by-one length-field tolerance TLS-Anvil's
+    // `helloExtensionsLength` / `clientHelloCompressionLength` tests
+    // exercise: a `-1` on the extensions-list length (or a preceding
+    // length field, which shifts the extensions slice) leaves a trailing
+    // byte that was previously dropped silently. RFC 8446 §6.2
+    // `decode_error`.
+    if data.len() != 2 + ext_len {
         return Err(TlsError::HandshakeFailed(
-            "extensions data truncated".into(),
+            "extensions length mismatch — trailing or truncated data (decode_error)".into(),
         ));
     }
-    parse_extensions_list(&data[2..2 + ext_len])
+    parse_extensions_list(&data[2..])
 }
 
 /// Parse a raw extension list (no length prefix).
@@ -779,6 +789,18 @@ pub(crate) fn parse_extensions_list(data: &[u8]) -> Result<Vec<Extension>, TlsEr
             data: data[pos..pos + ext_len].to_vec(),
         });
         pos += ext_len;
+    }
+    // Strict consumption: the entries MUST exactly fill the declared
+    // extensions region (callers pass a slice bounded by the outer
+    // extensions length). A leftover 1-3 bytes means an inner extension's
+    // length field is inconsistent with the block — TLS-Anvil's
+    // per-extension `*ExtensionLength` tests corrupt one ext's length by
+    // `-1`, leaving a stray trailing byte the loop would otherwise drop.
+    // RFC 8446 §6.2 `decode_error`.
+    if pos != data.len() {
+        return Err(TlsError::HandshakeFailed(
+            "trailing bytes after extensions list (decode_error)".into(),
+        ));
     }
     Ok(exts)
 }
@@ -1581,6 +1603,41 @@ mod tests {
                 "compression {comp:?} must draw illegal_parameter"
             );
         }
+    }
+
+    #[test]
+    fn test_parse_extensions_strict_length() {
+        use crate::alert::{tls_error_to_alert, AlertDescription};
+        // Valid: 2-byte length = 4, one zero-length extension (0x002b).
+        let ok = [0x00, 0x04, 0x00, 0x2b, 0x00, 0x00];
+        assert_eq!(parse_extensions_from(&ok).unwrap().len(), 1);
+        // Empty extensions block (length 0) and a fully-absent block both ok.
+        assert!(parse_extensions_from(&[0x00, 0x00]).unwrap().is_empty());
+        assert!(parse_extensions_from(&[]).unwrap().is_empty());
+
+        // Trailing byte after the declared region (the `-1`-length shape):
+        // declared length 4 but 5 bytes of content present.
+        let trailing = [0x00, 0x04, 0x00, 0x2b, 0x00, 0x00, 0xFF];
+        let err = parse_extensions_from(&trailing).unwrap_err();
+        assert_eq!(tls_error_to_alert(&err), AlertDescription::DecodeError);
+
+        // Truncated: declared length 5 but only 4 content bytes.
+        let truncated = [0x00, 0x05, 0x00, 0x2b, 0x00, 0x00];
+        let err = parse_extensions_from(&truncated).unwrap_err();
+        assert_eq!(tls_error_to_alert(&err), AlertDescription::DecodeError);
+
+        // parse_extensions_list rejects a stray trailing byte (a per-
+        // extension length corrupted by -1 leaves one byte over).
+        let list_trailing = [0x00, 0x2b, 0x00, 0x00, 0xAA];
+        let err = parse_extensions_list(&list_trailing).unwrap_err();
+        assert_eq!(tls_error_to_alert(&err), AlertDescription::DecodeError);
+        // Exact list parses cleanly.
+        assert_eq!(
+            parse_extensions_list(&[0x00, 0x2b, 0x00, 0x00])
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     #[test]
