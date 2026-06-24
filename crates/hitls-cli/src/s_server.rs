@@ -523,29 +523,78 @@ fn default_tls12_suites() -> Vec<CipherSuite> {
 /// own record parser then rejects a genuinely malformed handshake with
 /// a proper alert, so a wrong guess never silently corrupts state.
 fn peek_client_wants_tls13(stream: &TcpStream) -> bool {
-    let mut buf = [0u8; 2048];
+    let mut buf = [0u8; 4096];
     let mut n = 0usize;
-    for attempt in 0..8 {
+    for attempt in 0..12 {
         match stream.peek(&mut buf) {
             Ok(got) => {
                 n = got;
-                // Stop once the full first record is buffered (or the
-                // peek buffer is saturated — enough to find the
-                // supported_versions extension in any sane ClientHello).
-                if got >= 5 {
-                    let rec_len = ((buf[3] as usize) << 8) | buf[4] as usize;
-                    if got >= 5 + rec_len || got == buf.len() {
-                        break;
-                    }
+                // Stop once the *entire* ClientHello handshake message has
+                // arrived — reassembled across however many records the peer
+                // chose to split it into (RFC 8446 §5.1; TLS-Anvil's
+                // record-length tests fragment the CH down to 1 byte per
+                // record). Saturating the peek window is also a stop signal:
+                // we then decide best-effort on the buffered prefix.
+                if got >= 5 && handshake_message_complete(&buf[..got]) {
+                    break;
+                }
+                if got == buf.len() {
+                    break;
                 }
             }
             Err(_) => return false,
         }
-        if attempt < 7 {
+        if attempt < 11 {
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
     }
     client_hello_offers_tls13(&buf[..n])
+}
+
+/// Reassemble the handshake-message bytes carried by one or more
+/// consecutive TLS Handshake (`0x16`) records at the front of `buf`
+/// (RFC 8446 §5.1 — a handshake message MAY be fragmented across
+/// several records). Stops at the first non-Handshake record, once the
+/// full message (4-byte header + body) is assembled, or when the buffer
+/// runs out mid-record (the trailing partial fragment is still
+/// appended, best-effort). Pure (`&[u8] -> Vec<u8>`) for unit testing.
+fn reassemble_handshake_fragments(buf: &[u8]) -> Vec<u8> {
+    let mut hs: Vec<u8> = Vec::new();
+    let mut p = 0;
+    while p + 5 <= buf.len() {
+        if buf[p] != 0x16 {
+            break; // not a Handshake record — stop reassembling
+        }
+        let rec_len = ((buf[p + 3] as usize) << 8) | buf[p + 4] as usize;
+        let frag_start = p + 5;
+        let frag_end = frag_start + rec_len;
+        if frag_end > buf.len() {
+            hs.extend_from_slice(&buf[frag_start..]); // partial trailing record
+            break;
+        }
+        hs.extend_from_slice(&buf[frag_start..frag_end]);
+        p = frag_end;
+        // Stop once the full handshake message is buffered.
+        if hs.len() >= 4 {
+            let total = 4 + (((hs[1] as usize) << 16) | ((hs[2] as usize) << 8) | hs[3] as usize);
+            if hs.len() >= total {
+                break;
+            }
+        }
+    }
+    hs
+}
+
+/// True once the front of `buf` holds a complete handshake message
+/// (reassembled across records). Used by the peek loop to know when it
+/// has seen enough to route the connection without truncating the CH.
+fn handshake_message_complete(buf: &[u8]) -> bool {
+    let hs = reassemble_handshake_fragments(buf);
+    if hs.len() < 4 {
+        return false;
+    }
+    let total = 4 + (((hs[1] as usize) << 16) | ((hs[2] as usize) << 8) | hs[3] as usize);
+    hs.len() >= total
 }
 
 /// Walk a raw TLS record + ClientHello far enough to locate the
@@ -555,11 +604,13 @@ fn peek_client_wants_tls13(stream: &TcpStream) -> bool {
 /// `false` rather than panicking. Pure (`&[u8] -> bool`) so it is
 /// unit-testable without a socket.
 fn client_hello_offers_tls13(buf: &[u8]) -> bool {
-    // TLS record header: content_type(1) legacy_version(2) length(2).
-    if buf.len() < 5 || buf[0] != 0x16 {
-        return false; // not a Handshake record
-    }
-    let body = &buf[5..];
+    // Reassemble the ClientHello across any number of TLS records first
+    // (RFC 8446 §5.1) — a CH fragmented into small records (down to 1
+    // byte each, as TLS-Anvil's record-length tests do) must still route
+    // correctly. Pre-fix this parsed only `buf[5..]` (the first record),
+    // so a fragmented CH never reached `supported_versions` and a
+    // 1.3-only client was misrouted to the TLS 1.2 handler.
+    let body = reassemble_handshake_fragments(buf);
     // Handshake header: msg_type(1) length(3).
     if body.len() < 4 || body[0] != 0x01 {
         return false; // not a ClientHello
@@ -1143,6 +1194,55 @@ zwS7ekmeex/ZRkHXaFTKnywwOraGSJAlcwAwlMNLCrkZn9wm79fcuaRoBCCYpCZL
         // extension at all — must fall back to the 1.2 handler.
         let rec = make_client_hello(&[(0x000d, vec![0x00, 0x02, 0x04, 0x01])]);
         assert!(!client_hello_offers_tls13(&rec));
+    }
+
+    /// Re-fragment a single-record ClientHello into multiple `0x16`
+    /// records each carrying `frag` payload bytes (mirrors TLS-Anvil's
+    /// RECORD_LENGTH parameter, which splits the CH down to 1 byte/record).
+    fn fragment_into_records(single_record: &[u8], frag: usize) -> Vec<u8> {
+        let hs = &single_record[5..]; // the handshake-message bytes
+        let mut out = Vec::new();
+        for chunk in hs.chunks(frag.max(1)) {
+            out.push(0x16);
+            out.extend_from_slice(&[0x03, 0x01]);
+            out.extend_from_slice(&(chunk.len() as u16).to_be_bytes());
+            out.extend_from_slice(chunk);
+        }
+        out
+    }
+
+    #[test]
+    fn test_ch_offers_tls13_fragmented_records() {
+        // A TLS 1.3 ClientHello split across many small records (the
+        // `--tls auto` routing bug surfaced by TLS-Anvil's RECORD_LENGTH
+        // tests) must still be detected as offering TLS 1.3.
+        let rec = make_client_hello(&[(0x002b, sv_ext(&[0x0304, 0x0303]))]);
+        for frag in [1usize, 5, 50, 111] {
+            let fragmented = fragment_into_records(&rec, frag);
+            assert!(
+                client_hello_offers_tls13(&fragmented),
+                "fragmented CH ({frag} bytes/record) must still be read as TLS 1.3"
+            );
+            assert!(
+                handshake_message_complete(&fragmented),
+                "fully-buffered fragmented CH ({frag} bytes/record) must report complete"
+            );
+        }
+        // A TLS-1.2-only CH fragmented the same way must still route to 1.2.
+        let rec12 = make_client_hello(&[(0x002b, sv_ext(&[0x0303]))]);
+        assert!(!client_hello_offers_tls13(&fragment_into_records(
+            &rec12, 1
+        )));
+    }
+
+    #[test]
+    fn test_handshake_message_complete_partial() {
+        // A CH still arriving (only the first fragment buffered) is not
+        // yet complete — the peek loop must keep reading.
+        let rec = make_client_hello(&[(0x002b, sv_ext(&[0x0304]))]);
+        let fragmented = fragment_into_records(&rec, 1);
+        assert!(!handshake_message_complete(&fragmented[..10]));
+        assert!(handshake_message_complete(&fragmented));
     }
 
     #[test]

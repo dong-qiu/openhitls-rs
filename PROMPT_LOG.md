@@ -18373,3 +18373,11 @@ I186 —— TLS-Anvil 发现的 #1:RFC 6066 `max_fragment_length` / RFC 8449 `re
   - **修复**:重构 `seal_record` 做分片 —— 把单条记录的加密抽到新 `seal_one_record`,`seal_record` 改为 `chunks(max_fragment_size)` 明文再拼接已封记录(msg_callback 对整条逻辑消息仍只触发**一次**;ChangeCipherSpec 永不分片;`max_fragment_size.max(1)` 守退化的 0)。删掉旧拒绝分支。
   - **验证**:新记录层单测(`max_fragment_size=64`,200 字节明文 → 4 条记录可重组)+ 3 个旧测从"期望拒绝"改"期望分片"(`test_seal_oversized_plaintext_fragments`、`test_max_fragment_size_custom`、TLS 1.3 + TLS 1.2 `record_size_limit` 连接测试解析封帧断言 ≥2 条记录、往返保持)+ **线缆 e2e**:`openssl s_client -tls1_3 -maxfraglen 512` 打 `--tls auto` s-server,2000 字节回显完整收回(无正确出向分片做不到;修复前服务端会拒绝超大回显)。客户端关闭时残留的 `internal_error` 告警是 s-server 读循环的**既有**产物(EAGAIN/os-error-35),无 `-maxfraglen` 也复现,与本修复无关。hitls-tls 1575/0 + 全套 0 FAIL + 集成 0 回归;fmt+clippy clean。
   - **收口**:TLS-Anvil 的两个真实发现(#2 降级哨兵 I185 + #1 MFL 出向分片 I186)全部关闭。
+
+> 基于TLS-Anvil的测试结果,还有什么要处理的
+
+I187 —— I185/I186 后**原生重跑 TLS-Anvil**(437 测试,3.3h),拿到真实盘面并把残留归因到唯一一个 bug。
+  - **盘面回升**:RecordLayer 64→80、Interoperability 59→77、Handshake 64→79、DeprecatedFeature→100、Crypto 72→89;STRICTLY 113→154、PARTIALLY 81→45。把 754 个残留失败 case 全量归因:**100% 带小 `RECORD_LENGTH`(1/50/111),纯逻辑失败 = 0** —— 所有残留都走同一个 bug。
+  - **根因(cli 非 lib)**:`s_server.rs::peek_client_wants_tls13`(`--tls auto` 的每连接版本派发)只 peek **第一条记录**,`client_hello_offers_tls13` 解析 `buf[5..]` 时**假设整个 ClientHello 装在一条记录里**。当对端把 CH 分片成小记录(RFC 8446 §5.1 明确允许;TLS-Anvil `RECORD_LENGTH` 测试切到 1 字节/记录),第一条记录只含 `client_version`+部分 `random`,**够不到 `supported_versions`** → 检测返回 false → 把**只支持 1.3** 的客户端路由到 **1.2 handler** → 协商失败发 `handshake_failure`。与数据完全吻合(小记录失败、`RECORD_LENGTH=16384` 整条 CH 一记录则通过)。
+  - **修复**:新 `reassemble_handshake_fragments` 走连续 Handshake(`0x16`)记录、拼接分片成完整握手消息再解析;`client_hello_offers_tls13` 改解析这个重组结果;`peek_client_wants_tls13` 改为循环(新 `handshake_message_complete` 判完整、缓冲 2048→4096、最多 12×20ms)直到**整条 CH 跨任意多条记录到齐**,而非读完第一条就停。
+  - **验证**:新单测(CH 切成 1/5/50/111 字节/记录仍判 TLS 1.3;1.2-only CH 同样分片仍路由 1.2;部分缓冲 `handshake_message_complete` 先 false 后 true)+ **线缆 e2e**:抓真实 1449 字节 `openssl s_client -tls1_3` ClientHello,分片成 50/111/**1** 字节/记录打活的 `--tls auto` s-server,三种都回 ServerHello(`hs_type 0x02`),修复前都是 `handshake_failure`;正常不分片的 1.3/1.2 握手不变。hitls-cli 308+4/0(+3 测);workspace clippy/fmt clean。预计翻绿整个小-`RECORD_LENGTH` 残留(≈734 case),下一次原生重跑确认。
