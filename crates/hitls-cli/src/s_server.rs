@@ -184,7 +184,18 @@ pub fn run(
         let (min, max) = if want_tls13 {
             (TlsVersion::Tls13, TlsVersion::Tls13)
         } else {
-            (TlsVersion::Tls12, TlsVersion::Tls12)
+            // TLS 1.2 connection config. Under `--tls auto` the server also
+            // supports TLS 1.3, so record that as the max — it is what the
+            // TLS 1.2 handler keys off to (a) emit the RFC 8446 §4.1.3
+            // downgrade-protection sentinel in ServerHello.random and (b) reject
+            // an inappropriate TLS_FALLBACK_SCSV (§4.1.4). A pinned `--tls 1.2`
+            // server genuinely tops out at 1.2 and does neither.
+            let max = if tls_version == "auto" {
+                TlsVersion::Tls13
+            } else {
+                TlsVersion::Tls12
+            };
+            (TlsVersion::Tls12, max)
         };
         builder = builder
             .min_version(min)

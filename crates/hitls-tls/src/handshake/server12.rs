@@ -324,6 +324,24 @@ impl Tls12ServerHandshake {
         &self.server_random
     }
 
+    /// RFC 8446 §4.1.3 — TLS 1.2 downgrade protection.
+    ///
+    /// A server that supports TLS 1.3 but negotiates TLS 1.2 MUST overwrite the
+    /// last 8 bytes of `ServerHello.random` with the sentinel
+    /// `44 4F 57 4E 47 52 44 01` ("DOWNGRD\x01") so a TLS-1.3-capable client can
+    /// detect an active downgrade attack (it aborts if it offered 1.3 yet sees
+    /// this value). A server that only supports up to TLS 1.2 (`max_version !=
+    /// Tls13`) leaves the bytes random. (The `…00` sentinel for TLS ≤1.1 does
+    /// not apply — this server never negotiates below TLS 1.2.) Must be called
+    /// right after `server_random` is randomized, before it feeds the ServerHello
+    /// / key schedule / SKE signature, so all consumers see the sentinel value.
+    fn apply_tls12_downgrade_sentinel(&mut self) {
+        if self.config.max_version == TlsVersion::Tls13 {
+            self.server_random[24..]
+                .copy_from_slice(&[0x44, 0x4F, 0x57, 0x4E, 0x47, 0x52, 0x44, 0x01]);
+        }
+    }
+
     /// Whether this handshake used abbreviated (session resumption) mode.
     pub fn is_abbreviated(&self) -> bool {
         self.abbreviated
@@ -603,6 +621,9 @@ impl Tls12ServerHandshake {
         // Generate server random
         getrandom::fill(&mut self.server_random)
             .map_err(|e| TlsError::HandshakeFailed(format!("random gen failed: {e}")))?;
+        // RFC 8446 §4.1.3 — downgrade-protection sentinel when a TLS 1.3-capable
+        // server negotiates TLS 1.2 (no-op for a TLS-1.2-only server).
+        self.apply_tls12_downgrade_sentinel();
 
         // Generate server-assigned session_id (32 bytes) for session caching
         let mut session_id = vec![0u8; 32];
@@ -1229,6 +1250,9 @@ impl Tls12ServerHandshake {
         // Generate server random
         getrandom::fill(&mut self.server_random)
             .map_err(|e| TlsError::HandshakeFailed(format!("random gen failed: {e}")))?;
+        // RFC 8446 §4.1.3 — downgrade-protection sentinel when a TLS 1.3-capable
+        // server negotiates TLS 1.2 (no-op for a TLS-1.2-only server).
+        self.apply_tls12_downgrade_sentinel();
 
         // Add full ClientHello to transcript
         self.transcript.update(msg_data)?;
@@ -2736,6 +2760,40 @@ mod tests {
             let scheme = select_signature_scheme_tls12(&key, &[]).unwrap();
             assert_eq!(scheme, SignatureScheme::ECDSA_SHA1);
         }
+    }
+
+    #[test]
+    fn test_tls12_downgrade_sentinel() {
+        // RFC 8446 §4.1.3 — a TLS 1.3-capable server (max_version Tls13) that
+        // negotiates TLS 1.2 overwrites the last 8 bytes of ServerHello.random
+        // with the DOWNGRD sentinel; a TLS-1.2-only server leaves them random.
+        const SENTINEL: [u8; 8] = [0x44, 0x4F, 0x57, 0x4E, 0x47, 0x52, 0x44, 0x01];
+
+        let mut cfg13 = make_server_config();
+        cfg13.max_version = TlsVersion::Tls13;
+        let mut hs13 = Tls12ServerHandshake::new(cfg13);
+        hs13.server_random = [0xAB; 32];
+        hs13.apply_tls12_downgrade_sentinel();
+        assert_eq!(
+            &hs13.server_random[24..],
+            &SENTINEL,
+            "1.3-capable server must set the downgrade sentinel"
+        );
+        assert_eq!(
+            &hs13.server_random[..24],
+            &[0xAB; 24],
+            "the random prefix must be left untouched"
+        );
+
+        let mut cfg12 = make_server_config();
+        cfg12.max_version = TlsVersion::Tls12;
+        let mut hs12 = Tls12ServerHandshake::new(cfg12);
+        hs12.server_random = [0xAB; 32];
+        hs12.apply_tls12_downgrade_sentinel();
+        assert_eq!(
+            hs12.server_random, [0xAB; 32],
+            "a TLS-1.2-only server must NOT set the sentinel"
+        );
     }
 
     #[test]
