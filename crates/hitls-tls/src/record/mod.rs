@@ -454,6 +454,26 @@ impl RecordLayer {
             (record.content_type, record.fragment)
         };
 
+        // RFC 6066 §4 / RFC 8449 §4 / RFC 8446 §5.2 — the *plaintext*
+        // fragment a receiver accepts MUST NOT exceed the negotiated
+        // fragment size (the 2^14 base limit, or a smaller RFC 6066
+        // `max_fragment_length` / RFC 8449 `record_size_limit`), and a
+        // violation is `record_overflow`. `parse_record` bounds the
+        // *ciphertext* length, but with a generous cipher-overhead budget
+        // it cannot tell that the post-decryption content overruns a small
+        // negotiated MFL — so an over-MFL plaintext whose ciphertext fits
+        // the budget slips through (TLS-Anvil `enforcesRecordLimit` pins
+        // this). The pre-decryption `MAX_PLAINTEXT_LENGTH` guards in
+        // `encryption*.rs` only enforce the hard 2^14 ceiling, never the
+        // negotiated `max_fragment_size`. Enforce it here, once, on the
+        // decrypted content. ChangeCipherSpec is exempt (a fixed 1-byte
+        // legacy record, not subject to fragment-length negotiation).
+        if ct != ContentType::ChangeCipherSpec && pt.len() > self.max_fragment_size {
+            return Err(TlsError::RecordError(
+                "record overflow: plaintext exceeds negotiated max_fragment_size".into(),
+            ));
+        }
+
         // Protocol-message observation (OpenSSL SSL_set_msg_callback parity).
         if let Some(ref cb) = self.msg_callback {
             cb(false, wire_version, ct as u8, &pt);
@@ -967,6 +987,61 @@ mod tests {
             assert_eq!(ct, inner_type);
             assert_eq!(pt, b"test data");
         }
+    }
+
+    #[test]
+    fn test_inbound_plaintext_over_mfl_rejected() {
+        // RFC 6066 §4 — a decrypted plaintext larger than the negotiated
+        // max_fragment_size MUST draw record_overflow, even though its
+        // ciphertext fits `parse_record`'s (ciphertext + overhead) budget.
+        // Sender keeps the default 2^14 limit (so it emits ONE 600-byte
+        // record, no fragmentation); receiver negotiated MFL = 512.
+        let keys = TrafficKeys {
+            key: vec![0x42; 16],
+            iv: vec![0x43; 12],
+        };
+        let mut sender = RecordLayer::new();
+        sender
+            .activate_write_encryption(CipherSuite::TLS_AES_128_GCM_SHA256, &keys)
+            .unwrap();
+        let mut receiver = RecordLayer::new();
+        receiver.max_fragment_size = 512;
+        receiver
+            .activate_read_decryption(CipherSuite::TLS_AES_128_GCM_SHA256, &keys)
+            .unwrap();
+
+        // 600 > 512 (over MFL) but well under the 2^14 hard cap.
+        let big = vec![0x55u8; 600];
+        let sealed = sender
+            .seal_record(ContentType::ApplicationData, &big)
+            .unwrap();
+        let err = receiver.open_record(&sealed).unwrap_err();
+        match err {
+            TlsError::RecordError(m) => assert!(
+                m.contains("overflow") && m.contains("max_fragment_size"),
+                "expected a negotiated-MFL overflow, got: {m}"
+            ),
+            other => panic!("expected RecordError(overflow), got {other:?}"),
+        }
+
+        // A plaintext exactly at the limit round-trips cleanly (proves the
+        // check is `>`, not `>=`, and that decryption itself works).
+        let mut sender2 = RecordLayer::new();
+        sender2
+            .activate_write_encryption(CipherSuite::TLS_AES_128_GCM_SHA256, &keys)
+            .unwrap();
+        let mut receiver2 = RecordLayer::new();
+        receiver2.max_fragment_size = 512;
+        receiver2
+            .activate_read_decryption(CipherSuite::TLS_AES_128_GCM_SHA256, &keys)
+            .unwrap();
+        let exact = vec![0x66u8; 512];
+        let sealed2 = sender2
+            .seal_record(ContentType::ApplicationData, &exact)
+            .unwrap();
+        let (ct, pt, _) = receiver2.open_record(&sealed2).unwrap();
+        assert_eq!(ct, ContentType::ApplicationData);
+        assert_eq!(pt, exact);
     }
 
     #[test]
