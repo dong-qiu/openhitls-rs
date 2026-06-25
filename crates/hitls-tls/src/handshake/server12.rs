@@ -1832,9 +1832,36 @@ fn kx_group_satisfiable(
         return true;
     }
     match kx {
-        KeyExchangeAlg::Dhe | KeyExchangeAlg::DhePsk | KeyExchangeAlg::DheAnon => client_groups
-            .iter()
-            .any(|g| is_ffdhe_group(*g) && server_groups.contains(g)),
+        KeyExchangeAlg::Dhe | KeyExchangeAlg::DhePsk | KeyExchangeAlg::DheAnon => {
+            // RFC 7919 §4: if the client offered any FFDHE group, the
+            // server MUST select one from the client∩server intersection
+            // (and MUST NOT pick a DHE suite if that intersection is
+            // empty). But if the client offered NO FFDHE group at all —
+            // e.g. its `supported_groups` lists only EC curves, or only an
+            // invalid / GREASE curve — it has expressed no FFDHE
+            // constraint, and the server MAY use a group of its own
+            // choosing (`negotiate_ffdhe_group` falls back to FFDHE2048).
+            // So DHE stays selectable in that case. This is what lets the
+            // server honour RFC 8422 §4 ("a server MUST NOT negotiate an
+            // ECC cipher suite unless it can respect the client's offered
+            // curves") by falling back to a non-ECC DHE suite instead of
+            // failing the whole handshake when only an unusable curve is
+            // offered (TLS-Anvil `invalidEllipticCurve_WithNonECCCiphersuite`).
+            // "Offered an FFDHE group" is determined by the RFC 7919
+            // codepoint *range* (0x0100..=0x01FF), "even if unknown to the
+            // server" (§4) — not by `is_ffdhe_group`, which only matches
+            // the five assigned groups. So an unassigned-but-FFDHE-range
+            // codepoint (e.g. 511) still counts as an FFDHE offer (and, if
+            // unmatched, forbids DHE), whereas an EC / invalid / GREASE
+            // codepoint outside that range does not.
+            let client_offered_ffdhe = client_groups
+                .iter()
+                .any(|g| (0x0100..=0x01ff).contains(&g.0));
+            !client_offered_ffdhe
+                || client_groups
+                    .iter()
+                    .any(|g| is_ffdhe_group(*g) && server_groups.contains(g))
+        }
         KeyExchangeAlg::Ecdhe | KeyExchangeAlg::EcdhePsk | KeyExchangeAlg::EcdheAnon => {
             client_groups
                 .iter()
@@ -2637,11 +2664,24 @@ mod tests {
             &[NamedGroup::FFDHE2048],
             &server
         ));
-        // A `supported_groups` list with no usable FFDHE group (511 is
-        // unassigned) makes a DHE suite unsatisfiable.
+        // A `supported_groups` list whose only FFDHE-range codepoint (511,
+        // unassigned but within 0x0100..=0x01ff per RFC 7919 §4) is not
+        // server-supported makes a DHE suite unsatisfiable — the client
+        // DID express an FFDHE constraint and none matched.
         assert!(!kx_group_satisfiable(
             KeyExchangeAlg::Dhe,
             &[NamedGroup(511)],
+            &server
+        ));
+        // But a `supported_groups` list with NO FFDHE-range codepoint at
+        // all (here an invalid / EC-range curve, 0xFEFE) expresses no
+        // FFDHE constraint, so DHE stays satisfiable — the server may use
+        // a group of its own choosing (RFC 7919 §4), which lets it fall
+        // back to a non-ECC DHE suite per RFC 8422 §4 instead of failing
+        // (TLS-Anvil invalidEllipticCurve_WithNonECCCiphersuite).
+        assert!(kx_group_satisfiable(
+            KeyExchangeAlg::Dhe,
+            &[NamedGroup(0xFEFE)],
             &server
         ));
         // ECDHE needs an EC group — an FFDHE-only client list fails it.

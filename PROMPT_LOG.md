@@ -18399,3 +18399,12 @@ I190 —— **C 组:扩展长度精确消费(RFC 8446 §6.2 decode_error)**。6 
 
 I191 —— **D 组:零长 Handshake/Alert 分片拒绝(RFC 8446 §5.1 unexpected_message)—— 收口 TLS-Anvil 残留**。`zeroLengthRecord_Finished`:在期望 client Finished 处发零长加密 Handshake 记录,服务端**挂起**(期望致命告警却 socket 仍开、无消息)。根因:§5.1 禁止零长 Handshake/Alert 分片、要求收到时 abort unexpected_message,但读路径**没人强制**——`check_empty_record` 这个 helper **只在测试里被调用过**,从没接进读路径,于是零长 Handshake 分片落到跨记录重组循环,循环把 0 字节 append 后继续等永不到来的 Finished → 死锁。修复:`open_record` 加一处检查(在 I189 溢出守卫之后)——`pt.is_empty() && ct ∈ {Handshake,Alert}` → unexpected_message;重组循环现在传播这个错、读路径发告警而非阻塞。零长 ApplicationData 仍放行(§5.1 / T103),CCS 是固定 1 字节。另给 `tls_error_to_alert` 的 RecordError 分支加 `unexpected_message` 子串使新错误路由到告警 10。验证:新单测(加密零长 Handshake **和** Alert 分片都在解密成功后→unexpected_message;零长 ApplicationData 仍透传空内容)+ hitls-tls 1581/0(+1)+ 集成 0 回归(无合法流发空 Handshake/Alert——完整握手/重协商/KeyUpdate/PHA 往返全不受影响);clippy/fmt clean。
   - **收口**:TLS-Anvil 去噪四组残留(A–D,I188–I191)全部关闭,叠加三个主发现(I185 降级哨兵 / I186 出站 MFL / I187 分片 CH 路由);唯一未改项是 closeNotify(I189 已用 openssl 验证我们正确,TLS-Anvil 判定复现不出)。**TLS-Anvil 测试线全部收口。**
+
+> 调查 invalidEllipticCurve(承接最终确认跑后剩的 3 个范围外 FULLY)
+
+I192 —— **最终确认跑**(STRICTLY 113→**213**、PARTIALLY 81→**0**、FULLY 5→**3**;A–D + 三主发现全绿)后,剩 3 个范围外 FULLY 里唯一可能真有内容的 `invalidEllipticCurve_WithNonECCCiphersuite`,调查证实是**真 over-strict bug** 并修复。
+  - **现象**:CH 用非 ECC 套件(`TLS_DHE_RSA_WITH_AES_128_CBC_SHA`)+ `supported_groups` 里**只有一个非法/不可用椭圆曲线** → 服务端发 `handshake_failure` 而非完成握手。RFC 8422 §4 要求服务端别协商无法满足曲线的 ECC 套件、应回退到非 ECC(DHE)套件。
+  - **根因**:`negotiate_cipher_suite` 的 I105 `kx_group_satisfiable` 门控,在客户端 `supported_groups` 无可用 FFDHE 组时就判 DHE 套件不可满足——但这和 `negotiate_ffdhe_group` 矛盾(后者按 RFC 7919 §4,在客户端**根本没给** FFDHE 组时回退 FFDHE2048)。于是 ECDHE 被(正确)跳过、DHE 也被(错误)跳过 → NoSharedCipherSuite → handshake_failure。
+  - **修复**:DHE 分支改为——客户端没给任何 FFDHE-**范围**码点(`0x0100..=0x01ff`,按 RFC 7919 §4 的范围判定,"即使服务端不认识",而非只认五个已分配组的 `is_ffdhe_group`,所以像 `511` 这种未分配但属 FFDHE 范围的值仍算"给了 FFDHE"、不匹配仍禁 DHE)时,DHE 保持可满足;只有客户端**确实给了** FFDHE 范围组时才要求交集非空。ECDHE 不变(它没有服务端默认曲线回退,不可用曲线正确地令其不可满足)。
+  - **验证**:**线缆复现+修复**(把真实 openssl TLS 1.2 CH 的 supported_groups 改写成 `0xFEFE`:修前→handshake_failure 40,修后→ServerHello 协商出 `DHE-RSA-AES128-SHA` 并完成)+ 扩展 `test_kx_group_satisfiable`(保留 `[511]→不可满足`,新增 `[0xFEFE]→可满足`)+ 正常 DHE 握手仍完成。hitls-tls 1581/0 + 集成 0 回归;clippy/fmt clean。
+  - **TLS-Anvil 残留全部 actioned**:最终 3 个 FULLY 里这个已修,另两个确认非问题(closeNotify openssl 验证正确;ecdsaNoSignatureAlgorithmsExtension 在 RSA 服务端证书下 N/A)。
