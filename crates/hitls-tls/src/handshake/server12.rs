@@ -8,7 +8,8 @@ use crate::crypt::key_schedule12::{
 };
 use crate::crypt::transcript::TranscriptHash;
 use crate::crypt::{
-    is_tls12_suite, HashAlgId, KeyExchangeAlg, NamedGroup, SignatureScheme, Tls12CipherSuiteParams,
+    is_tls12_suite, AuthAlg, HashAlgId, KeyExchangeAlg, NamedGroup, SignatureScheme,
+    Tls12CipherSuiteParams,
 };
 use crate::extensions::ExtensionType;
 use crate::handshake::codec::{decode_client_hello, encode_server_hello, ClientHello, ServerHello};
@@ -1823,6 +1824,39 @@ impl Tls12ServerHandshake {
 /// extension at all it has expressed no constraint (RFC 4492 §5.1 /
 /// RFC 7919) — every suite stays satisfiable. Static-RSA / PSK suites
 /// negotiate no group and are always satisfiable.
+/// Is a cipher suite's **authentication** algorithm honourable with the
+/// server's configured certificate / private key? RFC 5246 §7.4.2: the
+/// server's Certificate must match the negotiated suite's auth — an
+/// RSA-auth suite (`*_RSA_*`) needs an RSA key, an ECDSA-auth suite
+/// (`*_ECDSA_*`, also what Ed25519 / Ed448 certificates use in TLS 1.2)
+/// needs an EC / EdDSA key, etc. Without this gate a server holding only
+/// an EC certificate could pick an `ECDHE_RSA` / `DHE_RSA` suite and
+/// present its EC cert, which the client rejects as `wrong certificate
+/// type` (found via ECDSA-cert testing). PSK / anonymous suites carry no
+/// certificate signature, so they are always honourable here; a config
+/// with no key configured is left for the later signing step to reject.
+fn auth_satisfiable(auth: AuthAlg, key: Option<&ServerPrivateKey>) -> bool {
+    if matches!(auth, AuthAlg::Psk | AuthAlg::Anon) {
+        return true;
+    }
+    let Some(key) = key else {
+        return true;
+    };
+    match auth {
+        AuthAlg::Rsa => matches!(key, ServerPrivateKey::Rsa { .. }),
+        AuthAlg::Ecdsa => matches!(
+            key,
+            ServerPrivateKey::Ecdsa { .. }
+                | ServerPrivateKey::Ed25519(_)
+                | ServerPrivateKey::Ed448(_)
+        ),
+        AuthAlg::Dsa => matches!(key, ServerPrivateKey::Dsa { .. }),
+        #[cfg(feature = "tlcp")]
+        AuthAlg::Sm2 => matches!(key, ServerPrivateKey::Sm2 { .. }),
+        AuthAlg::Psk | AuthAlg::Anon => true,
+    }
+}
+
 fn kx_group_satisfiable(
     kx: KeyExchangeAlg,
     client_groups: &[NamedGroup],
@@ -1898,6 +1932,7 @@ pub(crate) fn negotiate_cipher_suite(
         match Tls12CipherSuiteParams::from_suite(suite) {
             Ok(params) => {
                 kx_group_satisfiable(params.kx_alg, &client_groups, &config.supported_groups)
+                    && auth_satisfiable(params.auth_alg, config.private_key.as_ref())
             }
             Err(_) => false,
         }
@@ -2566,7 +2601,7 @@ mod tests {
 
         TlsConfig::builder()
             .cipher_suites(&[
-                CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+                CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
                 CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
             ])
             .supported_groups(&[NamedGroup::SECP256R1, NamedGroup::X25519])
@@ -2628,7 +2663,7 @@ mod tests {
             random: [0u8; 32],
             legacy_session_id: vec![],
             cipher_suites: vec![
-                CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+                CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
                 CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
             ],
             extensions: vec![],
@@ -2636,7 +2671,7 @@ mod tests {
         let config = make_server_config();
         let suite = negotiate_cipher_suite(&ch, &config).unwrap();
         // Server preference order has RSA first
-        assert_eq!(suite, CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256);
+        assert_eq!(suite, CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256);
     }
 
     #[test]
@@ -2701,6 +2736,42 @@ mod tests {
             &[NamedGroup(511)],
             &server
         ));
+    }
+
+    #[test]
+    fn test_auth_satisfiable() {
+        let rsa = ServerPrivateKey::Rsa {
+            n: vec![1],
+            d: vec![1],
+            e: vec![1],
+            p: vec![1],
+            q: vec![1],
+        };
+        let ec = ServerPrivateKey::Ecdsa {
+            curve_id: EccCurveId::NistP256,
+            private_key: vec![1],
+        };
+        let ed = ServerPrivateKey::Ed25519(vec![0x42; 32]);
+
+        // An RSA key honours only RSA-auth suites; an EC / EdDSA key honours
+        // only ECDSA-auth suites (Ed25519 / Ed448 certs use the ECDSA suites
+        // in TLS 1.2). This is the gate that stops an EC-cert server from
+        // selecting an `ECDHE_RSA` suite and tripping `wrong certificate type`.
+        assert!(auth_satisfiable(AuthAlg::Rsa, Some(&rsa)));
+        assert!(!auth_satisfiable(AuthAlg::Ecdsa, Some(&rsa)));
+        assert!(auth_satisfiable(AuthAlg::Ecdsa, Some(&ec)));
+        assert!(!auth_satisfiable(AuthAlg::Rsa, Some(&ec)));
+        assert!(auth_satisfiable(AuthAlg::Ecdsa, Some(&ed)));
+        assert!(!auth_satisfiable(AuthAlg::Rsa, Some(&ed)));
+
+        // PSK / anonymous suites carry no certificate signature → always ok.
+        assert!(auth_satisfiable(AuthAlg::Psk, Some(&rsa)));
+        assert!(auth_satisfiable(AuthAlg::Anon, None));
+
+        // No key configured → not gated here (a keyless cert-auth handshake
+        // is rejected later at the signing step).
+        assert!(auth_satisfiable(AuthAlg::Rsa, None));
+        assert!(auth_satisfiable(AuthAlg::Ecdsa, None));
     }
 
     #[test]
@@ -2844,7 +2915,8 @@ mod tests {
 
         let mut hs = Tls12ServerHandshake::new(config);
 
-        let ch_msg = build_test_client_hello(&[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256]);
+        let ch_msg =
+            build_test_client_hello(&[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256]);
 
         // Pass the full handshake message (including 4-byte header)
         let result = hs.process_client_hello(&ch_msg).unwrap();
@@ -2880,7 +2952,8 @@ mod tests {
         config.verify_client_cert = true;
 
         let mut hs = Tls12ServerHandshake::new(config);
-        let ch_msg = build_test_client_hello(&[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256]);
+        let ch_msg =
+            build_test_client_hello(&[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256]);
         let result = hs.process_client_hello(&ch_msg).unwrap();
 
         assert!(result.certificate_request.is_some());
@@ -2903,7 +2976,8 @@ mod tests {
         config.verify_client_cert = true;
 
         let mut hs = Tls12ServerHandshake::new(config);
-        let ch_msg = build_test_client_hello(&[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256]);
+        let ch_msg =
+            build_test_client_hello(&[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256]);
         let result = hs.process_client_hello(&ch_msg).unwrap();
 
         let cr_data = result.certificate_request.expect("CR present");
@@ -2938,7 +3012,8 @@ mod tests {
     fn test_server_no_cert_request_when_disabled() {
         let config = make_server_config();
         let mut hs = Tls12ServerHandshake::new(config);
-        let ch_msg = build_test_client_hello(&[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256]);
+        let ch_msg =
+            build_test_client_hello(&[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256]);
         let result = hs.process_client_hello(&ch_msg).unwrap();
 
         assert!(result.certificate_request.is_none());
@@ -2952,7 +3027,8 @@ mod tests {
         config.require_client_cert = true;
 
         let mut hs = Tls12ServerHandshake::new(config);
-        let ch_msg = build_test_client_hello(&[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256]);
+        let ch_msg =
+            build_test_client_hello(&[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256]);
         hs.process_client_hello(&ch_msg).unwrap();
 
         // Send empty client certificate
@@ -2971,7 +3047,8 @@ mod tests {
         config.require_client_cert = false;
 
         let mut hs = Tls12ServerHandshake::new(config);
-        let ch_msg = build_test_client_hello(&[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256]);
+        let ch_msg =
+            build_test_client_hello(&[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256]);
         hs.process_client_hello(&ch_msg).unwrap();
 
         // Send empty client certificate
@@ -2988,7 +3065,7 @@ mod tests {
         use crate::session::{InMemorySessionCache, TlsSession};
 
         let config = make_server_config();
-        let suite = CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256;
+        let suite = CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256;
 
         // Create a cached session
         let session_id = vec![0xAA; 32];
@@ -3042,7 +3119,7 @@ mod tests {
         use crate::session::InMemorySessionCache;
 
         let config = make_server_config();
-        let suite = CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256;
+        let suite = CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256;
 
         // Empty cache — no sessions
         let cache = InMemorySessionCache::new(16);
@@ -3099,7 +3176,7 @@ mod tests {
 
         // Client offers only AES-128-GCM, but cached session uses AES-256-GCM
         let ch_msg = build_test_client_hello_with_session_id(
-            &[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256],
+            &[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256],
             &session_id,
         );
 
@@ -3111,7 +3188,7 @@ mod tests {
             ServerHelloResult::Full(ref flight) => {
                 assert_eq!(
                     flight.suite,
-                    CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+                    CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
                 );
             }
             ServerHelloResult::Abbreviated(_) => panic!("expected full handshake"),
@@ -3194,7 +3271,7 @@ mod tests {
     fn test_server_ocsp_stapling_when_requested_and_configured() {
         let fake_ocsp_response = vec![0x30, 0x82, 0x01, 0x00, 0xAA, 0xBB];
         let config = TlsConfig::builder()
-            .cipher_suites(&[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256])
+            .cipher_suites(&[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256])
             .supported_groups(&[NamedGroup::SECP256R1, NamedGroup::X25519])
             .signature_algorithms(&[
                 SignatureScheme::ED25519,
@@ -3208,7 +3285,7 @@ mod tests {
 
         let mut hs = Tls12ServerHandshake::new(config);
         let ch = build_test_client_hello_with_ocsp(
-            &[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256],
+            &[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256],
             true,
             false,
         );
@@ -3229,7 +3306,7 @@ mod tests {
     #[test]
     fn test_server_no_ocsp_when_not_requested() {
         let config = TlsConfig::builder()
-            .cipher_suites(&[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256])
+            .cipher_suites(&[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256])
             .supported_groups(&[NamedGroup::SECP256R1, NamedGroup::X25519])
             .signature_algorithms(&[
                 SignatureScheme::ED25519,
@@ -3244,7 +3321,7 @@ mod tests {
         let mut hs = Tls12ServerHandshake::new(config);
         // Client does NOT include STATUS_REQUEST extension
         let ch = build_test_client_hello_with_ocsp(
-            &[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256],
+            &[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256],
             false,
             false,
         );
@@ -3257,7 +3334,7 @@ mod tests {
     #[test]
     fn test_server_no_ocsp_when_no_staple_configured() {
         let config = TlsConfig::builder()
-            .cipher_suites(&[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256])
+            .cipher_suites(&[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256])
             .supported_groups(&[NamedGroup::SECP256R1, NamedGroup::X25519])
             .signature_algorithms(&[
                 SignatureScheme::ED25519,
@@ -3272,7 +3349,7 @@ mod tests {
         let mut hs = Tls12ServerHandshake::new(config);
         // Client requests OCSP stapling but server has no staple
         let ch = build_test_client_hello_with_ocsp(
-            &[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256],
+            &[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256],
             true,
             false,
         );
@@ -3286,7 +3363,7 @@ mod tests {
     fn test_server_flight_order_with_ocsp() {
         let fake_ocsp = vec![0xDE, 0xAD];
         let config = TlsConfig::builder()
-            .cipher_suites(&[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256])
+            .cipher_suites(&[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256])
             .supported_groups(&[NamedGroup::SECP256R1, NamedGroup::X25519])
             .signature_algorithms(&[
                 SignatureScheme::ED25519,
@@ -3300,7 +3377,7 @@ mod tests {
 
         let mut hs = Tls12ServerHandshake::new(config);
         let ch = build_test_client_hello_with_ocsp(
-            &[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256],
+            &[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256],
             true,
             false,
         );
@@ -3401,7 +3478,9 @@ mod tests {
 
     #[test]
     fn test_cipher_server_preference_default() {
-        // Server preference: server's first matching suite wins
+        // Server preference: server's first matching suite wins. No key is
+        // configured, so auth_satisfiable does not gate (None → true) and the
+        // RSA-vs-ECDSA ordering is what's under test.
         let ch = ClientHello {
             random: [0u8; 32],
             legacy_session_id: vec![],
@@ -3450,7 +3529,7 @@ mod tests {
         // No ticket_key configured → returns Ok(None) regardless of master_secret.
         let result = hs
             .build_and_record_new_session_ticket(
-                CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+                CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
                 &[0xAB; 48],
                 false,
                 3600,
@@ -3465,13 +3544,13 @@ mod tests {
             .role(crate::TlsRole::Server)
             .certificate_chain(vec![vec![0x30, 0x02, 0x05, 0x00]])
             .private_key(ServerPrivateKey::Ed25519(vec![0x42u8; 32]))
-            .cipher_suites(&[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256])
+            .cipher_suites(&[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256])
             .ticket_key(vec![0xAA; 48])
             .build();
         let mut hs = Tls12ServerHandshake::new(config);
         // ticket_key configured but caller passed empty master_secret → error
         let result = hs.build_and_record_new_session_ticket(
-            CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+            CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
             &[],
             false,
             3600,
@@ -3481,7 +3560,9 @@ mod tests {
 
     #[test]
     fn test_cipher_client_preference() {
-        // Client preference: client's first matching suite wins
+        // Client preference: client's first matching suite wins. No key is
+        // configured (None → auth_satisfiable does not gate), so the
+        // RSA-vs-ECDSA ordering is what's under test.
         let ch = ClientHello {
             random: [0u8; 32],
             legacy_session_id: vec![],

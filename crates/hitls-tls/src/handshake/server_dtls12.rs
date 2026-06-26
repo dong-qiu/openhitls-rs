@@ -809,7 +809,7 @@ mod tests {
 
         TlsConfig::builder()
             .cipher_suites(&[
-                CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+                CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
                 CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
             ])
             .supported_groups(&[NamedGroup::SECP256R1, NamedGroup::X25519])
@@ -865,7 +865,7 @@ mod tests {
         let mut hs = Dtls12ServerHandshake::new(config, false);
 
         let ch_msg =
-            build_dtls_client_hello(&[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256], &[]);
+            build_dtls_client_hello(&[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256], &[]);
 
         let result = hs.process_client_hello(&ch_msg).unwrap();
         // Should directly produce server flight (no HVR)
@@ -898,7 +898,7 @@ mod tests {
 
         // First ClientHello (no cookie)
         let ch_msg =
-            build_dtls_client_hello(&[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256], &[]);
+            build_dtls_client_hello(&[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256], &[]);
 
         let result = hs.process_client_hello(&ch_msg).unwrap();
         // Should get HVR, not flight
@@ -920,7 +920,7 @@ mod tests {
 
         // CH1 without cookie → HVR
         let ch1 =
-            build_dtls_client_hello(&[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256], &[]);
+            build_dtls_client_hello(&[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256], &[]);
         let result = hs.process_client_hello(&ch1).unwrap();
         let Err(hvr_result) = result else {
             panic!("expected HVR");
@@ -933,7 +933,7 @@ mod tests {
 
         // CH2 with correct cookie → server flight
         let ch2 = build_dtls_client_hello(
-            &[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256],
+            &[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256],
             &cookie,
         );
         let server_result = hs.process_client_hello_with_cookie(&ch2).unwrap();
@@ -955,13 +955,13 @@ mod tests {
 
         // CH1 without cookie → HVR
         let ch1 =
-            build_dtls_client_hello(&[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256], &[]);
+            build_dtls_client_hello(&[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256], &[]);
         let _result = hs.process_client_hello(&ch1).unwrap();
 
         // CH2 with wrong cookie → error
         let wrong_cookie = vec![0xFF; 16];
         let ch2 = build_dtls_client_hello(
-            &[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256],
+            &[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256],
             &wrong_cookie,
         );
         assert!(hs.process_client_hello_with_cookie(&ch2).is_err());
@@ -1008,7 +1008,7 @@ mod tests {
         let mut hs = Dtls12ServerHandshake::new(config, true);
         // State is Idle, not WaitClientHelloWithCookie
         let ch_msg =
-            build_dtls_client_hello(&[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256], &[]);
+            build_dtls_client_hello(&[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256], &[]);
         assert!(hs.process_client_hello_with_cookie(&ch_msg).is_err());
     }
 
@@ -1108,7 +1108,7 @@ mod tests {
         assert_eq!(hs.message_seq, 0);
 
         let ch_msg =
-            build_dtls_client_hello(&[CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256], &[]);
+            build_dtls_client_hello(&[CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256], &[]);
         let _result = hs.process_client_hello(&ch_msg).unwrap();
 
         // After HVR, message_seq should have incremented

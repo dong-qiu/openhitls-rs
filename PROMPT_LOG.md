@@ -18408,3 +18408,11 @@ I192 —— **最终确认跑**(STRICTLY 113→**213**、PARTIALLY 81→**0**、
   - **修复**:DHE 分支改为——客户端没给任何 FFDHE-**范围**码点(`0x0100..=0x01ff`,按 RFC 7919 §4 的范围判定,"即使服务端不认识",而非只认五个已分配组的 `is_ffdhe_group`,所以像 `511` 这种未分配但属 FFDHE 范围的值仍算"给了 FFDHE"、不匹配仍禁 DHE)时,DHE 保持可满足;只有客户端**确实给了** FFDHE 范围组时才要求交集非空。ECDHE 不变(它没有服务端默认曲线回退,不可用曲线正确地令其不可满足)。
   - **验证**:**线缆复现+修复**(把真实 openssl TLS 1.2 CH 的 supported_groups 改写成 `0xFEFE`:修前→handshake_failure 40,修后→ServerHello 协商出 `DHE-RSA-AES128-SHA` 并完成)+ 扩展 `test_kx_group_satisfiable`(保留 `[511]→不可满足`,新增 `[0xFEFE]→可满足`)+ 正常 DHE 握手仍完成。hitls-tls 1581/0 + 集成 0 回归;clippy/fmt clean。
   - **TLS-Anvil 残留全部 actioned**:最终 3 个 FULLY 里这个已修,另两个确认非问题(closeNotify openssl 验证正确;ecdsaNoSignatureAlgorithmsExtension 在 RSA 服务端证书下 N/A)。
+
+> 请看看还有没有什么专项的测试 → 先修 cert-cipher bug,再跑漏洞扫
+
+I193 —— 调研「还有什么专项测试」时,用 **ECDSA 证书**一测立刻挖出真 bug:`s-server` 配 EC 证书 + openssl 默认 cipher 列表 → `wrong certificate type` 握手失败。
+  - **bug**:`negotiate_cipher_suite` 只按 `is_tls12_suite` + `kx_group_satisfiable`(I105/I192 的组门控)过滤候选套件,**从不检查套件的认证算法是否匹配服务端密钥**。于是只有 EC 证书的服务端会(服务端优先)选 RSA-认证套件(ECDHE_RSA/DHE_RSA)、把 EC 证书发出去,客户端判类型不符拒绝。(这也是 TLS-Anvil 一直用 RSA 证书的原因——EC 证书会让它握手全断,把这个 bug 和 ecdsaNoSignatureAlgorithmsExtension 一起盖住。)
+  - **修复**:套件过滤里加 `auth_satisfiable(auth, key)`——`AuthAlg::Rsa` 套件要 `ServerPrivateKey::Rsa`,`Ecdsa` 要 `Ecdsa`/`Ed25519`/`Ed448`(TLS 1.2 里 EdDSA 证书用 ECDSA 套件),`Dsa`→`Dsa`、`Sm2`→`Sm2`;`Psk`/`Anon` 无证书签名(恒真);无密钥的 config 不在此门控(留给后面签名步骤拒),使隔离的 cipher 偏好单测仍过。
+  - **验证**:**线缆**——EC 证书 `--tls auto` s-server 用 openssl 默认列表现协商 `ECDHE-ECDSA-AES128-GCM-SHA256`(1.2)+ 完成 1.3,修前是 `wrong certificate type`;RSA 证书服务端仍协商 `ECDHE-RSA`(不误伤)。新 `test_auth_satisfiable` 单测 + 把 Ed25519-密钥的服务端握手测试 fixture 从 ECDHE_RSA 改 ECDHE_ECDSA(它们把 Ed25519 密钥配了 RSA-认证套件,这种错配只有缺门控时才被允许;无密钥的 cipher 偏好测试保留 ECDHE_RSA,因 None 不门控)。hitls-tls 1582/0(+1)+ 集成 0 回归;clippy/fmt clean。和 I192 同类(证书/套件一致性),但在认证轴而非密钥交换组轴。
+  - **下一步**:跑 tlsfuzzer 专项漏洞脚本扫(Bleichenbacher/Lucky13/CVE/fuzzed)。
