@@ -122,6 +122,11 @@ pub fn tls_error_to_alert(err: &hitls_types::TlsError) -> AlertDescription {
                 || m.contains("unexpected content type")
             {
                 AlertDescription::UnexpectedMessage
+            } else if m.contains("unsupported_extension") {
+                // RFC 8446 §6.2 — an extension appearing in a message it is
+                // not permitted in (e.g. an extension the client never
+                // offered echoed in ServerHello / EncryptedExtensions).
+                AlertDescription::UnsupportedExtension
             } else if m.contains("illegal_parameter")
                 || m.contains("illegal parameter")
                 || m.contains("invalid key_share")

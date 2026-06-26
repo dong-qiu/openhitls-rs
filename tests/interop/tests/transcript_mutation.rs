@@ -34,18 +34,18 @@
 //! | `sh_without_supported_versions_rejected` | `MODIFIED_SUPPORTED_VERSIONS_*` | extension lookup | `missing supported_versions extension` |
 //! | `sh_with_wrong_supported_version_rejected` | (RFC 8446 §4.2.1) | version != 0x0304 | `unsupported TLS version` |
 //! | `sh_without_key_share_rejected` | (RFC 8446 §4.2.8) | extension lookup | `missing key_share` |
-//! | `sh_with_mismatched_session_id_NOT_rejected_gap` | `MODIFIED_SESSID_FROM_SH_TC001` | **Rust does NOT check** | `TODO(#48-rfc-gap)` |
-//! | `sh_with_nonzero_legacy_compression_NOT_rejected_gap` | (RFC 8446 §4.1.3) | **Rust does NOT check** | `TODO(#48-rfc-gap)` |
+//! | `sh_with_mismatched_session_id_rejected` | `MODIFIED_SESSID_FROM_SH_TC001` | session-id echo check (I195) | `illegal_parameter` |
+//! | `sh_with_nonzero_legacy_compression_rejected` | (RFC 8446 §4.1.3) | compression == 0 check (I195) | `illegal_parameter` |
 //!
-//! ## Documented gaps (RFC 8446 §4.1.3 MUSTs not enforced by Rust today)
+//! ## RFC 8446 §4.1.3 MUSTs (now enforced by Rust — closed in I195)
 //!
-//! - `TODO(#48-rfc-gap-sessid)`: RFC 8446 §4.1.3 — client MUST abort with
-//!   `illegal_parameter` if `legacy_session_id_echo` does not match
-//!   ClientHello.legacy_session_id. `decode_server_hello` currently parses
-//!   and ignores. Pinned by `sh_with_mismatched_session_id_NOT_rejected_gap`.
-//! - `TODO(#48-rfc-gap-compression)`: RFC 8446 §4.1.3 —
-//!   `legacy_compression_method` MUST be 0. `decode_server_hello` reads and
-//!   discards. Pinned by `sh_with_nonzero_legacy_compression_NOT_rejected_gap`.
+//! - RFC 8446 §4.1.3 — client aborts with `illegal_parameter` if
+//!   `legacy_session_id_echo` does not match ClientHello.legacy_session_id.
+//!   Enforced in `process_server_hello`; pinned by
+//!   `sh_with_mismatched_session_id_rejected`.
+//! - RFC 8446 §4.1.3 — `legacy_compression_method` MUST be 0. Enforced in
+//!   `process_server_hello`; pinned by
+//!   `sh_with_nonzero_legacy_compression_rejected`.
 //! - `TODO(#48-encrypted-mutation)`: encrypted post-SH transcript mutations
 //!   (cert_verify, finished, certificate) require key-schedule simulation on
 //!   the rogue-server side.
@@ -184,6 +184,14 @@ impl ShBuilder {
 
     fn drop_extension(mut self, ty: ExtensionType) -> Self {
         self.extensions.retain(|e| e.extension_type != ty);
+        self
+    }
+
+    fn add_extension(mut self, ty: ExtensionType, data: Vec<u8>) -> Self {
+        self.extensions.push(Extension {
+            extension_type: ty,
+            data,
+        });
         self
     }
 
@@ -335,6 +343,7 @@ where
         || err_str.contains("compression")
         || err_str.contains("legacy")
         || err_str.contains("illegal_parameter")
+        || err_str.contains("unsupported_extension")
     {
         return Err(format!(
             "expected SH parse to silently accept the gap; got: {err_str}"
@@ -454,12 +463,11 @@ fn sh_without_key_share_rejected() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn sh_with_mismatched_session_id_not_rejected_gap() {
-    // C `MODIFIED_SESSID_FROM_SH_TC001`: RFC 8446 §4.1.3 says client MUST
+fn sh_with_mismatched_session_id_rejected() {
+    // C `MODIFIED_SESSID_FROM_SH_TC001`: RFC 8446 §4.1.3 — the client MUST
     // abort with `illegal_parameter` when legacy_session_id_echo does not
-    // match what it sent. Rust `decode_server_hello` parses and discards
-    // legacy_session_id; the SH proceeds through.
-    // TODO(#48-rfc-gap-sessid): enforce session-id echo check per RFC 8446 §4.1.3.
+    // match what it sent. Closed in I195 (was a documented gap; found via
+    // TLS-Anvil client-mode `ServerHello.testSessionId`).
     let outcome = drive_client_accepting_rogue_sh(|info| {
         let mut wrong_sid = info.session_id.clone();
         if wrong_sid.is_empty() {
@@ -471,14 +479,37 @@ fn sh_with_mismatched_session_id_not_rejected_gap() {
             .session_id(wrong_sid)
             .encode()
     });
-    outcome.expect("Rust silently accepts mismatched session_id (RFC gap)");
+    let err = outcome.expect_err("client must reject a mismatched session_id_echo");
+    assert!(
+        err.contains("legacy_session_id_echo") || err.contains("illegal_parameter"),
+        "expected an illegal_parameter session-id abort, got: {err}"
+    );
 }
 
 #[test]
-fn sh_with_nonzero_legacy_compression_not_rejected_gap() {
-    // RFC 8446 §4.1.3: legacy_compression_method MUST be 0. Rust
-    // `decode_server_hello` reads byte and discards.
-    // TODO(#48-rfc-gap-compression): enforce legacy_compression_method == 0.
+fn sh_with_disallowed_extension_rejected() {
+    // RFC 8446 §4.2: the only extensions permitted in a (non-HRR)
+    // ServerHello are supported_versions, key_share, and pre_shared_key.
+    // An extension the client never offered (here heartbeat) MUST draw
+    // unsupported_extension. Closed in I195 (TLS-Anvil client-mode
+    // `ServerHello.sendHeartBeatExtensionInSH` / GREASE-in-SH).
+    let outcome = drive_client_accepting_rogue_sh(|info| {
+        ShBuilder::from_client_hello(info)
+            .add_extension(ExtensionType::HEARTBEAT, vec![0x01])
+            .encode()
+    });
+    let err = outcome.expect_err("client must reject a disallowed ServerHello extension");
+    assert!(
+        err.contains("unsupported_extension"),
+        "expected unsupported_extension, got: {err}"
+    );
+}
+
+#[test]
+fn sh_with_nonzero_legacy_compression_rejected() {
+    // RFC 8446 §4.1.3: legacy_compression_method MUST be 0. Closed in I195
+    // (was a documented gap; found via TLS-Anvil client-mode
+    // `ServerHello.testCompressionValue`).
     // To inject a non-zero compression byte we hand-craft the SH bytes since
     // `encode_server_hello` always writes 0. Layout we patch:
     //   hs_type(1) + len(3) + legacy_version(2) + random(32)
@@ -494,7 +525,11 @@ fn sh_with_nonzero_legacy_compression_not_rejected_gap() {
         hs[compression_off] = 0x01;
         hs
     });
-    outcome.expect("Rust silently accepts non-zero legacy_compression (RFC gap)");
+    let err = outcome.expect_err("client must reject non-zero legacy_compression_method");
+    assert!(
+        err.contains("legacy_compression_method") || err.contains("illegal_parameter"),
+        "expected an illegal_parameter compression abort, got: {err}"
+    );
 }
 
 // ===========================================================================
