@@ -850,6 +850,24 @@ impl ClientHandshake {
             return self.process_hello_retry_request(msg_data, &sh, suite);
         }
 
+        // RFC 8446 §4.1.4: once a HelloRetryRequest has been processed, the
+        // cipher_suite in the subsequent (real) ServerHello MUST match the
+        // one the HRR selected; a client that sees a different suite MUST
+        // abort with illegal_parameter. `negotiated_suite` still holds the
+        // HRR's choice at this point (the normal path overwrites it below).
+        // Found via TLS-Anvil client-mode `HelloRetryRequest.cipherSuiteDisparity`.
+        if self.hrr_done {
+            if let Some(hrr_suite) = self.negotiated_suite {
+                if suite != hrr_suite {
+                    return Err(TlsError::HandshakeFailed(format!(
+                        "illegal_parameter: ServerHello cipher_suite {:#06x} differs from \
+                         the HelloRetryRequest's {:#06x} (RFC 8446 §4.1.4)",
+                        suite.0, hrr_suite.0
+                    )));
+                }
+            }
+        }
+
         // RFC 8446 §4.1.3 / §4.2: the only extensions permitted in a
         // (non-HRR) ServerHello are supported_versions, key_share, and
         // pre_shared_key. Any other extension — including one the client
@@ -1721,6 +1739,63 @@ mod tests {
         assert_eq!(
             decoded1.legacy_session_id, decoded2.legacy_session_id,
             "post-HRR ClientHello MUST reuse legacy_session_id"
+        );
+    }
+
+    #[test]
+    fn test_hrr_then_mismatched_cipher_rejected() {
+        use crate::handshake::codec::{encode_server_hello, ServerHello};
+        use crate::handshake::extensions_codec::{
+            build_key_share_hrr, build_key_share_sh, build_supported_versions_sh,
+        };
+
+        let config = TlsConfig::builder()
+            .cipher_suites(&[
+                CipherSuite::TLS_AES_128_GCM_SHA256,
+                CipherSuite::TLS_AES_256_GCM_SHA384,
+            ])
+            .build();
+        let mut hs = ClientHandshake::new(config);
+        let _ch = hs.build_client_hello().unwrap();
+        let sid = hs.legacy_session_id.clone();
+
+        // HelloRetryRequest selecting SECP256R1 with cipher AES_128_GCM.
+        let hrr = ServerHello {
+            random: HELLO_RETRY_REQUEST_RANDOM,
+            legacy_session_id: sid.clone(),
+            cipher_suite: CipherSuite::TLS_AES_128_GCM_SHA256,
+            extensions: vec![
+                build_supported_versions_sh(),
+                build_key_share_hrr(NamedGroup::SECP256R1),
+            ],
+        };
+        let retry = match hs.process_server_hello(&encode_server_hello(&hrr)).unwrap() {
+            ServerHelloResult::RetryNeeded(r) => r,
+            _ => panic!("expected HelloRetryRequest"),
+        };
+        let _ch2 = hs.build_client_hello_retry(&retry).unwrap();
+
+        // Real ServerHello with a DIFFERENT cipher (AES_256_GCM) — RFC 8446
+        // §4.1.4 requires the client to abort with illegal_parameter. The
+        // cipher check fires before key_share processing, so a dummy key is
+        // fine.
+        let sh = ServerHello {
+            random: [0x11; 32],
+            legacy_session_id: sid,
+            cipher_suite: CipherSuite::TLS_AES_256_GCM_SHA384,
+            extensions: vec![
+                build_supported_versions_sh(),
+                build_key_share_sh(NamedGroup::SECP256R1, &[0x55; 65]),
+            ],
+        };
+        let err = match hs.process_server_hello(&encode_server_hello(&sh)) {
+            Err(e) => e,
+            Ok(_) => panic!("post-HRR cipher disparity must be rejected"),
+        };
+        assert_eq!(
+            crate::alert::tls_error_to_alert(&err),
+            crate::alert::AlertDescription::IllegalParameter,
+            "post-HRR cipher_suite disparity must draw illegal_parameter"
         );
     }
 
