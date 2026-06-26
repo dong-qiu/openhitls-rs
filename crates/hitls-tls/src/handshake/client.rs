@@ -136,8 +136,13 @@ pub struct ClientHandshake {
     ocsp_response: Option<Vec<u8>>,
     /// SCT data received from server Certificate entry.
     sct_data: Option<Vec<u8>>,
-    /// Client random (for key logging).
+    /// Client random (for key logging). RFC 8446 §4.1.2: the post-HRR
+    /// ClientHello MUST reuse this same value (not re-randomize).
     client_random: [u8; 32],
+    /// `legacy_session_id` chosen for the initial ClientHello (32 random
+    /// bytes under middlebox-compat, else empty). RFC 8446 §4.1.2: the
+    /// post-HRR ClientHello MUST echo the same value.
+    legacy_session_id: Vec<u8>,
     /// Negotiated ALPN protocol from EncryptedExtensions (if any).
     negotiated_alpn: Option<Vec<u8>>,
     /// Negotiated key exchange group from ServerHello key_share.
@@ -193,6 +198,7 @@ impl ClientHandshake {
             ocsp_response: None,
             sct_data: None,
             client_random: [0u8; 32],
+            legacy_session_id: Vec::new(),
             negotiated_alpn: None,
             negotiated_group: None,
             early_exporter_master_secret: Vec::new(),
@@ -299,6 +305,9 @@ impl ClientHandshake {
         } else {
             vec![]
         };
+        // Remember both for a possible HelloRetryRequest resend, which MUST
+        // reuse the identical client_random + legacy_session_id (§4.1.2).
+        self.legacy_session_id = legacy_session_id.clone();
 
         let ch = ClientHello {
             random,
@@ -994,9 +1003,15 @@ impl ClientHandshake {
         // Generate new key exchange for the selected group
         let kx = KeyExchange::generate(retry.selected_group)?;
 
-        let mut random = [0u8; 32];
-        getrandom::fill(&mut random)
-            .map_err(|_| TlsError::HandshakeFailed("random generation failed".into()))?;
+        // RFC 8446 §4.1.2: the ClientHello sent in response to a
+        // HelloRetryRequest MUST be the same as the original except for the
+        // explicitly-permitted changes (key_share, cookie, early_data
+        // removal, PSK update, padding). client_random and
+        // legacy_session_id are NOT among those, so reuse the originals —
+        // a fresh random would make a conforming server reject the second
+        // ClientHello (found via TLS-Anvil client-mode
+        // `actsCorrectlyUponHelloRetryRequest`).
+        let random = self.client_random;
 
         let mut extensions = vec![
             build_supported_versions_ch(),
@@ -1035,7 +1050,7 @@ impl ClientHandshake {
 
         let ch = ClientHello {
             random,
-            legacy_session_id: vec![],
+            legacy_session_id: self.legacy_session_id.clone(),
             cipher_suites: self.config.cipher_suites.clone(),
             extensions,
         };
@@ -1604,6 +1619,38 @@ mod tests {
 
         // Cannot build ClientHello again
         assert!(hs.build_client_hello().is_err());
+    }
+
+    #[test]
+    fn test_hrr_retry_reuses_random_and_session_id() {
+        use crate::handshake::codec::decode_client_hello;
+        // middlebox_compat is on by default → a 32-byte legacy_session_id,
+        // so this exercises both fields.
+        let config = TlsConfig::builder().server_name("example.com").build();
+        let mut hs = ClientHandshake::new(config);
+
+        let ch1 = hs.build_client_hello().unwrap();
+        let decoded1 = decode_client_hello(&ch1[4..]).unwrap();
+        assert_eq!(decoded1.legacy_session_id.len(), 32, "middlebox-compat sid");
+
+        // Resend after a HelloRetryRequest selecting a different group.
+        let retry = RetryActions {
+            selected_group: NamedGroup::SECP256R1,
+            cookie: Some(vec![0xAA, 0xBB]),
+            suite: CipherSuite::TLS_AES_128_GCM_SHA256,
+        };
+        let ch2 = hs.build_client_hello_retry(&retry).unwrap();
+        let decoded2 = decode_client_hello(&ch2[4..]).unwrap();
+
+        // RFC 8446 §4.1.2: identical client_random + legacy_session_id.
+        assert_eq!(
+            decoded1.random, decoded2.random,
+            "post-HRR ClientHello MUST reuse client_random"
+        );
+        assert_eq!(
+            decoded1.legacy_session_id, decoded2.legacy_session_id,
+            "post-HRR ClientHello MUST reuse legacy_session_id"
+        );
     }
 
     #[test]
