@@ -798,6 +798,30 @@ impl ClientHandshake {
         let body = get_body(msg_data)?;
         let sh = decode_server_hello(body)?;
 
+        // RFC 8446 §4.1.3: a client receiving a legacy_session_id_echo that
+        // does not match what it sent in its ClientHello MUST abort with
+        // illegal_parameter. (Applies to a HelloRetryRequest too — it is a
+        // ServerHello and is decoded here before the HRR branch below.)
+        if sh.legacy_session_id != self.legacy_session_id {
+            return Err(TlsError::HandshakeFailed(
+                "illegal_parameter: ServerHello legacy_session_id_echo mismatch (RFC 8446 §4.1.3)"
+                    .into(),
+            ));
+        }
+
+        // RFC 8446 §4.1.3: legacy_compression_method MUST be 0. The struct
+        // `ServerHello` drops the byte (the shared decoder accepts it), so
+        // read it back from the already-validated body. Layout:
+        // legacy_version(2) random(32) sid(1+n) cipher_suite(2) compression(1).
+        let comp_off = 2 + 32 + 1 + sh.legacy_session_id.len() + 2;
+        if body.get(comp_off).copied() != Some(0) {
+            return Err(TlsError::HandshakeFailed(
+                "illegal_parameter: ServerHello legacy_compression_method must be 0 \
+                 (RFC 8446 §4.1.3)"
+                    .into(),
+            ));
+        }
+
         // Check supported_versions extension for TLS 1.3
         let version_ext = sh
             .extensions
@@ -824,6 +848,27 @@ impl ClientHandshake {
         // Detect HelloRetryRequest by magic random
         if sh.random == HELLO_RETRY_REQUEST_RANDOM {
             return self.process_hello_retry_request(msg_data, &sh, suite);
+        }
+
+        // RFC 8446 §4.1.3 / §4.2: the only extensions permitted in a
+        // (non-HRR) ServerHello are supported_versions, key_share, and
+        // pre_shared_key. Any other extension — including one the client
+        // never offered (a GREASE codepoint, heartbeat, etc.) — MUST be
+        // rejected with unsupported_extension. (HRR additionally allows
+        // cookie, so this check is intentionally after the HRR branch.)
+        for ext in &sh.extensions {
+            if !matches!(
+                ext.extension_type,
+                ExtensionType::SUPPORTED_VERSIONS
+                    | ExtensionType::KEY_SHARE
+                    | ExtensionType::PRE_SHARED_KEY
+            ) {
+                return Err(TlsError::HandshakeFailed(format!(
+                    "unsupported_extension: type {:#06x} not allowed in ServerHello \
+                     (RFC 8446 §4.2)",
+                    ext.extension_type.0
+                )));
+            }
         }
 
         let params = CipherSuiteParams::from_suite(suite)?;
@@ -1085,6 +1130,32 @@ impl ClientHandshake {
 
         let body = get_body(msg_data)?;
         let ee = decode_encrypted_extensions(body)?;
+
+        // RFC 8446 §4.2: EncryptedExtensions carries only extensions not
+        // needed to establish the cryptographic context. Extensions that
+        // belong solely to ClientHello / ServerHello / HelloRetryRequest
+        // MUST NOT appear here; a client that finds one MUST abort with
+        // unsupported_extension. (Catches e.g. supported_versions or a
+        // padding extension smuggled into EE.)
+        for ext in &ee.extensions {
+            if matches!(
+                ext.extension_type,
+                ExtensionType::SUPPORTED_VERSIONS
+                    | ExtensionType::KEY_SHARE
+                    | ExtensionType::PRE_SHARED_KEY
+                    | ExtensionType::PADDING
+                    | ExtensionType::SIGNATURE_ALGORITHMS
+                    | ExtensionType::SIGNATURE_ALGORITHMS_CERT
+                    | ExtensionType::PSK_KEY_EXCHANGE_MODES
+                    | ExtensionType::COOKIE
+            ) {
+                return Err(TlsError::HandshakeFailed(format!(
+                    "unsupported_extension: type {:#06x} not allowed in EncryptedExtensions \
+                     (RFC 8446 §4.2)",
+                    ext.extension_type.0
+                )));
+            }
+        }
 
         // Process extensions from EncryptedExtensions
         for ext in &ee.extensions {
