@@ -35,14 +35,14 @@ jobs:
     name: Spell Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: crate-ci/typos@v1.46.1
 
   fmt:
     name: Format Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-rust
         with:
           components: rustfmt
@@ -52,7 +52,7 @@ jobs:
     name: Clippy Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-rust
         with:
           components: clippy
@@ -75,7 +75,7 @@ jobs:
           - { os: macos-latest, rust: "1.75" }
           - { os: windows-latest, rust: "1.75" }
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-rust
         with:
           toolchain: ${{ matrix.rust }}
@@ -118,7 +118,7 @@ jobs:
     needs: [fmt, clippy]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-rust
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@nextest
@@ -136,7 +136,7 @@ jobs:
       matrix:
         group: [crypto-single, crypto-advanced, tls-protocol, pki-auth]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-rust
       - uses: Swatinem/rust-cache@v2
       - name: crypto-single
@@ -221,7 +221,7 @@ jobs:
     needs: [fmt, clippy]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-rust
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-hack
@@ -242,7 +242,7 @@ jobs:
     needs: [fmt, clippy]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-rust
         with:
           toolchain: ${{ env.NIGHTLY }}
@@ -268,7 +268,7 @@ jobs:
       contents: read
       issues: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: rustsec/audit-check@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -299,7 +299,7 @@ jobs:
     env:
       MIRIFLAGS: "-Zmiri-disable-isolation"
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-rust
         with:
           toolchain: ${{ env.NIGHTLY }}
@@ -344,7 +344,7 @@ jobs:
     env:
       MIRIFLAGS: "-Zmiri-disable-isolation"
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-rust
         with:
           toolchain: ${{ env.NIGHTLY }}
@@ -357,7 +357,7 @@ jobs:
     needs: [fmt, clippy]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-rust
         with:
           toolchain: ${{ env.NIGHTLY }}
@@ -382,7 +382,7 @@ jobs:
       matrix:
         shard: [0, 1, 2, 3, 4, 5]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-rust
         with:
           toolchain: ${{ env.NIGHTLY }}
@@ -470,7 +470,7 @@ jobs:
           - hitls-auth
           - hitls-cli
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-rust
         with:
           toolchain: ${{ env.NIGHTLY }}
@@ -501,7 +501,7 @@ jobs:
     needs: [fmt, clippy]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-rust
         with:
           toolchain: ${{ env.NIGHTLY }}
@@ -517,7 +517,7 @@ jobs:
     name: Supply Chain Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: EmbarkStudios/cargo-deny-action@v2
 
   cross-check:
@@ -530,7 +530,7 @@ jobs:
       matrix:
         target: [i686-unknown-linux-gnu, s390x-unknown-linux-gnu]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-rust
         with:
           targets: ${{ matrix.target }}
@@ -542,7 +542,7 @@ jobs:
     needs: [fmt, clippy]
     runs-on: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-rust
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@nextest
@@ -556,7 +556,7 @@ jobs:
     needs: [fmt, clippy]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-rust
         with:
           targets: wasm32-unknown-unknown
@@ -569,7 +569,7 @@ jobs:
     needs: [fmt, clippy]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-rust
       - uses: Swatinem/rust-cache@v2
       - run: cargo doc --workspace --all-features --no-deps
@@ -581,7 +581,7 @@ jobs:
     needs: [fmt, clippy]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-rust
       - uses: Swatinem/rust-cache@v2
       # Slow keygen + zeroize verification (skip timing and flaky tests)
@@ -594,7 +594,7 @@ jobs:
     needs: [fmt, clippy]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-rust
       - uses: Swatinem/rust-cache@v2
       - name: Verify OpenSSL version
@@ -618,7 +618,7 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-rust
       - uses: Swatinem/rust-cache@v2
       - name: Run core timing tests (comparison/verify — advisory)
@@ -637,7 +637,7 @@ jobs:
     if: github.event.schedule == '0 3 * * 1'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-rust
       - uses: Swatinem/rust-cache@v2
       - name: Run all timing tests (release mode, advisory)
@@ -652,7 +652,7 @@ jobs:
     needs: [fmt, clippy]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-rust
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-vet
@@ -674,7 +674,7 @@ jobs:
       contents: read
       attestations: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-rust
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-cyclonedx
@@ -719,7 +719,7 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-rust
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-geiger
@@ -740,7 +740,7 @@ jobs:
     needs: [fmt, clippy]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-rust
       - uses: Swatinem/rust-cache@v2
       - run: cargo bench --all-features --no-run
@@ -753,7 +753,7 @@ jobs:
     needs: [fmt, clippy]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: ./.github/actions/setup-rust
@@ -772,7 +772,7 @@ jobs:
     needs: [fmt, clippy]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: ./.github/actions/setup-rust
@@ -801,7 +801,7 @@ jobs:
     needs: [fmt, clippy]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-rust
         with:
           toolchain: ${{ env.NIGHTLY }}
@@ -821,7 +821,7 @@ jobs:
     if: github.event.schedule == '0 3 * * 1'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-rust
       - uses: Swatinem/rust-cache@v2
       - name: Build twice and compare checksums
@@ -845,7 +845,7 @@ jobs:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-rust
         with:
           toolchain: ${{ env.NIGHTLY }}
@@ -864,7 +864,7 @@ jobs:
     if: github.event.schedule == '0 3 * * 1'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-rust
         with:
           toolchain: ${{ env.NIGHTLY }}
@@ -885,7 +885,7 @@ jobs:
     if: github.event.schedule == '0 3 * * 1'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-rust
         with:
           toolchain: ${{ env.NIGHTLY }}
@@ -941,7 +941,7 @@ jobs:
       TLSFUZZER_REF: bf7f579dc0e65498cfb21b60e9b152f6bd84a3bf
       TLSLITE_NG_REF: 02d1506badb16473faf50ebc3a413c6d789fe31f
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-rust
       - uses: Swatinem/rust-cache@v2
       - name: Build release hitls CLI
