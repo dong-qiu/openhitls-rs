@@ -488,7 +488,7 @@ jobs:
             --codecov --output-path coverage/codecov-${{ matrix.crate }}.json \
             --ignore-filename-regex "tests/vectors/"
       - name: Upload to Codecov
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           files: coverage/codecov-${{ matrix.crate }}.json
           flags: ${{ matrix.crate }}
