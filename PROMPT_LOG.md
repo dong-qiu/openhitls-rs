@@ -18436,3 +18436,12 @@ I196 —— 客户端测试第三个真 bug:`HelloRetryRequest.cipherSuiteDispar
   - **修复**:`process_server_hello` 在 HRR 检测分支之后(看到的是真 SH 而非 HRR,且此时 `negotiated_suite` 还是 HRR 的选择、未被正常路径覆盖)加一处检查:`hrr_done` 时若 SH suite != negotiated_suite → illegal_parameter。
   - **验证**:新 `test_hrr_then_mismatched_cipher_rejected`(驱动客户端走真 HRR 选 AES-128-GCM,再喂 AES-256-GCM 的 SH → 断言 illegal_parameter;检查在 key_share 处理前触发,dummy key 即可)+ 既有真-HRR 互通测试(suite 一致)仍过、不误拒。hitls-tls 1584/0(+1)+ 集成 0 回归;clippy/fmt clean。
   - **客户端一致性面三连**:I194(HRR random/session_id)、I195(SH/EE 扩展严格性)、I196(HRR cipher 一致性)—— 都是测客户端这个最大盲区挖出的真实 RFC 一致性 bug。
+
+> 请查看当前main是否处于最新状态 / 请深度分析其他的worktree能否删除 / 选择2 / 清理掉 / 清理掉那两个 stash / 请看看还有什么要做的 / MSRV 1.75 和 1.85，到底该如何选 / 更新 DEV_LOG 记录本次清理与 MSRV 策略
+
+R24 —— 非功能性维护相(仓库卫生 + 依赖治理 + MSRV 策略),由本会话上述多轮交互驱动,**零产品代码改动**。详见 DEV_LOG Phase R24。
+
+- **Part A 仓库/磁盘清理**:删全部 4 个空闲 worktree slot + `feature` slot(删前用 squash-merge 感知的 `git cherry origin/main <b>` 验证 patch 已进 main,`--merged` 对 squash 不可靠);本地分支 186→1(156 个 `git cherry` 判定已合并 + 16 个残留逐一 `gh pr list --state merged --head` 核实对应已 MERGED PR);删 2 个废弃 `testing` 分支陈旧 stash;磁盘 **98G→205M**(`target/debug/incremental` 跨 slot 71G + `cargo clean` + `git gc` 569M→102M)。
+- **Part B dependabot 队列(11 PR)清空**:合并 8 个安全 bump(checkout 7 / codecov 7 / typos 1.47.2 / insta 1.48.0 / libfuzzer-sys 0.4.13 / zeroize-fuzz 1.9.0 / serde_json 1.0.150 / tempfile 3.27.0)+ 2 个 cargo-vet keystone(#398 直接依赖豁免 / #399 tempfile 传递依赖 rustix 1.1.4 + linux-raw-sys 0.12.1,经 `git fetch origin pull/318/head` + `cargo vet` 根因定位)；关闭 3 个突破 MSRV 1.75 的 bump(getrandom 0.4.3 / zeroize 1.9.0 workspace / proptest 1.11.0,指向 issue #72)。`strict` 模式串行 rebase churn 逐个推进至合并。
+- **Part C MSRV 策略(#400)**:决定守 1.75(基础密码/TLS 库下游兼容面 > 工具链尝鲜，当前无 forcing function)。正式化:README(策略 + 受阻依赖表 + 触发条件)+ `.github/dependabot.yml`（root + /fuzz 版本范围 ignore，修正旧 getrandom 只挡 semver-major 漏掉 0.3→0.4 minor、且 /fuzz 无 ignore 的双漏洞)+ issue #72（暂缓 + 触发条件）。
+- **DEV_LOG/PROMPT_LOG**:R24 入册（#401 DEV_LOG + 本条 PROMPT_LOG）。
