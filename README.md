@@ -307,7 +307,43 @@ hitls-crypto = { version = "0.2", default-features = false, features = ["aes", "
 
 ## MSRV
 
-**Minimum Supported Rust Version: 1.75** (edition 2021)
+**Minimum Supported Rust Version: 1.75** (edition 2021), verified in CI on every PR.
+
+### Policy
+
+As a foundational cryptographic / TLS library, openHiTLS-rs prioritizes a broad
+downstream compatibility surface over tracking the latest toolchain. MSRV 1.75 is
+therefore treated as a maintained commitment, not an incidental floor: the CI
+matrix gates every PR against 1.75, and MSRV-incompatible language/API usage is
+rejected at review time.
+
+Because of this, a few dependencies are intentionally pinned below their latest
+release — their newer versions require Rust 1.85:
+
+| Dependency | Held at | Newer version blocked | Needs |
+|---|---|---|---|
+| `getrandom` | 0.3.x | ≥ 0.4 | Rust 1.85 |
+| `proptest` (dev) | 1.8.x | ≥ 1.9 | Rust 1.85 |
+| `zeroize` | 1.8.x | ≥ 1.9 | Rust 1.85 |
+| `clap` | 4.5.x | ≥ 4.6 | Rust 1.85 |
+
+Dependabot is configured to stop proposing these blocked upgrades while the MSRV
+holds (see `.github/dependabot.yml`).
+
+### When MSRV will be revisited
+
+The MSRV will be raised (likely to 1.85, adopting edition 2024) when a concrete
+forcing function appears — whichever comes first:
+
+- `getrandom` 0.3.x reaches end-of-life or receives a security advisory with no
+  0.3 backport (it is a randomness source, so this is the highest-priority trigger);
+- a required new dependency, or a needed feature of an existing one, is only
+  available on a newer toolchain;
+- a language/`std` feature with material safety or performance value for this
+  codebase requires it.
+
+Absent such a trigger, the MSRV is held. The coordinated 0.3 → 0.4 `getrandom`
+migration is tracked, deferred, in [issue #72](https://github.com/dong-qiu/openhitls-rs/issues/72).
 
 ## License
 
