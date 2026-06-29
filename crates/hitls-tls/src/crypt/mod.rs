@@ -38,6 +38,12 @@ pub enum HashAlgId {
 ///
 /// Implements the `Digest` trait by delegating to the inner variant,
 /// avoiding `Box<dyn Digest>` heap allocations.
+///
+/// `Clone` snapshots the live mid-hash state of the inner digest (all of
+/// `Sha256/384/512`, `Sha1`, `Sm3` derive `Clone`). This lets
+/// `TranscriptHash::current_hash` clone-and-finish an incremental hasher
+/// instead of replaying the whole message buffer on every call.
+#[derive(Clone)]
 pub enum DigestVariant {
     Sha256(Sha256),
     Sha384(Sha384),
