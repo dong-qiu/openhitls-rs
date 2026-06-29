@@ -255,6 +255,81 @@ unsafe fn encrypt_4_blocks_vaes(blocks: &mut [[u8; 16]; 4], enc_keys: &[[u8; 16]
     }
 }
 
+/// Decrypt 4 blocks in parallel using AES-NI pipeline.
+///
+/// Mirror of [`encrypt_4_blocks_ni`] on the inverse cipher (`_mm_aesdec_si128`
+/// / `_mm_aesdeclast_si128` over the precomputed decryption round keys).
+/// Decrypting 4 blocks at once hides the `aesdec` latency the single-block
+/// path exposes — the win for CBC/ECB bulk decryption.
+#[target_feature(enable = "aes")]
+unsafe fn decrypt_4_blocks_ni(blocks: &mut [[u8; 16]; 4], dec_keys: &[[u8; 16]], rounds: usize) {
+    // SAFETY: caller guarantees CPU feature availability (aes).
+    unsafe {
+        let mut s0 = _mm_loadu_si128(blocks[0].as_ptr() as *const __m128i);
+        let mut s1 = _mm_loadu_si128(blocks[1].as_ptr() as *const __m128i);
+        let mut s2 = _mm_loadu_si128(blocks[2].as_ptr() as *const __m128i);
+        let mut s3 = _mm_loadu_si128(blocks[3].as_ptr() as *const __m128i);
+
+        let rk0 = load_key(&dec_keys[0]);
+        s0 = _mm_xor_si128(s0, rk0);
+        s1 = _mm_xor_si128(s1, rk0);
+        s2 = _mm_xor_si128(s2, rk0);
+        s3 = _mm_xor_si128(s3, rk0);
+
+        for rk in dec_keys.iter().take(rounds).skip(1) {
+            let k = load_key(rk);
+            s0 = _mm_aesdec_si128(s0, k);
+            s1 = _mm_aesdec_si128(s1, k);
+            s2 = _mm_aesdec_si128(s2, k);
+            s3 = _mm_aesdec_si128(s3, k);
+        }
+
+        let kf = load_key(&dec_keys[rounds]);
+        s0 = _mm_aesdeclast_si128(s0, kf);
+        s1 = _mm_aesdeclast_si128(s1, kf);
+        s2 = _mm_aesdeclast_si128(s2, kf);
+        s3 = _mm_aesdeclast_si128(s3, kf);
+
+        _mm_storeu_si128(blocks[0].as_mut_ptr() as *mut __m128i, s0);
+        _mm_storeu_si128(blocks[1].as_mut_ptr() as *mut __m128i, s1);
+        _mm_storeu_si128(blocks[2].as_mut_ptr() as *mut __m128i, s2);
+        _mm_storeu_si128(blocks[3].as_mut_ptr() as *mut __m128i, s3);
+    }
+}
+
+/// Decrypt 4 blocks in parallel using VAES 256-bit instructions.
+///
+/// Mirror of [`encrypt_4_blocks_vaes`] on the inverse cipher: packs
+/// blocks[0..1] / blocks[2..3] into two `__m256i` and processes all 4 with 2
+/// VAES instructions per round (`_mm256_aesdec_epi128` / `_mm256_aesdeclast_epi128`).
+#[cfg(all(target_arch = "x86_64", has_vaes_intrinsics))]
+#[allow(clippy::incompatible_msrv)]
+#[target_feature(enable = "vaes,avx2")]
+unsafe fn decrypt_4_blocks_vaes(blocks: &mut [[u8; 16]; 4], dec_keys: &[[u8; 16]], rounds: usize) {
+    // SAFETY: caller guarantees CPU feature availability (vaes, avx2).
+    unsafe {
+        let mut s01 = _mm256_loadu_si256(blocks[0].as_ptr() as *const __m256i);
+        let mut s23 = _mm256_loadu_si256(blocks[2].as_ptr() as *const __m256i);
+
+        let rk0 = _mm256_broadcastsi128_si256(load_key(&dec_keys[0]));
+        s01 = _mm256_xor_si256(s01, rk0);
+        s23 = _mm256_xor_si256(s23, rk0);
+
+        for rk in dec_keys.iter().take(rounds).skip(1) {
+            let k = _mm256_broadcastsi128_si256(load_key(rk));
+            s01 = _mm256_aesdec_epi128(s01, k);
+            s23 = _mm256_aesdec_epi128(s23, k);
+        }
+
+        let kf = _mm256_broadcastsi128_si256(load_key(&dec_keys[rounds]));
+        s01 = _mm256_aesdeclast_epi128(s01, kf);
+        s23 = _mm256_aesdeclast_epi128(s23, kf);
+
+        _mm256_storeu_si256(blocks[0].as_mut_ptr() as *mut __m256i, s01);
+        _mm256_storeu_si256(blocks[2].as_mut_ptr() as *mut __m256i, s23);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // NiAesKey — public(crate) struct
 // ---------------------------------------------------------------------------
@@ -346,6 +421,24 @@ impl NiAesKey {
             }
         }
         unsafe { encrypt_4_blocks_ni(blocks, &self.enc_keys, self.rounds) }
+        Ok(())
+    }
+
+    /// Decrypt 4 blocks in place using pipelined AES instructions.
+    ///
+    /// Uses VAES 256-bit when available (2 instructions per round for 4 blocks),
+    /// falling back to the AES-NI 128-bit pipeline (4 instructions per round).
+    pub fn decrypt_4_blocks(&self, blocks: &mut [[u8; 16]; 4]) -> Result<(), CryptoError> {
+        #[cfg(has_vaes_intrinsics)]
+        {
+            if is_x86_feature_detected!("vaes") {
+                // SAFETY: NiAesKey is only instantiated when AES is detected,
+                // and we just verified VAES + AVX2 support.
+                unsafe { decrypt_4_blocks_vaes(blocks, &self.dec_keys, self.rounds) }
+                return Ok(());
+            }
+        }
+        unsafe { decrypt_4_blocks_ni(blocks, &self.dec_keys, self.rounds) }
         Ok(())
     }
 

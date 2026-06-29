@@ -125,6 +125,24 @@ impl AesKey {
         }
     }
 
+    /// Decrypt 4 blocks in place, exploiting AES pipeline parallelism.
+    ///
+    /// On hardware AES (NEON/NI), all 4 blocks flow through each inverse round
+    /// simultaneously, hiding the multi-cycle `aesd`/`aesdec` latency that the
+    /// single-block path leaves exposed. Software falls back to sequential
+    /// single-block decryption. The blocks are independent (the caller handles
+    /// any CBC chaining), so this is a drop-in 4× batch of `decrypt_block`.
+    #[inline]
+    pub fn decrypt_4_blocks(&self, blocks: &mut [[u8; 16]; 4]) -> Result<(), CryptoError> {
+        match &self.inner {
+            AesImpl::Soft(k) => k.decrypt_4_blocks(blocks),
+            #[cfg(target_arch = "aarch64")]
+            AesImpl::Neon(k) => k.decrypt_4_blocks(blocks),
+            #[cfg(target_arch = "x86_64")]
+            AesImpl::Ni(k) => k.decrypt_4_blocks(blocks),
+        }
+    }
+
     /// Return the key length in bytes.
     #[inline]
     pub fn key_len(&self) -> usize {
@@ -169,6 +187,9 @@ impl crate::provider::BlockCipher for AesKey {
     }
     fn decrypt_block(&self, block: &mut [u8]) -> Result<(), CryptoError> {
         self.decrypt_block(block)
+    }
+    fn decrypt_4_blocks(&self, blocks: &mut [[u8; 16]; 4]) -> Result<(), CryptoError> {
+        AesKey::decrypt_4_blocks(self, blocks)
     }
 }
 
@@ -367,6 +388,54 @@ mod tests {
             hw.decrypt_block(&mut block_hw).unwrap();
             sw.decrypt_block(&mut block_sw).unwrap();
             assert_eq!(block_hw, block_sw, "decrypt mismatch at seed={seed}");
+        }
+    }
+
+    /// `decrypt_4_blocks` must equal 4× `decrypt_block`, and round-trip with
+    /// `encrypt_4_blocks`, across all key sizes and both HW and SW backends.
+    /// Guards the new pipelined inverse-cipher intrinsics against the proven
+    /// single-block path.
+    #[test]
+    fn test_aes_decrypt_4_blocks_matches_single() {
+        for key_len in [16usize, 24, 32] {
+            let key: Vec<u8> = (0..key_len).map(|i| (i * 5 + 1) as u8).collect();
+            let hw = AesKey::new(&key).unwrap();
+            let sw = AesKey::new_soft(&key).unwrap();
+
+            for seed in 0u8..32 {
+                let blocks: [[u8; 16]; 4] = core::array::from_fn(|b| {
+                    core::array::from_fn(|i| seed.wrapping_add((b * 16 + i) as u8))
+                });
+
+                // 4-block decrypt (HW) == single-block decrypt, block by block.
+                let mut batch = blocks;
+                hw.decrypt_4_blocks(&mut batch).unwrap();
+                for b in 0..4 {
+                    let mut one = blocks[b];
+                    hw.decrypt_block(&mut one).unwrap();
+                    assert_eq!(
+                        batch[b], one,
+                        "4-block vs single decrypt (HW) key_len={key_len} seed={seed} b={b}"
+                    );
+                }
+
+                // HW 4-block decrypt == SW 4-block decrypt.
+                let mut batch_sw = blocks;
+                sw.decrypt_4_blocks(&mut batch_sw).unwrap();
+                assert_eq!(
+                    batch, batch_sw,
+                    "HW vs SW 4-block decrypt key_len={key_len} seed={seed}"
+                );
+
+                // encrypt_4_blocks then decrypt_4_blocks round-trips to identity.
+                let mut rt = blocks;
+                hw.encrypt_4_blocks(&mut rt).unwrap();
+                hw.decrypt_4_blocks(&mut rt).unwrap();
+                assert_eq!(
+                    rt, blocks,
+                    "4-block enc/dec round-trip key_len={key_len} seed={seed}"
+                );
+            }
         }
     }
 

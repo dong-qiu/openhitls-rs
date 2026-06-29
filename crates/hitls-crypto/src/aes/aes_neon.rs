@@ -244,6 +244,54 @@ unsafe fn neon_encrypt_4_blocks(blocks: &mut [[u8; 16]; 4], enc_keys: &[[u8; 16]
     }
 }
 
+/// Decrypt 4 blocks in parallel using ARMv8 AES pipeline.
+///
+/// Mirror of [`neon_encrypt_4_blocks`] on the inverse cipher: `AESD` +
+/// `AESIMC` over the precomputed decryption round keys. Decrypting 4 blocks
+/// at once hides the multi-cycle `aesd` latency (the single-block path leaves
+/// it exposed), which is the win for CBC/ECB bulk decryption.
+///
+/// # Safety
+///
+/// Caller must ensure the CPU supports the ARMv8 AES and NEON extensions.
+#[target_feature(enable = "aes,neon")]
+unsafe fn neon_decrypt_4_blocks(blocks: &mut [[u8; 16]; 4], dec_keys: &[[u8; 16]], rounds: usize) {
+    // SAFETY: caller guarantees CPU feature availability (aes + neon).
+    unsafe {
+        let mut s0 = vld1q_u8(blocks[0].as_ptr());
+        let mut s1 = vld1q_u8(blocks[1].as_ptr());
+        let mut s2 = vld1q_u8(blocks[2].as_ptr());
+        let mut s3 = vld1q_u8(blocks[3].as_ptr());
+
+        // Rounds 0 .. rounds-2: AESD + AESIMC on all 4 blocks
+        for rk_bytes in dec_keys.iter().take(rounds - 1) {
+            let rk = vld1q_u8(rk_bytes.as_ptr());
+            s0 = vaesimcq_u8(vaesdq_u8(s0, rk));
+            s1 = vaesimcq_u8(vaesdq_u8(s1, rk));
+            s2 = vaesimcq_u8(vaesdq_u8(s2, rk));
+            s3 = vaesimcq_u8(vaesdq_u8(s3, rk));
+        }
+
+        // Last round: AESD (no InvMixColumns) + XOR final round key
+        let rk_last = vld1q_u8(dec_keys[rounds - 1].as_ptr());
+        s0 = vaesdq_u8(s0, rk_last);
+        s1 = vaesdq_u8(s1, rk_last);
+        s2 = vaesdq_u8(s2, rk_last);
+        s3 = vaesdq_u8(s3, rk_last);
+
+        let rk_final = vld1q_u8(dec_keys[rounds].as_ptr());
+        s0 = veorq_u8(s0, rk_final);
+        s1 = veorq_u8(s1, rk_final);
+        s2 = veorq_u8(s2, rk_final);
+        s3 = veorq_u8(s3, rk_final);
+
+        vst1q_u8(blocks[0].as_mut_ptr(), s0);
+        vst1q_u8(blocks[1].as_mut_ptr(), s1);
+        vst1q_u8(blocks[2].as_mut_ptr(), s2);
+        vst1q_u8(blocks[3].as_mut_ptr(), s3);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Public type.
 // ---------------------------------------------------------------------------
@@ -335,6 +383,16 @@ impl NeonAesKey {
     /// the 4-cycle latency / 1-cycle throughput of the AES pipeline.
     pub fn encrypt_4_blocks(&self, blocks: &mut [[u8; 16]; 4]) -> Result<(), CryptoError> {
         unsafe { neon_encrypt_4_blocks(blocks, &self.enc_keys, self.rounds) }
+        Ok(())
+    }
+
+    /// Decrypt 4 blocks in place using pipelined NEON AES instructions.
+    ///
+    /// Processes all 4 blocks through each inverse round simultaneously to hide
+    /// the `aesd` latency that the single-block path exposes.
+    pub fn decrypt_4_blocks(&self, blocks: &mut [[u8; 16]; 4]) -> Result<(), CryptoError> {
+        // Safety: module only compiled on aarch64 with AES feature support.
+        unsafe { neon_decrypt_4_blocks(blocks, &self.dec_keys, self.rounds) }
         Ok(())
     }
 

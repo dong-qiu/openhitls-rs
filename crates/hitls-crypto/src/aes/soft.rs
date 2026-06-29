@@ -180,6 +180,17 @@ impl SoftAesKey {
         Ok(())
     }
 
+    /// Decrypt 4 blocks in place (sequential software fallback).
+    ///
+    /// Software has no pipeline to exploit, so this is just a sequential loop;
+    /// it exists to give the dispatch layer a uniform 4-block decrypt API.
+    pub fn decrypt_4_blocks(&self, blocks: &mut [[u8; 16]; 4]) -> Result<(), CryptoError> {
+        for blk in blocks.iter_mut() {
+            self.decrypt_block(blk)?;
+        }
+        Ok(())
+    }
+
     /// Return the key length in bytes.
     pub fn key_len(&self) -> usize {
         self.key.len()

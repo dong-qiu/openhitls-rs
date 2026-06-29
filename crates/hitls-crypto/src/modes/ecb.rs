@@ -48,9 +48,29 @@ pub fn ecb_decrypt(key: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>, CryptoError
     }
     let cipher = AesKey::new(key)?;
     let mut output = ciphertext.to_vec();
-    for chunk in output.chunks_mut(AES_BLOCK_SIZE) {
-        cipher.decrypt_block(chunk)?;
+
+    let mut offset = 0;
+
+    // 4-block pipeline (mirrors ecb_encrypt — ECB blocks are independent, so
+    // decryption parallelizes directly; hides the aesd/aesdec latency).
+    while offset + 64 <= output.len() {
+        let mut blocks = [[0u8; 16]; 4];
+        for i in 0..4 {
+            blocks[i].copy_from_slice(&output[offset + i * 16..offset + (i + 1) * 16]);
+        }
+        cipher.decrypt_4_blocks(&mut blocks)?;
+        for i in 0..4 {
+            output[offset + i * 16..offset + (i + 1) * 16].copy_from_slice(&blocks[i]);
+        }
+        offset += 64;
     }
+
+    // Tail: single-block loop
+    while offset < output.len() {
+        cipher.decrypt_block(&mut output[offset..offset + 16])?;
+        offset += 16;
+    }
+
     Ok(output)
 }
 
@@ -83,6 +103,19 @@ mod tests {
         let ct = ecb_encrypt(&key, &pt).unwrap();
         let decrypted = ecb_decrypt(&key, &ct).unwrap();
         assert_eq!(decrypted, pt);
+    }
+
+    #[test]
+    fn test_ecb_roundtrip_all_block_counts_exercises_4block_tail() {
+        // The pipelined ECB decrypt processes full groups of 4 blocks then a
+        // 1-3 block tail; sweep 1..9 blocks to cover every remainder.
+        let key = hex("000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f");
+        for blocks in 1usize..=9 {
+            let pt: Vec<u8> = (0..blocks * 16).map(|i| (i * 5 + 1) as u8).collect();
+            let ct = ecb_encrypt(&key, &pt).unwrap();
+            let rt = ecb_decrypt(&key, &ct).unwrap();
+            assert_eq!(rt, pt, "ECB round-trip failed at {blocks} blocks");
+        }
     }
 
     #[test]
