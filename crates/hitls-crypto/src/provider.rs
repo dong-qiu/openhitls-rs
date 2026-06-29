@@ -59,6 +59,20 @@ pub trait BlockCipher: Send + Sync {
 
     /// Decrypt a single block in-place.
     fn decrypt_block(&self, block: &mut [u8]) -> Result<(), CryptoError>;
+
+    /// Decrypt 4 consecutive 16-byte blocks in-place.
+    ///
+    /// The blocks are independent (any chaining is the caller's responsibility),
+    /// so a hardware implementation can pipeline all 4 through the inverse cipher
+    /// to hide instruction latency. The default loops single-block; ciphers with
+    /// a pipelined path (AES) override it. Only meaningful for 128-bit-block
+    /// ciphers — every current implementor has a 16-byte block.
+    fn decrypt_4_blocks(&self, blocks: &mut [[u8; 16]; 4]) -> Result<(), CryptoError> {
+        for block in blocks.iter_mut() {
+            self.decrypt_block(block)?;
+        }
+        Ok(())
+    }
 }
 
 /// An Authenticated Encryption with Associated Data (AEAD) algorithm.

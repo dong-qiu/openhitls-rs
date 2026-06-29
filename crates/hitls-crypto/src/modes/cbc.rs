@@ -109,6 +109,61 @@ pub fn cbc_encrypt_with<C: BlockCipher>(
     Ok(data)
 }
 
+/// In-place CBC decryption of a 16-byte-block ciphertext buffer (no padding
+/// handling): `output` enters as ciphertext and leaves as plaintext.
+///
+/// Pipelined: CBC decryption parallelizes because each `P_i = D(C_i) XOR C_{i-1}`
+/// and all the `C_i` are known up front, so 4 blocks are decrypted in one batch
+/// (`decrypt_4_blocks`, which hides the inverse-cipher instruction latency) and
+/// then XORed with their preceding ciphertext blocks. (CBC *encryption* can't do
+/// this — it is serial on the previous ciphertext.) The 1-3 trailing blocks fall
+/// back to single-block. Shared by the padded and raw CBC-decrypt entry points.
+///
+/// Preconditions (callers validate): `iv.len() == 16` and `output.len() % 16 == 0`.
+fn cbc_decrypt_in_place_16<C: BlockCipher>(
+    cipher: &C,
+    iv: &[u8],
+    output: &mut [u8],
+) -> Result<(), CryptoError> {
+    let mut prev = [0u8; 16];
+    prev.copy_from_slice(&iv[..16]);
+
+    let mut offset = 0;
+    while offset + 64 <= output.len() {
+        let mut blocks = [[0u8; 16]; 4];
+        for j in 0..4 {
+            blocks[j].copy_from_slice(&output[offset + j * 16..offset + (j + 1) * 16]);
+        }
+        // Snapshot the ciphertext blocks before in-place decryption: they are the
+        // XOR operands (C_{i-1}) and the chaining value for the next group.
+        let cts = blocks;
+        cipher.decrypt_4_blocks(&mut blocks)?;
+        for k in 0..16 {
+            blocks[0][k] ^= prev[k];
+            blocks[1][k] ^= cts[0][k];
+            blocks[2][k] ^= cts[1][k];
+            blocks[3][k] ^= cts[2][k];
+        }
+        prev = cts[3];
+        for j in 0..4 {
+            output[offset + j * 16..offset + (j + 1) * 16].copy_from_slice(&blocks[j]);
+        }
+        offset += 64;
+    }
+    // Tail: remaining 1-3 blocks, single-block.
+    while offset < output.len() {
+        let mut ct_copy = [0u8; 16];
+        ct_copy.copy_from_slice(&output[offset..offset + 16]);
+        cipher.decrypt_block(&mut output[offset..offset + 16])?;
+        for k in 0..16 {
+            output[offset + k] ^= prev[k];
+        }
+        prev = ct_copy;
+        offset += 16;
+    }
+    Ok(())
+}
+
 /// Decrypt data using CBC mode with a generic block cipher and remove PKCS#7 padding.
 pub fn cbc_decrypt_with<C: BlockCipher>(
     cipher: &C,
@@ -124,17 +179,22 @@ pub fn cbc_decrypt_with<C: BlockCipher>(
     }
 
     let mut output = ciphertext.to_vec();
-    let mut prev = [0u8; 16];
-    prev[..bs].copy_from_slice(iv);
 
-    for chunk in output.chunks_mut(bs) {
-        let mut ct_copy = [0u8; 16];
-        ct_copy[..bs].copy_from_slice(chunk);
-        cipher.decrypt_block(chunk)?;
-        for i in 0..bs {
-            chunk[i] ^= prev[i];
+    if bs == 16 {
+        cbc_decrypt_in_place_16(cipher, iv, &mut output)?;
+    } else {
+        // Generic single-block path for any non-128-bit block cipher.
+        let mut prev = [0u8; 16];
+        prev[..bs].copy_from_slice(iv);
+        for chunk in output.chunks_mut(bs) {
+            let mut ct_copy = [0u8; 16];
+            ct_copy[..bs].copy_from_slice(chunk);
+            cipher.decrypt_block(chunk)?;
+            for i in 0..bs {
+                chunk[i] ^= prev[i];
+            }
+            prev = ct_copy;
         }
-        prev = ct_copy;
     }
 
     // PKCS#7 unpad (constant-time check)
@@ -299,18 +359,8 @@ pub fn cbc_decrypt_raw_with<C: BlockCipher>(
     }
 
     let mut output = ciphertext.to_vec();
-    let mut prev = [0u8; 16];
-    prev[..bs].copy_from_slice(iv);
-
-    for chunk in output.chunks_mut(bs) {
-        let mut ct_copy = [0u8; 16];
-        ct_copy[..bs].copy_from_slice(chunk);
-        cipher.decrypt_block(chunk)?;
-        for i in 0..bs {
-            chunk[i] ^= prev[i];
-        }
-        prev = ct_copy;
-    }
+    // bs == 16 enforced above; use the pipelined in-place CBC decrypt.
+    cbc_decrypt_in_place_16(cipher, iv, &mut output)?;
     Ok(output)
 }
 
@@ -330,6 +380,29 @@ mod tests {
         // ct has padding block appended
         let decrypted = cbc_decrypt(&key, &iv, &ct).unwrap();
         assert_eq!(decrypted, pt);
+    }
+
+    #[test]
+    fn test_cbc_roundtrip_all_lengths_exercises_4block_tail() {
+        // The pipelined CBC decrypt processes full groups of 4 blocks then a
+        // 1-3 block tail. Sweep plaintext lengths so the resulting ciphertexts
+        // span 1..6 blocks (every tail remainder + multi-group cases) and assert
+        // round-trip recovery for both padded and raw CBC.
+        let key = hex("2b7e151628aed2a6abf7158809cf4f3c");
+        let iv = hex("000102030405060708090a0b0c0d0e0f");
+        for n in 0usize..=80 {
+            let pt: Vec<u8> = (0..n).map(|i| (i * 3 + 7) as u8).collect();
+            let ct = cbc_encrypt(&key, &iv, &pt).unwrap();
+            let rt = cbc_decrypt(&key, &iv, &ct).unwrap();
+            assert_eq!(rt, pt, "padded CBC round-trip failed at len {n}");
+        }
+        // Raw (no padding): block-aligned inputs of 1..9 blocks.
+        for blocks in 1usize..=9 {
+            let pt: Vec<u8> = (0..blocks * 16).map(|i| (i ^ 0x5a) as u8).collect();
+            let ct = cbc_encrypt_raw(&key, &iv, &pt).unwrap();
+            let rt = cbc_decrypt_raw(&key, &iv, &ct).unwrap();
+            assert_eq!(rt, pt, "raw CBC round-trip failed at {blocks} blocks");
+        }
     }
 
     #[test]
