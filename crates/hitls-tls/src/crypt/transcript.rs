@@ -52,16 +52,28 @@ impl PartialEq<[u8]> for HashOutput {
 
 /// Running transcript hash over handshake messages.
 ///
-/// Uses a message buffer + replay approach: `current_hash()` creates a fresh
-/// hasher, replays all buffered data, and finishes to get the intermediate hash.
-/// The live hasher is never finalized, so `update()` continues to work.
+/// Maintains a **live incremental hasher** (`hasher`) that is fed in `update()`;
+/// `current_hash()` clones that mid-state hasher and finalizes the clone, so the
+/// running state is never re-derived. This replaces the previous "replay the
+/// whole buffer on every `current_hash()`" approach, which was O(messages ×
+/// transcript) — `current_hash()` is called ~8-9× per TLS 1.3 handshake side.
 ///
-/// `Clone` (Phase I97) snapshots the buffered messages — used to retain the
-/// completed handshake transcript so post-handshake CertificateVerify
+/// `message_buffer` is still retained because two consumers need the raw bytes,
+/// not just the running digest: the TLS 1.2 CertificateVerify path re-hashes the
+/// transcript with the CV-scheme's hash via `message_bytes()` (RFC 5246 §7.4.8),
+/// and HelloRetryRequest rebuilds the transcript via `replace_with_message_hash`
+/// (RFC 8446 §4.4.1).
+///
+/// `Clone` (Phase I97) snapshots both the live hasher and the buffer — used to
+/// retain the completed handshake transcript so post-handshake CertificateVerify
 /// (RFC 8446 §4.4.1 / §4.6.2) can continue it.
 #[derive(Clone)]
 pub struct TranscriptHash {
     alg: HashAlgId,
+    /// Live incremental hasher over all messages fed so far.
+    hasher: DigestVariant,
+    /// Raw message bytes, retained for `message_bytes()` (TLS 1.2 CV) and
+    /// `replace_with_message_hash()` (HRR) — see struct docs.
     message_buffer: Vec<u8>,
     hash_len: usize,
 }
@@ -72,26 +84,29 @@ impl TranscriptHash {
         let hash_len = DigestVariant::output_size_for(alg);
         Self {
             alg,
+            hasher: DigestVariant::new(alg),
             message_buffer: Vec::new(),
             hash_len,
         }
     }
 
     /// Feed handshake message data into the transcript.
+    ///
+    /// Updates the live incremental hasher and appends to the raw buffer.
     pub fn update(&mut self, data: &[u8]) -> Result<(), TlsError> {
+        self.hasher.update(data).map_err(TlsError::CryptoError)?;
         self.message_buffer.extend_from_slice(data);
         Ok(())
     }
 
     /// Get the current transcript hash without consuming the state.
     ///
-    /// Creates a fresh hasher, replays all buffered messages, and finishes.
-    /// Returns a stack-allocated `HashOutput` (no heap allocation).
+    /// Clones the live mid-state hasher and finalizes the clone, leaving the
+    /// running state intact for further `update()`s. O(1) in the number of
+    /// messages already absorbed (no replay). Returns a stack-allocated
+    /// `HashOutput` (no heap allocation).
     pub fn current_hash(&self) -> Result<HashOutput, TlsError> {
-        let mut hasher = DigestVariant::new(self.alg);
-        hasher
-            .update(&self.message_buffer)
-            .map_err(TlsError::CryptoError)?;
+        let mut hasher = self.hasher.clone();
         let mut out = HashOutput::new(self.hash_len);
         hasher
             .finish(&mut out.buf[..self.hash_len])
@@ -137,6 +152,14 @@ impl TranscriptHash {
         synthetic.push(hash.len() as u8);
         synthetic.extend_from_slice(&hash);
         self.message_buffer = synthetic;
+        // Ordering invariant: `message_buffer` must already hold the synthetic
+        // transcript before the re-seed below, since the re-seed reads from it.
+        // Reset the live hasher and re-seed it from the synthetic buffer so the
+        // incremental state matches the rebuilt transcript.
+        self.hasher = DigestVariant::new(self.alg);
+        self.hasher
+            .update(&self.message_buffer)
+            .map_err(TlsError::CryptoError)?;
         Ok(())
     }
 }
@@ -308,6 +331,30 @@ mod tests {
         let h_after_update = th.current_hash().unwrap();
         assert_ne!(h_after_replace, h_after_update);
         assert_eq!(h_after_update.len(), 32);
+    }
+
+    #[test]
+    fn test_transcript_incremental_matches_replay() {
+        // Guards the incremental-hasher optimization: across many interleaved
+        // update()/current_hash() calls, the live clone-and-finish state must
+        // always equal a from-scratch hash of the full accumulated buffer
+        // (the previous "replay the whole buffer" semantics).
+        let mut th = TranscriptHash::new(HashAlgId::Sha256);
+        let mut acc: Vec<u8> = Vec::new();
+        for i in 0u16..50 {
+            // Variable-length chunk with non-trivial bytes.
+            let chunk: Vec<u8> = (0..=(i as u8)).collect();
+            th.update(&chunk).unwrap();
+            acc.extend_from_slice(&chunk);
+
+            // current_hash() after every update must match a fresh full hash...
+            let got = th.current_hash().unwrap();
+            let expected = Sha256::digest(&acc).unwrap();
+            assert_eq!(got, expected.to_vec(), "mismatch at step {i}");
+
+            // ...and calling it again must be non-destructive (same value).
+            assert_eq!(th.current_hash().unwrap(), got);
+        }
     }
 
     // ===== Phase T112: SM3 transcript hash tests =====
