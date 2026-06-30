@@ -107,6 +107,8 @@ integration tests and so do not show in instrumented line coverage.)
 ## 5. Related documents
 - `docs/c-test-na-list.md` — the N/A exemption list + the dual-track rationale.
 - `docs/tlsfuzzer.md` — tlsfuzzer harness + contributor walkthrough.
+- `docs/tls-anvil-analysis-report.md` — TLS-Anvil RFC-conformance analysis
+  (multi-run server + client + DTLS), fixes I185–I196, consolidated.
 - `docs/issue-42-phase-e-plan.md`, `docs/issue-42-phase-f-plan.md` — per-row
   audit-pin mapping (TLCP / DTLS consistency).
 - `docs/tlcp-test-mapping.md` — TLCP C-test → Rust mapping.
