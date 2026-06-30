@@ -18461,3 +18461,12 @@ P96 —— 性能审计 A1 项(收官;A3=P95 已合,A2 回退):**AES CBC/ECB 解
 - **修复**:三后端加 `decrypt_4_blocks`(NEON `vaesdq`+`vaesimcq` / AES-NI `_mm_aesdec*` / VAES-256 `_mm256_aesdec_epi128` / soft 顺序),镜像已验证的加密侧;新增 `AesKey::decrypt_4_blocks` + `BlockCipher::decrypt_4_blocks`(默认逐块,AES override)。CBC 解密(padded `cbc_decrypt_with` + 无 padding `cbc_decrypt_raw_with`=TLS 1.2 记录路径)共用 helper `cbc_decrypt_in_place_16`:批解 4 块 + 快照前序密文 XOR 链 + 1-3 块尾巴;ECB 镜像加密侧流水线。
 - **无 A2 那种代价**:纯流水线、栈数组、无分配。**实测 M4 2.66×**(5139→13648 MiB/s)。
 - **验证**:新 `test_aes_decrypt_4_blocks_matches_single`(4-block==单块==soft+往返,全 key size)+ CBC 往返 0..80/1..9 块 + ECB 1..9 块 + FIPS/NIST KAT + 42 migrated_aes + hitls-crypto 1521/0 + hitls-tls 1586/0 + 集成全绿 + fmt/clippy clean。详见 DEV_LOG P96。
+
+> 继续做11
+
+P97 —— 性能审计选"Keccak/SHAKE 吞吐"侦察,定位到 **P18 的 ARM SHA-3 CE 路径在 Apple Silicon 实测慢 2.6×**,删除之。
+- **侦察**:确认 ML-KEM 共用主 sha3、M4 上走 ARM SHA-3 CE(rustc 1.95 cfg 激活 + 运行时 sha3 detected)。微基准 keccak_f1600_arm vs soft(各 2M 次,结果字节一致):ARM ≈360ns/perm vs 软件 ≈138ns/perm → **ARM 0.38×**,三测稳定。
+- **根因**:keccak_arm 每轮 pack/lo/hi 在 GPR↔NEON 横跳(状态留标量数组),跨域搬移代价盖过 EOR3/BCAX/RAX1 收益。正确做法需 25 lane 全程寄存器常驻 + XAR。
+- **修复**:删 keccak_arm.rs + 分派 arm 分支 + 4 个对比测试 + build.rs 的 has_sha3_keccak_intrinsics cfg;keccak_f1600 全目标走软件。
+- **实测(M4 vs PERF_REPORT 基线)**:ML-KEM-768 encaps 41452→57618/s(1.39×)、decaps 46072→76197/s(1.65×,与 C 近持平)。惠及所有 SHA-3/SHAKE/ML-KEM/ML-DSA/SLH-DSA。
+- **正确性**:SHA-3 23/0 + migrated_sha3 46 + migrated_mlkem 150 + migrated_mldsa 105 KAT + crypto lib 1517/0 + 全工作区编译 + fmt/clippy clean。寄存器常驻 SHA-3 CE 重写留 backlog。详见 DEV_LOG P97。
