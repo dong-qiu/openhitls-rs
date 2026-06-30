@@ -6,9 +6,6 @@
 use hitls_types::CryptoError;
 use zeroize::Zeroize;
 
-#[cfg(all(target_arch = "aarch64", has_sha3_keccak_intrinsics))]
-mod keccak_arm;
-
 // ---------------------------------------------------------------------------
 // Keccak-f[1600] permutation
 // ---------------------------------------------------------------------------
@@ -46,16 +43,21 @@ const ROTATIONS: [u32; 25] = [
     0, 1, 62, 28, 27, 36, 44, 6, 55, 20, 3, 10, 43, 25, 39, 41, 45, 15, 21, 8, 18, 2, 61, 56, 14,
 ];
 
-/// Keccak-f[1600] dispatch: use SHA-3 crypto extensions on ARMv8.2+ when available.
+/// Keccak-f[1600] permutation.
+///
+/// Uses the scalar software implementation on all targets. An ARMv8.2 SHA-3
+/// Crypto Extension path (EOR3/BCAX/RAX1) existed previously (Phase P18) but was
+/// **removed after benchmarking showed it was a net pessimization** on Apple
+/// Silicon — ~2.6× *slower* than this scalar path (≈360 ns vs ≈138 ns per
+/// permutation on an M4). The root cause was architecture-independent: that
+/// implementation kept the 25-lane state in the scalar array and shuttled it in
+/// and out of NEON registers every round (GPR↔SIMD `pack`/`lo`/`hi`), and the
+/// cross-domain moves cost more than the SHA-3 instructions saved. A correct
+/// SHA-3 CE implementation must keep all 25 lanes register-resident across all
+/// rounds (using XAR for the ρ rotates); that is a future rewrite (tracked
+/// separately) rather than the shuttling version. See DEV_LOG Phase P97.
+#[inline]
 fn keccak_f1600(state: &mut [u64; 25]) {
-    #[cfg(all(target_arch = "aarch64", has_sha3_keccak_intrinsics))]
-    {
-        if std::arch::is_aarch64_feature_detected!("sha3") {
-            // SAFETY: feature detection ensures SHA-3 crypto extensions are available.
-            unsafe { keccak_arm::keccak_f1600_arm(state) };
-            return;
-        }
-    }
     keccak_f1600_soft(state);
 }
 
@@ -804,86 +806,6 @@ mod tests {
 
         assert_eq!(&full[..136], &part1);
         assert_eq!(&full[136..], &part2);
-    }
-
-    // -------------------------------------------------------
-    // HW↔SW cross-validation: Keccak-f[1600] ARM vs software
-    // -------------------------------------------------------
-
-    #[test]
-    #[cfg(all(target_arch = "aarch64", has_sha3_keccak_intrinsics))]
-    fn test_keccak_arm_matches_software_zero_state() {
-        if !std::arch::is_aarch64_feature_detected!("sha3") {
-            return;
-        }
-        let mut state_hw = [0u64; 25];
-        let mut state_sw = [0u64; 25];
-        unsafe { super::keccak_arm::keccak_f1600_arm(&mut state_hw) };
-        keccak_f1600_soft(&mut state_sw);
-        assert_eq!(
-            state_hw, state_sw,
-            "Keccak ARM must match software on zero state"
-        );
-    }
-
-    #[test]
-    #[cfg(all(target_arch = "aarch64", has_sha3_keccak_intrinsics))]
-    fn test_keccak_arm_matches_software_nonzero_state() {
-        if !std::arch::is_aarch64_feature_detected!("sha3") {
-            return;
-        }
-        let mut state_hw = [0u64; 25];
-        let mut state_sw = [0u64; 25];
-        for i in 0..25 {
-            let v = (i as u64).wrapping_mul(0xDEAD_BEEF_CAFE_BABE);
-            state_hw[i] = v;
-            state_sw[i] = v;
-        }
-        unsafe { super::keccak_arm::keccak_f1600_arm(&mut state_hw) };
-        keccak_f1600_soft(&mut state_sw);
-        assert_eq!(
-            state_hw, state_sw,
-            "Keccak ARM must match software on non-zero state"
-        );
-    }
-
-    #[test]
-    #[cfg(all(target_arch = "aarch64", has_sha3_keccak_intrinsics))]
-    fn test_keccak_arm_matches_software_all_ones() {
-        if !std::arch::is_aarch64_feature_detected!("sha3") {
-            return;
-        }
-        let mut state_hw = [u64::MAX; 25];
-        let mut state_sw = [u64::MAX; 25];
-        unsafe { super::keccak_arm::keccak_f1600_arm(&mut state_hw) };
-        keccak_f1600_soft(&mut state_sw);
-        assert_eq!(
-            state_hw, state_sw,
-            "Keccak ARM must match software on all-ones"
-        );
-    }
-
-    #[test]
-    #[cfg(all(target_arch = "aarch64", has_sha3_keccak_intrinsics))]
-    fn test_keccak_arm_matches_software_multi_round() {
-        if !std::arch::is_aarch64_feature_detected!("sha3") {
-            return;
-        }
-        let mut state_hw = [0u64; 25];
-        let mut state_sw = [0u64; 25];
-        // Absorb some data then permute multiple times
-        state_hw[0] = 0x0102030405060708;
-        state_hw[1] = 0xFFEEDDCCBBAA9988;
-        state_sw[0] = state_hw[0];
-        state_sw[1] = state_hw[1];
-        for _ in 0..5 {
-            unsafe { super::keccak_arm::keccak_f1600_arm(&mut state_hw) };
-            keccak_f1600_soft(&mut state_sw);
-        }
-        assert_eq!(
-            state_hw, state_sw,
-            "Keccak ARM must match software after multiple rounds"
-        );
     }
 
     mod proptests {
