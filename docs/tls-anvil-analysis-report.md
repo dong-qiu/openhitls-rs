@@ -1,5 +1,7 @@
 # TLS-Anvil Conformance Analysis Report
 
+> 中文版见 [`tls-anvil-analysis-report.zh-CN.md`](./tls-anvil-analysis-report.zh-CN.md)（this document is the source of truth）.
+
 **Status: closed-out summary (consolidated 2026-06-30).** Pulls the multi-run
 TLS-Anvil analysis — previously scattered across `DEV_LOG.md` / `PROMPT_LOG.md`
 phases I185–I196 and the `tls-anvil-run-native` working note — into one
