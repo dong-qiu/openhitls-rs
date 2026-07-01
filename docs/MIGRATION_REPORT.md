@@ -1,6 +1,6 @@
 # openHiTLS C→Rust Migration Report
 
-> ⚠️ **ARCHIVED SNAPSHOT** — generated **2026-02-20**, last updated **2026-03-02**. The C→Rust feature-correspondence analysis below is the canonical migration record up to roughly Phase I80 / P4. Current canonical project state (per [DEV_LOG.md](DEV_LOG.md) / [CLAUDE.md](CLAUDE.md)): **I1–I95, T1–T119, R1–R13, P1–P94, 4222 tests / 43 ignored**. All correspondence tables remain valid (C-side has not moved meaningfully); test counts and post-I80 / post-P4 work (ECH, EMS three-state, ISO/IEC 9796-2, SHA256-MB, etc.) are not reflected here — consult DEV_LOG.md for those.
+> ⚠️ **ARCHIVED SNAPSHOT** — generated **2026-02-20**, last updated **2026-03-02**. The C→Rust feature-correspondence analysis below is the canonical migration record up to roughly Phase I80 / P4. Current canonical project state (per [DEV_LOG.md](../DEV_LOG.md) / [CLAUDE.md](../CLAUDE.md)): **I1–I95, T1–T119, R1–R13, P1–P94, 4222 tests / 43 ignored**. All correspondence tables remain valid (C-side has not moved meaningfully); test counts and post-I80 / post-P4 work (ECH, EMS three-state, ISO/IEC 9796-2, SHA256-MB, etc.) are not reflected here — consult DEV_LOG.md for those.
 >
 > **Generated**: 2026-02-20 | **Updated**: 2026-03-02 | **Status (at snapshot)**: 100% feature parity + HW acceleration | **Tests (at snapshot)**: 3,699 pass (22 ignored)
 
