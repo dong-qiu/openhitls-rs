@@ -1258,7 +1258,7 @@ T49–T58   3,401    +121   Quality improvement phase 2 (cipher suites/attacks/a
 
 ### 3. Coverage Gap Analysis & Optimization Plan
 
-> Full quality analysis: [QUALITY_REPORT.md](QUALITY_REPORT.md)
+> Full quality analysis: [QUALITY_REPORT.md](docs/QUALITY_REPORT.md)
 
 #### Identified Deficiencies
 
@@ -1314,7 +1314,7 @@ cargo fmt --all -- --check
 
 ### Refactoring Queue Summary
 
-The following phases are defined in [ARCH_REPORT.md](ARCH_REPORT.md) §7 and have not yet been started:
+The following phases are defined in [ARCH_REPORT.md](docs/ARCH_REPORT.md) §7 and have not yet been started:
 
 | Phase | Title | Priority | Status |
 |-------|-------|----------|--------|
