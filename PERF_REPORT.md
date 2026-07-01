@@ -6,6 +6,10 @@
 > All numbers below are from fresh, *isolated* per-group runs (not a single
 > 40-minute full-suite sweep), which removes most of the thermal throttling
 > that depressed the prior revision's figures.
+>
+> **Amended 2026-06-30** with a post-baseline optimization pass (P95–P97): the
+> baseline tables are the untouched 2026-06-19 snapshot; new measurements are
+> called out in-line as "post-baseline" (§0, §4.3, §5, §7.1).
 
 ---
 
@@ -31,6 +35,14 @@ optimized harder. Rust's real, defensible advantages are (a) it actually engages
 the CPU's crypto hardware, and (b) its specialized elliptic-curve/SM2 field
 arithmetic. Its real *deficits* are Keccak/SHAKE throughput (PQC) and
 hand-tuned big-number modular exponentiation (DH/RSA-class).
+
+> **Post-baseline update (P95–P97, 2026-06-30).** The Keccak/SHAKE deficit above
+> was substantially closed by **P97**, which *removed* the ARM SHA-3 Crypto-Extension
+> Keccak path after profiling showed it was a **2.6× pessimization** on Apple
+> Silicon (GPR↔NEON shuttling every round). ML-KEM-768 decaps is now ≈parity with
+> C; encaps roughly halved the gap. See the "Post-baseline measurements" note in
+> §4.3 and the P95–P97 rows in §7. The baseline tables below are the untouched
+> 2026-06-19 snapshot.
 
 ---
 
@@ -194,6 +206,21 @@ narrowed but did not close it.
 > Rust's X25519/ECDH-P256 are at parity-or-better). ML-KEM's deficit is the one
 > worth attention as PQC TLS adoption grows.
 
+**Post-baseline measurements (P97, 2026-06-30, same M4).** After removing the
+pessimizing ARM SHA-3 CE path (P97), ML-KEM-768 was re-measured against the C
+figures above:
+
+| Operation | C (ops/s) | Rust @baseline | Rust after P97 | Speedup | C gap: was → now |
+|-----------|----------:|---------------:|---------------:|:-------:|------------------|
+| ML-KEM-768 encaps | 108,899 | 41,452 | **57,618** | 1.39× | 2.63× → **1.89×** |
+| ML-KEM-768 decaps | 84,168 | 46,072 | **76,197** | 1.65× | 1.83× → **1.10× (≈parity)** |
+
+ML-KEM-512/1024 and ML-DSA were not individually re-measured but share the same
+`keccak_f1600` permutation, so they benefit proportionally to their SHAKE share.
+The `keccak-f1600` permutation itself went from ≈360 ns (ARM CE path) to ≈138 ns
+(scalar) per call — a 2.6× primitive-level speedup that flows into every SHA-3 /
+SHAKE consumer.
+
 ---
 
 ## 5. Root-cause summary — why each side wins what it wins
@@ -206,7 +233,7 @@ narrowed but did not close it.
 | SM4 | parity | Both T-table software. |
 | SM3 / HMAC-SM3 | **C** | C's compression loop is tighter; Rust's expansion has never recovered the P82 regression. |
 | ECDSA-P256 sign, ECDH-P521 | **C** (slight) | C's tuned scalar reduction. |
-| ML-KEM, ML-DSA-87, ML-DSA verify | **C** | Faster Keccak/SHAKE permutation throughput. |
+| ML-KEM, ML-DSA-87, ML-DSA verify | **C, narrowed by P97** | Was Keccak/SHAKE-bound; P97 removed a 2.6× ARM-CE pessimization, taking ML-KEM-768 decaps to ≈parity and halving the encaps gap (§4.3 post-baseline note). Residual is C's tighter scalar Keccak. |
 | DH (and RSA-class modexp) | **C** | Hand-tuned `bn_mul_mont`; gap grows with operand size. |
 
 The honest one-liner: **neither language is intrinsically faster here.** Rust's
@@ -239,7 +266,7 @@ pattern if a comparable C benchmark existed.
 
 ---
 
-## 7. Optimization history (Phases P1–P94)
+## 7. Optimization history (Phases P1–P97)
 
 The Rust numbers reflect 90+ optimization phases. Highlights that drive the Tier-2
 wins above (full per-phase detail in `DEV_LOG.md`):
@@ -257,12 +284,34 @@ wins above (full per-phase detail in `DEV_LOG.md`):
 | P59, P83 | Keccak unroll / ML-KEM SHAKE clone-fork | narrowed (not closed) ML-KEM gap |
 | P84 | x86-64 VAES + VPCLMULQDQ GCM | (x86 parity; not measured here) |
 | P94 | SHA-256 4-way multi-buffer batch API | batch-hash workloads |
+| **P95** | TLS transcript incremental hasher (was O(msgs×transcript) replay → O(1) clone-finish) | TLS 1.3 handshake CPU (not in these primitive benches) |
+| **P96** | AES CBC/ECB decrypt 4-block pipeline (inverse-cipher mirror of P72/P84) | **AES-CBC-dec 2.66× at the primitive level** (§7.1) |
+| **P97** | Removed the ARM SHA-3 CE Keccak path — it was a 2.6× *pessimization* | **ML-KEM-768 encaps 1.39× / decaps 1.65× (§4.3)** |
 
-**Open optimization targets surfaced by this re-benchmark:** (1) **SM3** — recover
-the P82 expansion regression (C is 1.4× ahead on equal footing); (2) **Keccak/
-SHAKE** — the dominant ML-KEM/ML-DSA gap; a NEON/scalar Keccak rewrite is the
-highest-leverage PQC item; (3) **BigNum modexp** — closing DH/RSA needs a
-`bn_mul_mont`-class inner loop.
+### 7.1 Post-baseline optimization pass (P95–P97, 2026-06-30)
+
+A targeted performance-audit pass after the 2026-06-19 baseline, measurement-first
+(each candidate A/B-timed before landing; two were **reverted** when timing showed
+no net win — an HMAC pad-state cache that traded recompression for allocation, and
+a DH MontgomeryCtx reuse that measured 0.996–1.00× because the modexp dominates):
+
+- **P95** — TLS `TranscriptHash::current_hash()` rebuilt a fresh hasher and
+  replayed the whole message buffer on every call (~8-9×/handshake). Now keeps a
+  live incremental digest and clone-finishes it. Not visible in these primitive
+  benches (it's a TLS-layer win) but removes an O(msgs×transcript) cost per
+  handshake.
+- **P96** — the AES backends had `encrypt_4_blocks` but no `decrypt_4_blocks`, so
+  CBC/ECB decrypt ran single-block, exposing `aesd`/`aesdec` latency. Adding the
+  pipelined inverse path measured **2.66× on M4** (single-block 5139 → 4-block
+  13648 MiB/s, AES-128). This lifts the §3 AES-CBC-dec figure further (the §3
+  table is the pre-P96 baseline).
+- **P97** — see §4.3 post-baseline note; the biggest post-baseline PQC win.
+
+**Remaining open targets:** (1) **Keccak/SHAKE** — a *register-resident* SHA-3 CE
+rewrite (25 lanes kept in NEON across all rounds, XAR for ρ) could beat the scalar
+path P97 fell back to (P97 only removed the pessimizing shuttling version);
+(2) **SM3** — recover the P82 expansion regression (C 1.4× ahead on equal footing);
+(3) **BigNum modexp** — closing DH/RSA needs a `bn_mul_mont`-class inner loop.
 
 ---
 
