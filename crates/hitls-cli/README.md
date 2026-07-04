@@ -12,6 +12,12 @@ intentionally **not** ported, together with the rationale.
 `#47` (CLI: port 5 missing subcommands) explicitly allows per-subcommand
 decisions of either *implement & test* or *document non-port rationale here*.
 
+> **Deferred-feature backlog:** the `TODO(#47-*)` anchors below (and the pkey
+> curve/format gaps) are consolidated for planning in the open tracking issue
+> [#410](https://github.com/dong-qiu/openhitls-rs/issues/410). The `#47-*` slug
+> stays as the historical decision anchor (asserted by the Phase-B/I audit-pin
+> tests); #410 is where forward-looking work is tracked.
+
 The table below carries that decision for each C subcommand the issue lists.
 
 | C subcommand | Status | Rationale |
